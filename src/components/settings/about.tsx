@@ -17,14 +17,16 @@ class AboutTab extends React.Component {
                 <Stack
                     horizontal
                     horizontalAlign="center"
-                    tokens={{ childrenGap: 12 }}>
+                    tokens={{ childrenGap: 12 }}
+                >
                     <small>
                         <Link
                             onClick={() =>
                                 window.utils.openExternal(
                                     "https://github.com/yang991178/fluent-reader/wiki/Support#keyboard-shortcuts"
                                 )
-                            }>
+                            }
+                        >
                             {intl.get("settings.shortcuts")}
                         </Link>
                     </small>
@@ -34,7 +36,8 @@ class AboutTab extends React.Component {
                                 window.utils.openExternal(
                                     "https://github.com/yang991178/fluent-reader"
                                 )
-                            }>
+                            }
+                        >
                             {intl.get("settings.openSource")}
                         </Link>
                     </small>
@@ -44,7 +47,8 @@ class AboutTab extends React.Component {
                                 window.utils.openExternal(
                                     "https://github.com/yang991178/fluent-reader/issues"
                                 )
-                            }>
+                            }
+                        >
                             {intl.get("settings.feedback")}
                         </Link>
                     </small>

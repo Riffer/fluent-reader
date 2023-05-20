@@ -61,7 +61,7 @@ export class WindowManager {
                 frame: process.platform === "darwin",
                 titleBarStyle: "hiddenInset",
                 fullscreenable: process.platform === "darwin",
-                
+
                 show: false,
                 webPreferences: {
                     webviewTag: true,
@@ -82,7 +82,7 @@ export class WindowManager {
             this.mainWindow.loadFile(
                 (app.isPackaged ? "dist/" : "") + "index.html"
             )
-            
+
             this.mainWindow.on("maximize", () => {
                 this.mainWindow.webContents.send("maximized")
             })
@@ -112,12 +112,13 @@ export class WindowManager {
             })
             //this.mainWindow.webContents.setVisualZoomLevelLimits(1, 3)
             //sthis.mainWindow.webContents.setZoomFactor(1.5)
-                        
+
             //this.mainWindow.webContents.on("zoom-changed", (event, zoomDirection) => {
             //    this.mainWindow.webContents.send("zoom-changed", zoomDirection);
             //    console.log("forward zoom to webContent ", zoomDirection);
             //})
-            
+
+            /*
             this.mainWindow.webContents.setWindowOpenHandler(({ url }) => {
                 console.log(url);
                 if (url === 'about:blank') {
@@ -135,7 +136,6 @@ export class WindowManager {
                 }
                 return { action: 'deny' }
             })
-
             this.mainWindow.webContents.on("zoom-changed", (event, zoomDirection) => {
                 console.log(zoomDirection);
 
@@ -162,6 +162,7 @@ export class WindowManager {
                         , this.mainWindow.webContents.zoomFactor * 100, "%");
                 }
             })
+            */
         }
     }
 
