@@ -1,5 +1,6 @@
 const HtmlWebpackPlugin = require("html-webpack-plugin")
-const HardSourceWebpackPlugin = require("hard-source-webpack-plugin")
+//const HardSourceWebpackPlugin = require("hard-source-webpack-plugin")
+const NodePolyfillPlugin = require("node-polyfill-webpack-plugin")
 
 module.exports = [
     {
@@ -13,6 +14,7 @@ module.exports = [
                     include: /src/,
                     resolve: {
                         extensions: [".ts", ".js"],
+                        fallback: { "timers": require.resolve("timers-browserify") },
                     },
                     use: [{ loader: "ts-loader" }],
                 },
@@ -26,7 +28,13 @@ module.exports = [
         node: {
             __dirname: false,
         },
-        plugins: [new HardSourceWebpackPlugin()],
+        cache: {
+            type: 'filesystem',
+            buildDependencies: {
+                config: [__filename]
+            }
+        },
+        plugins: [new NodePolyfillPlugin()],
     },
     {
         mode: "production",
@@ -39,6 +47,7 @@ module.exports = [
                     include: /src/,
                     resolve: {
                         extensions: [".ts", ".js"],
+                        fallback: { "timers": require.resolve("timers-browserify") },
                     },
                     use: [{ loader: "ts-loader" }],
                 },
@@ -48,7 +57,13 @@ module.exports = [
             path: __dirname + "/dist",
             filename: "preload.js",
         },
-        plugins: [new HardSourceWebpackPlugin()],
+        cache: {
+            type: 'filesystem',
+            buildDependencies: {
+                config: [__filename]
+            }
+        },
+        plugins: [new NodePolyfillPlugin()],
     },
     {
         mode: "production",
@@ -65,6 +80,7 @@ module.exports = [
                     include: /src/,
                     resolve: {
                         extensions: [".ts", ".tsx", ".js"],
+                        fallback: { "timers": require.resolve("timers-browserify") },
                     },
                     use: [{ loader: "ts-loader" }],
                 },
@@ -74,11 +90,17 @@ module.exports = [
             path: __dirname + "/dist",
             filename: "index.js",
         },
+        cache: {
+            type: 'filesystem',
+            buildDependencies: {
+                config: [__filename]
+            }
+        },
         plugins: [
-            new HardSourceWebpackPlugin(),
             new HtmlWebpackPlugin({
                 template: "./src/index.html",
             }),
+            new NodePolyfillPlugin(),
         ],
     },
 ]

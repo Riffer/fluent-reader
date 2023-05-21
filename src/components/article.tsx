@@ -20,8 +20,8 @@ import {
 import { shareSubmenu } from "./context-menu"
 import { platformCtrl, decodeFetchResponse } from "../scripts/utils"
 
-import * as reactnative from 'react-native';
-import { ReactNativeZoomableView } from '@openspacelabs/react-native-zoomable-view';
+//import { View, StyleSheet } from 'react-native';
+//import { ReactNativeZoomableView, ReactNativeZoomableViewProps, ZoomableViewEvent } from '@openspacelabs/react-native-zoomable-view';
 
 
 const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 17, 18, 19, 20]
@@ -274,9 +274,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     webviewLoaded = () => {
         this.webview.setVisualZoomLevelLimits(1, 3)
-        this.webview.addEventListener("new-window", function (e) {
-            this.webview.src = e.url
-        })
         this.setState({ loaded: true })
     }
     webviewError = (reason: string) => {
@@ -495,17 +492,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 </Stack>
             </Stack>
             {(!this.state.loadFull || this.state.fullContent) && (
-                <ReactNativeZoomableView
-                    maxZoom={1.5}
-                    minZoom={0.5}
-                    zoomStep={0.5}
-                    initialZoom={1}
-                    bindToBorders={true}
-                    style={{
-                        padding: 10,
-                        backgroundColor: 'red',
-                    }}
-                    >
+                //<ReactNativeZoomableView
+                //    maxZoom={1.5}
+                //    minZoom={0.5}
+                //    zoomStep={0.5}
+                //    initialZoom={1}
+                //    bindToBorders={true}
+                //    style={{
+                //        padding: 10,
+                //        backgroundColor: 'red',
+                //    }}
+                //    >
                     <webview
                         id="article"
                         className={this.state.error ? "error" : ""}
@@ -523,7 +520,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
                         partition={this.state.loadWebpage ? "sandbox" : undefined}
                     />
-                </ReactNativeZoomableView>
+                //</ReactNativeZoomableView>
             )}
             {this.state.error && (
                 <Stack
