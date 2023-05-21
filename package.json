@@ -36,7 +36,7 @@
     "html-webpack-plugin": "^4.3.0",
     "js-md5": "^0.7.3",
     "lovefield": "^2.1.12",
-    "nedb": "^1.8.0",
+    "@seald-io/nedb": "^4.0.2",
     "prettier": "2.3.2",
     "qrcode.react": "^1.0.0",
     "react": "^16.13.1",

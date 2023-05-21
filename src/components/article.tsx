@@ -71,6 +71,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
         window.utils.addWebviewErrorListener(this.webviewError)
+
         if (props.source.openTarget === SourceOpenTarget.FullContent)
             this.loadFull()
     }
