@@ -14,6 +14,7 @@ const utilsBridge = {
     },
 
     openExternal: (url: string, background = false) => {
+        console.log("openExternal!")
         ipcRenderer.invoke("open-external", url, background)
     },
 
@@ -144,13 +145,13 @@ const utilsBridge = {
         ipcRenderer.on("enter-fullscreen", () => {
             callback(WindowStateListenerType.Fullscreen, true)
         })
-
+/*
         ipcRenderer.removeAllListeners("new-window")
         ipcRenderer.on("new-window", () =>
         {
             console.error("new-window!")    
         })
-        
+*/        
         ipcRenderer.removeAllListeners("leave-fullscreen")
         ipcRenderer.on("leave-fullscreen", () => {
             callback(WindowStateListenerType.Fullscreen, false)

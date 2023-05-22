@@ -268,7 +268,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     webviewLoaded = () => {
         
-        this.webview.setVisualZoomLevelLimits(1, 3)
+        //this.webview.setVisualZoomLevelLimits(1, 3)
+
         this.setState({ loaded: true })
     }
     webviewError = (reason: string) => {
@@ -345,7 +346,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     loadFull = async () => {
         this.setState({ fullContent: "", loaded: false, error: false })
-        this.webview.setVisualZoomLevelLimits(0, 6)
+        //this.webview.setVisualZoomLevelLimits(0, 6)
+
         const link = this.props.item.link
         try {
             const result = await fetch(link)

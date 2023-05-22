@@ -109,13 +109,13 @@ export class WindowManager {
                     )
                 }
             })
-            this.mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
+            //this.mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
                         
             //this.mainWindow.webContents.on("zoom-changed", (event, zoomDirection) => {
             //    this.mainWindow.webContents.send("zoom-changed", zoomDirection);
             //    console.log("forward zoom to webContent ", zoomDirection);
             //})
-            
+            /*
             this.mainWindow.webContents.on("zoom-changed", (event, zoomDirection) => {
                 console.log(zoomDirection);
 
@@ -141,7 +141,7 @@ export class WindowManager {
                     console.log("Zoom Factor Decreased to - "
                         , this.mainWindow.webContents.zoomFactor * 100, "%");
                 }
-            })
+            })*/
         }
     }
 

@@ -33,7 +33,10 @@ export function setUtilsListeners(manager: WindowManager) {
         })
         contents.on("will-navigate", (event, url) => {
             event.preventDefault()
-            if (contents.getType() === "webview") openExternal(url)
+            contents.loadURL(url);
+            console.log("will-navigate:" + url)
+            
+            //if (contents.getType() === "webview") openExternal(url)
         })
     })
 
@@ -248,6 +251,22 @@ export function setUtilsListeners(manager: WindowManager) {
         event.returnValue =
             manager.hasWindow() && manager.mainWindow.isFullScreen()
     })
+
+    /*
+    const disable_external_navigate = (event, url) => {
+        {
+            event.preventDefault();
+        }
+    }
+    
+    ipcMain.on('webview-disable-external-navigate', (event, enabled) => {
+        console.log("webview-disable-external-navigate:" + enabled);
+        if (enabled) {
+            event.sender.on('will-navigate', disable_external_navigate)
+        } else {
+            event.sender.removeListener('will-navigate', disable_external_navigate)
+        }
+    })*/
 
     ipcMain.handle("request-focus", () => {
         if (manager.hasWindow()) {
