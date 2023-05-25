@@ -68,8 +68,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             errorDescription: "",
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
-
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
+        //window.utils.addWebviewKeyupListener(this.keyUpHandler)
         window.utils.addWebviewErrorListener(this.webviewError)
 
         if (props.source.openTarget === SourceOpenTarget.FullContent)
@@ -213,7 +213,32 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
+    keyUpHandler = (input: Electron.Input) => {
+        if (input.type === "keyUp")
+        {
+            if(input.control)
+            {
+                console.log("ctrl UP");
+            }
+        }
+    }
+
     keyDownHandler = (input: Electron.Input) => {
+        if (input.type === "keyDown")
+        {
+            if(input.control)
+            {
+                console.log("ctrl DOWN");
+            }
+        }
+        if (input.type === "keyUp")
+        {
+            if(input.control)
+            {
+                console.log("ctrl UP");
+            }
+        }
+
         if (input.type === "")
         {
             
@@ -503,6 +528,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     allowpopups={"true" as unknown as boolean}
                     webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
                     partition={this.state.loadWebpage ? "sandbox" : undefined}
+                    allowFullScreen={"true" as unknown as boolean}
                 />
             )}
             {this.state.error && (

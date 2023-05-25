@@ -94,7 +94,14 @@ const utilsBridge = {
             callback(input)
         })
     },
-
+/*
+    addWebviewKeyupListener: (callback: (event: Electron.Input) => any) => {
+        ipcRenderer.removeAllListeners("webview-keyup")
+        ipcRenderer.on("webview-keyup", (_, input) => {
+            callback(input)
+        })
+    },
+*/
     addWebviewErrorListener: (callback: (reason: string) => any) => {
         ipcRenderer.removeAllListeners("webview-error")
         ipcRenderer.on("webview-error", (_, reason) => {
@@ -145,13 +152,6 @@ const utilsBridge = {
         ipcRenderer.on("enter-fullscreen", () => {
             callback(WindowStateListenerType.Fullscreen, true)
         })
-/*
-        ipcRenderer.removeAllListeners("new-window")
-        ipcRenderer.on("new-window", () =>
-        {
-            console.error("new-window!")    
-        })
-*/        
         ipcRenderer.removeAllListeners("leave-fullscreen")
         ipcRenderer.on("leave-fullscreen", () => {
             callback(WindowStateListenerType.Fullscreen, false)

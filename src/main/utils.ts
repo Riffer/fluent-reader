@@ -20,7 +20,7 @@ export function setUtilsListeners(manager: WindowManager) {
             }
         }
     }
-
+    
     app.on("web-contents-created", (_, contents) => {
         contents.setWindowOpenHandler(details => {
             if (contents.getType() === "webview") {
