@@ -23,13 +23,13 @@ export function setUtilsListeners(manager: WindowManager) {
 
     app.on("web-contents-created", (_, contents) => {
         contents.setWindowOpenHandler(details => {
-            if (contents.getType() === "webview") { 
+            if (contents.getType() === "webview") {
                 console.log("by WindowOpenHandler:" + details.url)
-            openExternal(
-                details.url,
-                details.disposition === "background-tab"
-            )
-        }
+                openExternal(
+                    details.url,
+                    details.disposition === "background-tab"
+                )
+            }
             return {
                 action: manager.hasWindow() ? "deny" : "allow",
             }
@@ -38,7 +38,7 @@ export function setUtilsListeners(manager: WindowManager) {
             event.preventDefault()
             contents.loadURL(url);
             console.log("will-navigate:" + url)
-            
+
             //if (contents.getType() === "webview") openExternal(url)
         })
     })
