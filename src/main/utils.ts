@@ -256,22 +256,6 @@ export function setUtilsListeners(manager: WindowManager) {
             manager.hasWindow() && manager.mainWindow.isFullScreen()
     })
 
-    /*
-    const disable_external_navigate = (event, url) => {
-        {
-            event.preventDefault();
-        }
-    }
-    
-    ipcMain.on('webview-disable-external-navigate', (event, enabled) => {
-        console.log("webview-disable-external-navigate:" + enabled);
-        if (enabled) {
-            event.sender.on('will-navigate', disable_external_navigate)
-        } else {
-            event.sender.removeListener('will-navigate', disable_external_navigate)
-        }
-    })*/
-
     ipcMain.handle("request-focus", () => {
         if (manager.hasWindow()) {
             const win = manager.mainWindow

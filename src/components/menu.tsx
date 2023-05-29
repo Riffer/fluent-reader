@@ -180,7 +180,7 @@ export class Menu extends React.Component<MenuProps> {
                         </div>
                         <FocusZone
                             as="div"
-                            disabled={!this.props.display}
+                            disabled={!this.props.display} 
                             className="nav-wrapper">
                             <Nav
                                 onRenderGroupHeader={this._onRenderGroupHeader}
