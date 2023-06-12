@@ -16,7 +16,7 @@ import { saveSettings } from "./app"
 import { SourceRule } from "./rule"
 import { fixBrokenGroups } from "./group"
 
-export const enum SourceOpenTarget {
+export enum SourceOpenTarget {
     Local,
     Webpage,
     External,
@@ -43,10 +43,10 @@ export class RSSSource {
     textDir: SourceTextDirection
     hidden: boolean
 
-    constructor(url: string, name: string = null) {
+    constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null) {
         this.url = url
         this.name = name
-        this.openTarget = SourceOpenTarget.Local
+        this.openTarget = openTarget ?? SourceOpenTarget.Local
         this.lastFetched = new Date()
         this.fetchFrequency = 0
         this.textDir = SourceTextDirection.LTR
@@ -296,13 +296,14 @@ export function insertSource(source: RSSSource): AppThunk<Promise<RSSSource>> {
 export function addSource(
     url: string,
     name: string = null,
-    batch = false
+    batch = false,
+    openTarget = null
 ): AppThunk<Promise<number>> {
     return async (dispatch, getState) => {
         const app = getState().app
         if (app.sourceInit) {
             dispatch(addSourceRequest(batch))
-            const source = new RSSSource(url, name)
+            const source = new RSSSource(url, name, openTarget)
             try {
                 const feed = await RSSSource.fetchMetaData(source)
                 const inserted = await dispatch(insertSource(source))

@@ -226,14 +226,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     keyDownHandler = (input: Electron.Input) => {
         if (input.type === "keyDown")
         {
-            if(input.control)
+            if(input.control && !input.isAutoRepeat)
             {
                 console.log("ctrl DOWN");
             }
         }
         if (input.type === "keyUp")
         {
-            if(input.control)
+            if(input.control && !input.isAutoRepeat)
             {
                 console.log("ctrl UP");
             }
@@ -294,7 +294,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     webviewLoaded = () => {
         
         //this.webview.setVisualZoomLevelLimits(1, 3)
-
         this.setState({ loaded: true })
     }
     webviewError = (reason: string) => {

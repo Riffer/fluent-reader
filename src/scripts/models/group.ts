@@ -6,6 +6,7 @@ import {
     addSource,
     RSSSource,
     SourceState,
+    SourceOpenTarget
 } from "./source"
 import { SourceGroup } from "../../schema-types"
 import { ActionStatus, AppThunk, domParser } from "../utils"
@@ -221,9 +222,17 @@ function outlineToSource(
     outline: Element
 ): [ReturnType<typeof addSource>, string] {
     let url = outline.getAttribute("xmlUrl")
+    let openTargetString = outline.getAttribute("openTarget")
+    let openTarget = SourceOpenTarget.Local
+    try {
+        openTarget = SourceOpenTarget[openTargetString];
+    }
+    catch
+    { }
+    
     let name = outline.getAttribute("text") || outline.getAttribute("title")
     if (url) {
-        return [addSource(url.trim(), name, true), url]
+        return [addSource(url.trim(), name, true, openTarget), url]
     } else {
         return null
     }
@@ -315,6 +324,7 @@ function sourceToOutline(source: RSSSource, xml: Document) {
     outline.setAttribute("title", source.name)
     outline.setAttribute("type", "rss")
     outline.setAttribute("xmlUrl", source.url)
+    outline.setAttribute("openTarget",SourceOpenTarget[source.openTarget])
     return outline
 }
 
