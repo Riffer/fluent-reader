@@ -224,11 +224,8 @@ function outlineToSource(
     let url = outline.getAttribute("xmlUrl")
     let openTargetString = outline.getAttribute("openTarget")
     let openTarget = SourceOpenTarget.Local
-    try {
+    if (openTargetString in SourceOpenTarget)
         openTarget = SourceOpenTarget[openTargetString];
-    }
-    catch
-    { }
     
     let name = outline.getAttribute("text") || outline.getAttribute("title")
     if (url) {
