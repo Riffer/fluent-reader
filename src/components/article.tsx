@@ -370,6 +370,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     loadFull = async () => {
         this.setState({ fullContent: "", loaded: false, error: false })
+        //console.error("setVisualZoomLevelLimits")
         //this.webview.setVisualZoomLevelLimits(0, 6)
 
         const link = this.props.item.link
