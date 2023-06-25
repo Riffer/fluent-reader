@@ -118,8 +118,7 @@ export class ServiceTab extends React.Component<
                     <Stack
                         className="settings-rules-icons"
                         horizontal
-                        tokens={{ childrenGap: 12 }}
-                    >
+                        tokens={{ childrenGap: 12 }}>
                         <Icon iconName="ThisPC" />
                         <Icon iconName="Sync" />
                         <Icon iconName="Cloud" />
@@ -132,8 +131,7 @@ export class ServiceTab extends React.Component<
                                     "https://github.com/yang991178/fluent-reader/wiki/Support#services"
                                 )
                             }
-                            style={{ marginLeft: 6 }}
-                        >
+                            style={{ marginLeft: 6 }}>
                             {intl.get("rules.help")}
                         </Link>
                     </span>

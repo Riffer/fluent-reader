@@ -20,10 +20,6 @@ import {
 import { shareSubmenu } from "./context-menu"
 import { platformCtrl, decodeFetchResponse } from "../scripts/utils"
 
-//import { View, StyleSheet } from 'react-native';
-//import { ReactNativeZoomableView, ReactNativeZoomableViewProps, ZoomableViewEvent } from '@openspacelabs/react-native-zoomable-view';
-
-
 const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 17, 18, 19, 20]
 
 type ArticleProps = {
@@ -73,7 +69,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
-
+        //window.utils.addWebviewKeyupListener(this.keyUpHandler)
         window.utils.addWebviewErrorListener(this.webviewError)
 
         if (props.source.openTarget === SourceOpenTarget.FullContent)
@@ -261,18 +257,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.toggleWebpage()
                     break
                 case "+":
-                    this.webview.setZoomFactor(
-                        this.webview.getZoomFactor() + 0.12
-                    )
-                    break
+                    this.webview.setZoomFactor(this.webview.getZoomFactor() + 0.25);
+                    break;
                 case "-":
-                    this.webview.setZoomFactor(
-                        this.webview.getZoomFactor() - 0.12
-                    )
-                    break
+                    this.webview.setZoomFactor(this.webview.getZoomFactor()-0.25);
+                    break;
                 case "#":
-                    this.webview.setZoomFactor(1.0)
-                    break
+                    this.webview.setZoomFactor(1.0);
+                    break;
                 case "w":
                 case "W":
                     this.toggleFull()
@@ -300,6 +292,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     webviewLoaded = () => {
+        
         //this.webview.setVisualZoomLevelLimits(1, 3)
         this.setState({ loaded: true })
     }
@@ -380,7 +373,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         //console.error("setVisualZoomLevelLimits")
         //this.webview.setVisualZoomLevelLimits(0, 6)
 
-
         const link = this.props.item.link
         try {
             const result = await fetch(link)
@@ -435,8 +427,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     className="actions"
                     grow
                     horizontal
-                    tokens={{ childrenGap: 12 }}
-                >
+                    tokens={{ childrenGap: 12 }}>
                     <Stack.Item grow>
                         <span className="source-name">
                             {this.state.loaded ? (
@@ -521,49 +512,36 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 </Stack>
             </Stack>
             {(!this.state.loadFull || this.state.fullContent) && (
-                //<ReactNativeZoomableView
-                //    maxZoom={1.5}
-                //    minZoom={0.5}
-                //    zoomStep={0.5}
-                //    initialZoom={1}
-                //    bindToBorders={true}
-                //    style={{
-                //        padding: 10,
-                //        backgroundColor: 'red',
-                //    }}
-                //    >
-                    <webview
-                        id="article"
-                        className={this.state.error ? "error" : ""}
-                        key={
-                            this.props.item._id +
-                            (this.state.loadWebpage ? "_" : "") +
-                            (this.state.loadFull ? "__" : "")
-                        }
-                        src={
-                            this.state.loadWebpage
-                                ? this.props.item.link
-                                : this.articleView()
-                        }
-                        allowpopups={"false" as unknown as boolean}
-                        webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
-                        partition={this.state.loadWebpage ? "sandbox" : undefined}
-                    />
-                //</ReactNativeZoomableView>
+                <webview
+                    id="article"
+                    className={this.state.error ? "error" : ""}
+                    key={
+                        this.props.item._id +
+                        (this.state.loadWebpage ? "_" : "") +
+                        (this.state.loadFull ? "__" : "")
+                    }
+                    src={
+                        this.state.loadWebpage
+                            ? this.props.item.link
+                            : this.articleView()
+                    }
+                    allowpopups={"true" as unknown as boolean}
+                    webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
+                    partition={this.state.loadWebpage ? "sandbox" : undefined}
+                    allowFullScreen={"true" as unknown as boolean}
+                />
             )}
             {this.state.error && (
                 <Stack
                     className="error-prompt"
                     verticalAlign="center"
                     horizontalAlign="center"
-                    tokens={{ childrenGap: 12 }}
-                >
+                    tokens={{ childrenGap: 12 }}>
                     <Icon iconName="HeartBroken" style={{ fontSize: 32 }} />
                     <Stack
                         horizontal
                         horizontalAlign="center"
-                        tokens={{ childrenGap: 7 }}
-                    >
+                        tokens={{ childrenGap: 7 }}>
                         <small>{intl.get("article.error")}</small>
                         <small>
                             <Link onClick={this.webviewReload}>
