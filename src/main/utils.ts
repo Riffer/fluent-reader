@@ -7,6 +7,7 @@ import fontList = require("font-list")
 
 export function setUtilsListeners(manager: WindowManager) {
     async function openExternal(url: string, background = false) {
+        console.log("openExternal:" + url)
         if (url.startsWith("https://") || url.startsWith("http://")) {
             if (background && process.platform === "darwin") {
                 shell.openExternal(url, { activate: false })
@@ -19,21 +20,26 @@ export function setUtilsListeners(manager: WindowManager) {
             }
         }
     }
-
+    
     app.on("web-contents-created", (_, contents) => {
         contents.setWindowOpenHandler(details => {
-            if (contents.getType() === "webview")
+            if (contents.getType() === "webview") {
+                console.log("by WindowOpenHandler:" + details.url)
                 openExternal(
                     details.url,
                     details.disposition === "background-tab"
                 )
+            }
             return {
                 action: manager.hasWindow() ? "deny" : "allow",
             }
         })
         contents.on("will-navigate", (event, url) => {
             event.preventDefault()
-            if (contents.getType() === "webview") openExternal(url)
+            contents.loadURL(url);
+            console.log("will-navigate:" + url)
+
+            //if (contents.getType() === "webview") openExternal(url)
         })
     })
 
@@ -42,6 +48,7 @@ export function setUtilsListeners(manager: WindowManager) {
     })
 
     ipcMain.handle("open-external", (_, url: string, background: boolean) => {
+        console.log("from ipcMain.handle()")
         openExternal(url, background)
     })
 

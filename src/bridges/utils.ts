@@ -14,6 +14,7 @@ const utilsBridge = {
     },
 
     openExternal: (url: string, background = false) => {
+        console.log("openExternal!")
         ipcRenderer.invoke("open-external", url, background)
     },
 
@@ -93,7 +94,14 @@ const utilsBridge = {
             callback(input)
         })
     },
-
+/*
+    addWebviewKeyupListener: (callback: (event: Electron.Input) => any) => {
+        ipcRenderer.removeAllListeners("webview-keyup")
+        ipcRenderer.on("webview-keyup", (_, input) => {
+            callback(input)
+        })
+    },
+*/
     addWebviewErrorListener: (callback: (reason: string) => any) => {
         ipcRenderer.removeAllListeners("webview-error")
         ipcRenderer.on("webview-error", (_, reason) => {

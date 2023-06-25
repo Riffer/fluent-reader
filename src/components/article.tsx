@@ -72,10 +72,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             errorDescription: "",
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
-
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
 
         window.utils.addWebviewErrorListener(this.webviewError)
+
         if (props.source.openTarget === SourceOpenTarget.FullContent)
             this.loadFull()
     }
@@ -217,8 +217,35 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
+    keyUpHandler = (input: Electron.Input) => {
+        if (input.type === "keyUp")
+        {
+            if(input.control)
+            {
+                console.log("ctrl UP");
+            }
+        }
+    }
+
     keyDownHandler = (input: Electron.Input) => {
-        if (input.type === "") {
+        if (input.type === "keyDown")
+        {
+            if(input.control && !input.isAutoRepeat)
+            {
+                console.log("ctrl DOWN");
+            }
+        }
+        if (input.type === "keyUp")
+        {
+            if(input.control && !input.isAutoRepeat)
+            {
+                console.log("ctrl UP");
+            }
+        }
+
+        if (input.type === "")
+        {
+            
         }
         if (input.type === "keyDown") {
             switch (input.key) {
@@ -273,7 +300,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     webviewLoaded = () => {
-        this.webview.setVisualZoomLevelLimits(1, 3)
+        //this.webview.setVisualZoomLevelLimits(1, 3)
         this.setState({ loaded: true })
     }
     webviewError = (reason: string) => {
@@ -350,7 +377,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     loadFull = async () => {
         this.setState({ fullContent: "", loaded: false, error: false })
-        this.webview.setVisualZoomLevelLimits(0, 6)
+        //console.error("setVisualZoomLevelLimits")
+        //this.webview.setVisualZoomLevelLimits(0, 6)
+
 
         const link = this.props.item.link
         try {

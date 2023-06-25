@@ -1,0 +1,15 @@
+C:\Users\kposa\Documents\PlatformIO\Projects\fluent-reader>npm -version
+6.14.18
+
+
+nodejs.install
+By upgrading, you accept licenses for the packages.
+
+You have nodejs.install v14.21.3 installed. Version 18.16.0 is available based on your source(s).
+Progress: Downloading nodejs.install 18.16.0... 100%
+Progress: Downloading nodejs 18.16.0... 100%
+
+//npm config set legacy-peer-deps true
+
+choco upgrade nodejs.install --version 18.16.0
+

@@ -5,5 +5,3 @@ import utilsBridge from "./bridges/utils"
 
 contextBridge.exposeInMainWorld("settings", settingsBridge)
 contextBridge.exposeInMainWorld("utils", utilsBridge)
-//contextBridge.exposeInMainWorld("zoom", ReactNativeZoomableView)
-
