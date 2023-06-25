@@ -8,8 +8,9 @@
     "electron": "SET NODE_OPTIONS= && electron ./dist/electron.js",
     "start": "npm run build && npm run electron",
     "format": "prettier --write .",
-    "package-win": "SET NODE_OPTIONS=--openssl-legacy-provider && electron-builder -w appx:x64 && electron-builder -w appx:ia32 && electron-builder -w appx:arm64",
-    "package-win-ci": "SET NODE_OPTIONS=--openssl-legacy-provider && electron-builder -w --x64 -p never && electron-builder -w --ia32 -p never",
+    "cert": "electron-builder create-self-signed-cert -p Riffer",
+    "package-win": "electron-builder --win --x64",
+    "package-win-ci": "electron-builder -w --x64 -p never && electron-builder -w --ia32 -p never",
     "package-mac": "electron-builder --mac --x64",
     "package-mas": "bash build/resignAndPackage.sh",
     "package-linux": "electron-builder --linux --x64 -p never"
@@ -20,23 +21,22 @@
   "repository": "github:yang991178/fluent-reader",
   "devDependencies": {
     "@fluentui/react": "^7.204.0",
-    "@types/lovefield": "^2.1.3",
-    "@types/nedb": "^1.8.9",
-    "@types/react": "^16.9.35",
-    "@types/react-dom": "^16.9.8",
-    "@types/react-redux": "^7.1.9",
+    "@types/lovefield": "^2.1.4",
+    "@types/nedb": "^1.8.13",
+    "@types/react": "^16.14.41",
+    "@types/react-dom": "16.9.19",
+    "@types/react-redux": "^7.1.25",
+    "@seald-io/nedb": "^4.0.2",
     "@yang991178/rss-parser": "^3.8.1",
     "electron": "^21.0.1",
     "electron-builder": "^23.0.3",
     "electron-react-devtools": "^0.5.3",
-    "electron-store": "^5.2.0",
+    "electron-store": "^8.1.0",
     "electron-window-state": "^5.0.3",
-    "font-list": "^1.4.2",
-    "hard-source-webpack-plugin": "^0.13.1",
-    "html-webpack-plugin": "^4.3.0",
+    "font-list": "^1.4.5",
     "js-md5": "^0.7.3",
     "lovefield": "^2.1.12",
-    "@seald-io/nedb": "^4.0.2",
+    "nedb": "^1.8.0",
     "prettier": "2.3.2",
     "qrcode.react": "^1.0.0",
     "react": "^16.13.1",
@@ -49,8 +49,26 @@
     "reselect": "^4.0.0",
     "ts-loader": "^8.0.4",
     "typescript": "^4.3.5",
-    "webpack": "^4.0.0",
-    "webpack-cli": "^4.0.0"
+    "webpack": "^4.43.0",
+    "webpack-cli": "^3.3.11"
   },
-  "dependencies": {}
+  "win": {
+    "certificateFile": "./Riffer.pfx",
+    "certificatePassword": "yellow01",
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "build/icon.png",
+    "certificateSubjectName": "Interactive Knowledge, Inc",
+    "signingHashAlgorithms": [
+      "sha256"
+    ],
+    "publisherName": "Interactive Knowledge, Inc",
+    "signAndEditExecutable": true
+  }
 }

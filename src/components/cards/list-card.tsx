@@ -20,7 +20,8 @@ const ListCard: React.FunctionComponent<Card.Props> = props => (
         className={className(props)}
         {...Card.bindEventsToProps(props)}
         data-iid={props.item._id}
-        data-is-focusable>
+        data-is-focusable
+    >
         {props.item.thumb && props.viewConfigs & ViewConfigs.ShowCover ? (
             <div className="head">
                 <img src={props.item.thumb} />

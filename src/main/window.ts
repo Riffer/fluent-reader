@@ -60,6 +60,7 @@ export class WindowManager {
                 frame: process.platform === "darwin",
                 titleBarStyle: "hiddenInset",
                 fullscreenable: process.platform === "darwin",
+
                 show: false,
                 webPreferences: {
                     webviewTag: true,
@@ -80,7 +81,7 @@ export class WindowManager {
             this.mainWindow.loadFile(
                 (app.isPackaged ? "dist/" : "") + "index.html"
             )
-            
+
             this.mainWindow.on("maximize", () => {
                 this.mainWindow.webContents.send("maximized")
             })
