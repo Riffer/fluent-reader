@@ -4,7 +4,7 @@ import lf from "lovefield"
 import { RSSSource } from "./models/source"
 import { RSSItem } from "./models/item"
 
-const sdbSchema = lf.schema.create("sourcesDB", 3)
+const sdbSchema = lf.schema.create("sourcesDB", 4)
 sdbSchema
     .createTable("sources")
     .addColumn("sid", lf.Type.INTEGER)
@@ -13,6 +13,7 @@ sdbSchema
     .addColumn("iconurl", lf.Type.STRING)
     .addColumn("name", lf.Type.STRING)
     .addColumn("openTarget", lf.Type.NUMBER)
+    .addColumn("defaultZoom", lf.Type.NUMBER)
     .addColumn("lastFetched", lf.Type.DATE_TIME)
     .addColumn("serviceRef", lf.Type.STRING)
     .addColumn("fetchFrequency", lf.Type.NUMBER)
@@ -57,6 +58,9 @@ async function onUpgradeSourceDB(rawDb: lf.raw.BackStore) {
     }
     if (version < 3) {
         await rawDb.addTableColumn("sources", "hidden", false)
+    }
+    if (version < 4) {
+        await rawDb.addTableColumn("sources", "defaultZoom", 1)
     }
 }
 
