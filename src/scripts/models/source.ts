@@ -35,6 +35,7 @@ export class RSSSource {
     iconurl?: string
     name: string
     openTarget: SourceOpenTarget
+    defaultZoom: number
     unreadCount: number
     lastFetched: Date
     serviceRef?: string
@@ -47,6 +48,7 @@ export class RSSSource {
         this.url = url
         this.name = name
         this.openTarget = openTarget ?? SourceOpenTarget.Local
+        this.defaultZoom = 1
         this.lastFetched = new Date()
         this.fetchFrequency = 0
         this.textDir = SourceTextDirection.LTR
