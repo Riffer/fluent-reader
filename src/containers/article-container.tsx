@@ -71,6 +71,14 @@ const mapDispatchToProps = (dispatch: AppDispatch) => {
                 updateSource({ ...source, textDir: direction } as RSSSource)
             )
         },
+        updateDefaultZoom: (
+            source: RSSSource,
+            defaultZoom: Number
+        ) => {
+            dispatch(
+                updateSource({ ...source, defaultZoom: defaultZoom } as RSSSource)
+            )
+        },
     }
 }
 

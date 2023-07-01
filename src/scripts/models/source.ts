@@ -44,11 +44,11 @@ export class RSSSource {
     textDir: SourceTextDirection
     hidden: boolean
 
-    constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null) {
+    constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null, defaultZoom = 1) {
         this.url = url
         this.name = name
         this.openTarget = openTarget ?? SourceOpenTarget.Local
-        this.defaultZoom = 1
+        this.defaultZoom = defaultZoom
         this.lastFetched = new Date()
         this.fetchFrequency = 0
         this.textDir = SourceTextDirection.LTR
@@ -299,13 +299,14 @@ export function addSource(
     url: string,
     name: string = null,
     batch = false,
-    openTarget = null
+    openTarget = null,
+    defaultZoom = 1
 ): AppThunk<Promise<number>> {
     return async (dispatch, getState) => {
         const app = getState().app
         if (app.sourceInit) {
             dispatch(addSourceRequest(batch))
-            const source = new RSSSource(url, name, openTarget)
+            const source = new RSSSource(url, name, openTarget, defaultZoom)
             try {
                 const feed = await RSSSource.fetchMetaData(source)
                 const inserted = await dispatch(insertSource(source))

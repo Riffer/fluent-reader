@@ -20,7 +20,7 @@ import {
 import { shareSubmenu } from "./context-menu"
 import { platformCtrl, decodeFetchResponse } from "../scripts/utils"
 
-const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 17, 18, 19, 20]
+const FONT_SIZE_OPTIONS = [8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
 type ArticleProps = {
     item: RSSItem
@@ -34,6 +34,10 @@ type ArticleProps = {
     toggleHidden: (item: RSSItem) => void
     textMenu: (position: [number, number], text: string, url: string) => void
     imageMenu: (position: [number, number]) => void
+    updateDefaultZoom: (
+        source: RSSSource,
+        defaultZoom: Number
+    ) => void
     dismissContextMenu: () => void
     updateSourceTextDirection: (
         source: RSSSource,
@@ -107,6 +111,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     updateTextDirection = (direction: SourceTextDirection) => {
         this.props.updateSourceTextDirection(this.props.source, direction)
+    }
+
+    updateDefaultZoom = (defaultZoom: Number) => {
+        this.props.updateDefaultZoom(this.props.source, defaultZoom)
     }
 
     directionMenuProps = (): IContextualMenuProps => ({
@@ -258,9 +266,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     break
                 case "+":
                     this.webview.setZoomFactor(this.webview.getZoomFactor() + 0.25);
+                    this.updateDefaultZoom(this.webview.getZoomFactor());
                     break;
                 case "-":
                     this.webview.setZoomFactor(this.webview.getZoomFactor()-0.25);
+                    this.updateDefaultZoom(this.webview.getZoomFactor());
                     break;
                 case "#":
                     this.webview.setZoomFactor(1.0);
@@ -294,6 +304,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     webviewLoaded = () => {
         
         //this.webview.setVisualZoomLevelLimits(1, 3)
+        this.webview.setZoomFactor(this.props.source.defaultZoom)
         this.setState({ loaded: true })
     }
     webviewError = (reason: string) => {
@@ -370,8 +381,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     loadFull = async () => {
         this.setState({ fullContent: "", loaded: false, error: false })
-        //console.error("setVisualZoomLevelLimits")
-        //this.webview.setVisualZoomLevelLimits(0, 6)
 
         const link = this.props.item.link
         try {

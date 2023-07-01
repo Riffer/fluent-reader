@@ -226,10 +226,14 @@ function outlineToSource(
     let openTarget = SourceOpenTarget.Local
     if (openTargetString in SourceOpenTarget)
         openTarget = SourceOpenTarget[openTargetString];
+    let defaultZoomString = outline.getAttribute("defaultZoom")
+    let defaultZoom = 1 
+    if (!isNaN(Number(defaultZoomString)))
+        defaultZoom = Number(defaultZoomString) 
     
     let name = outline.getAttribute("text") || outline.getAttribute("title")
     if (url) {
-        return [addSource(url.trim(), name, true, openTarget), url]
+        return [addSource(url.trim(), name, true, openTarget, defaultZoom), url]
     } else {
         return null
     }
@@ -321,7 +325,8 @@ function sourceToOutline(source: RSSSource, xml: Document) {
     outline.setAttribute("title", source.name)
     outline.setAttribute("type", "rss")
     outline.setAttribute("xmlUrl", source.url)
-    outline.setAttribute("openTarget",SourceOpenTarget[source.openTarget])
+    outline.setAttribute("openTarget", SourceOpenTarget[source.openTarget])
+    outline.setAttribute("defaultZoom", source.defaultZoom.toString())
     return outline
 }
 
