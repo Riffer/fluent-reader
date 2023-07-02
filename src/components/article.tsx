@@ -274,6 +274,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     break;
                 case "#":
                     this.webview.setZoomFactor(1.0);
+                    this.updateDefaultZoom(this.webview.getZoomFactor());
                     break;
                 case "w":
                 case "W":
@@ -283,6 +284,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "h":
                     if (!input.meta) this.props.toggleHidden(this.props.item)
                     break
+                //case "c":
+                //case "C":
+                //    sessionStorage.clear()
+                //    this.webviewReload()
+                //    break
                 default:
                     const keyboardEvent = new KeyboardEvent("keydown", {
                         code: input.code,
@@ -301,11 +307,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
-    webviewLoaded = () => {
-        
-        //this.webview.setVisualZoomLevelLimits(1, 3)
+    webviewStartLoading = () => {
         this.webview.setZoomFactor(this.props.source.defaultZoom)
+    }
+    webviewLoaded = () => {
         this.setState({ loaded: true })
+        this.webview.setZoomFactor(this.props.source.defaultZoom)
     }
     webviewError = (reason: string) => {
         this.setState({ error: true, errorDescription: reason })
@@ -327,6 +334,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 webview.focus()
                 this.setState({ loaded: false, error: false })
                 webview.addEventListener("did-stop-loading", this.webviewLoaded)
+                webview.addEventListener("dom-ready", this.webviewStartLoading)
+                webview.addEventListener("did-start-loading", this.webviewStartLoading)
                 let card = document.querySelector(
                     `#refocus div[data-iid="${this.props.item._id}"]`
                 ) as HTMLElement
