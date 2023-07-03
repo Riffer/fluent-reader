@@ -176,7 +176,7 @@
         "content": "Inhalt",
         "fullSearch": "Titel oder Inhalt",
         "creator": "Autor/-in",
-        "match": "enspricht",
+        "match": "entspricht",
         "notMatch": "entspricht nicht",
         "regex": "regulärer Ausdruck",
         "badRegex": "Ungültiger regulärer Ausdruck.",
