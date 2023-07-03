@@ -307,12 +307,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
-    webviewStartLoading = () => {
-        this.webview.setZoomFactor(this.props.source.defaultZoom)
+    webviewStartLoading = () => { 
+        if (this.webview.getZoomFactor() !== this.props.source.defaultZoom )
+            this.webview.setZoomFactor(this.props.source.defaultZoom)
     }
     webviewLoaded = () => {
         this.setState({ loaded: true })
-        this.webview.setZoomFactor(this.props.source.defaultZoom)
+        if (this.webview.getZoomFactor() !== this.props.source.defaultZoom)
+            this.webview.setZoomFactor(this.props.source.defaultZoom)
     }
     webviewError = (reason: string) => {
         this.setState({ error: true, errorDescription: reason })
