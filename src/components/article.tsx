@@ -332,7 +332,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 this.setState({ loaded: false, error: false })
                 webview.addEventListener("did-stop-loading", this.webviewLoaded)
                 webview.addEventListener("dom-ready", this.webviewStartLoading)
-                webview.addEventListener("did-start-loading", this.webviewStartLoading)
                 let card = document.querySelector(
                     `#refocus div[data-iid="${this.props.item._id}"]`
                 ) as HTMLElement
