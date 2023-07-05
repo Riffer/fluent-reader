@@ -284,11 +284,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "h":
                     if (!input.meta) this.props.toggleHidden(this.props.item)
                     break
-                //case "c":
-                //case "C":
-                //    sessionStorage.clear()
-                //    this.webviewReload()
-                //    break
                 default:
                     const keyboardEvent = new KeyboardEvent("keydown", {
                         code: input.code,
