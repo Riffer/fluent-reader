@@ -182,9 +182,15 @@ interface PushNotificationAction {
 export type LogMenuActionType = ToggleLogMenuAction | PushNotificationAction
 
 export const TOGGLE_MENU = "TOGGLE_MENU"
+export const HIDE_MENU = "HIDE_MENU"
 
 export interface MenuActionTypes {
     type: typeof TOGGLE_MENU
+}
+
+export interface HideMenuActionTypes
+{
+    type: typeof HIDE_MENU
 }
 
 export const TOGGLE_SETTINGS = "TOGGLE_SETTINGS"
@@ -274,6 +280,14 @@ export function toggleMenu(): AppThunk {
         dispatch({ type: TOGGLE_MENU })
         window.settings.setDefaultMenu(getState().app.menu)
     }
+}
+
+export function hideMenu(): AppThunk {
+    return (dispatch) => {
+        dispatch({ type: HIDE_MENU })
+        window.settings.setDefaultMenu(false)
+    }
+
 }
 
 export const toggleLogMenu = () => ({ type: TOGGLE_LOGS })
@@ -421,6 +435,7 @@ export function appReducer(
         | SettingsActionTypes
         | InitIntlAction
         | MenuActionTypes
+        | HideMenuActionTypes
         | LogMenuActionType
         | FeedActionTypes
         | PageActionTypes
@@ -661,6 +676,11 @@ export function appReducer(
                 ...state,
                 menu: !state.menu,
             }
+        case HIDE_MENU:
+                return {
+                    ...state,
+                    menu: false,
+                }
         case SAVE_SETTINGS:
             return {
                 ...state,

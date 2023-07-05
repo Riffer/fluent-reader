@@ -11,7 +11,7 @@ import {
 import { getWindowBreakpoint, AppThunk, ActionStatus } from "../utils"
 import { RSSItem, markRead } from "./item"
 import { SourceActionTypes, DELETE_SOURCE } from "./source"
-import { toggleMenu } from "./app"
+import { toggleMenu, hideMenu } from "./app"
 import { ViewType, ViewConfigs } from "../../schema-types"
 
 export const SELECT_PAGE = "SELECT_PAGE"
@@ -139,6 +139,7 @@ export function showItem(feedId: string, item: RSSItem): AppThunk {
                 feedId: feedId,
                 item: item,
             })
+            dispatch(hideMenu())
         }
     }
 }
