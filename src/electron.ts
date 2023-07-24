@@ -105,37 +105,13 @@ if (process.platform === "darwin") {
 
 const winManager = new WindowManager()
 
-app.commandLine.appendSwitch("force_low_power_gpu");
+app.commandLine.appendSwitch("force_low_power_gpu","true");
+app.commandLine.appendSwitch("touch","true");
+app.commandLine.appendSwitch("touch-events","true");
+app.commandLine.appendSwitch("enable-pinch","true");
+app.commandLine.appendSwitch("enable-viewport","true");
 
-/*
-app.on('web-contents-created', (createEvent, contents) => {
-    console.log("setup of web-contents-created")
-
-    contents.on('new-window', newEvent => {
-        console.log("Blocked by 'new-window'")
-        newEvent.preventDefault();
-    });
-
-    contents.on('will-navigate', newEvent => {
-        console.log("Blocked by 'will-navigate'")
-        newEvent.preventDefault()
-        console.log("defaultPrevented:" + newEvent.defaultPrevented)
-    });
-
-    contents.setWindowOpenHandler(({ url }) => {
-        if (url.startsWith("https://doyensec.com/")) {
-            setImmediate(() => {
-                //shell.openExternal(url);
-            });
-            return { action: 'allow' }
-        } else {
-            console.log("Blocked by 'setWindowOpenHandler'")
-            return { action: 'deny' }
-        }
-    })
-
-});
-*/
+console.debug("touch or not touch that is here the question");
 
 app.on("window-all-closed", () => {
     if (winManager.hasWindow()) {
