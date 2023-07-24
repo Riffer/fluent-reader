@@ -204,6 +204,7 @@ async function unreadCount(sources: SourceState): Promise<SourceState> {
     for (let row of rows) {
         sources[row["source"]].unreadCount = row["COUNT(_id)"]
     }
+    console.log("update unreadCounts")
     return sources
 }
 
