@@ -40,6 +40,7 @@
     "html-webpack-plugin": "^4.3.0",
     "js-md5": "^0.7.3",
     "lovefield": "^2.1.12",
+    "pinch-zoom-js": "^2.3.5",
     "prettier": "2.3.2",
     "qrcode.react": "^1.0.0",
     "react": "^16.13.1",

@@ -73,7 +73,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
-        //window.utils.addWebviewKeyupListener(this.keyUpHandler)
+        window.utils.addWebviewKeyupListener(this.keyUpHandler)
         window.utils.addWebviewErrorListener(this.webviewError)
 
         if (props.source.openTarget === SourceOpenTarget.FullContent)
