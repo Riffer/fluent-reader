@@ -1,8 +1,13 @@
-import Parser from "@yang991178/rss-parser"
 import intl from "react-intl-universal"
 import * as db from "../db"
 import lf from "lovefield"
-import { fetchFavicon, ActionStatus, AppThunk, parseRSS } from "../utils"
+import {
+    fetchFavicon,
+    ActionStatus,
+    AppThunk,
+    parseRSS,
+    MyParserItem,
+} from "../utils"
 import {
     RSSItem,
     insertItems,
@@ -66,7 +71,7 @@ export class RSSSource {
 
     private static async checkItem(
         source: RSSSource,
-        item: Parser.Item
+        item: MyParserItem
     ): Promise<RSSItem> {
         let i = new RSSItem(item, source)
         const items = (await db.itemsDB
@@ -92,7 +97,7 @@ export class RSSSource {
 
     static checkItems(
         source: RSSSource,
-        items: Parser.Item[]
+        items: MyParserItem[]
     ): Promise<RSSItem[]> {
         return new Promise<RSSItem[]>((resolve, reject) => {
             let p = new Array<Promise<RSSItem>>()
@@ -325,7 +330,8 @@ export function addSource(
                 if (!batch) {
                     window.utils.showErrorBox(
                         intl.get("sources.errorAdd"),
-                        String(e)
+                        String(e),
+                        intl.get("context.copy")
                     )
                 }
                 throw e
