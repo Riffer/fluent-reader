@@ -9,7 +9,6 @@ if (dir === "1") {
     document.body.classList.add("vertical")
     document.body.addEventListener("wheel", (evt) => {
         document.scrollingElement.scrollLeft -= evt.deltaY;
-        console.log("wheel");
     });
 }
 async function getArticle(url) {
