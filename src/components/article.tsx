@@ -152,18 +152,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     moreMenuProps = (): IContextualMenuProps => ({
         items: [
-            {
-                key: "openInBrowser",
-                text: intl.get("openExternal"),
-                iconProps: { iconName: "NavigateExternalInline" },
-                onClick: e => {
-                    window.utils.openExternal(
-                        this.props.item.link,
-                        platformCtrl(e)
-                    )
-                },
-            },
-            {
+                        {
                 key: "copyURL",
                 text: intl.get("context.copyURL"),
                 iconProps: { iconName: "Link" },
@@ -509,6 +498,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         className={this.state.loadWebpage ? "active" : ""}
                         iconProps={{ iconName: "Globe" }}
                         onClick={this.toggleWebpage}
+                    />
+                    <CommandBarButton
+                        title={intl.get("openExternal")}
+                        iconProps={{ iconName: "NavigateExternalInline" }}
+                        onClick= {() =>
+                            window.utils.openExternal(this.props.item.link, false)
+                        }
                     />
                     <CommandBarButton
                         title={intl.get("more")}
