@@ -1,0 +1,16 @@
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=3, user-scalable=yes">
+<style>
+  /* Verhindere Pinch/Zoom auf dem gesamten Fenster (UI) */
+  html, body, #app { touch-action: none; -ms-touch-action: none; }
+
+  /* Erlaube Pinch/Zoom NUR im Web-Content-Container / <webview> */
+  #web-content, webview { touch-action: pan-x pan-y pinch-zoom; }
+</style>
+
+<!-- Beispiel: Webview-Container (stelle sicher, dass preload auf die webview-preload.js zeigt) -->
+<div id="app">
+  <!-- Andere UI-Elemente hier (kein pinch) -->
+  <div id="web-content">
+    <webview id="site" src="https://example.com" preload="src/renderer/webview-preload.js" style="width:100%;height:100%;"></webview>
+  </div>
+</div>

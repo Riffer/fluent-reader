@@ -1,6 +1,6 @@
 import windowStateKeeper = require("electron-window-state")
 import { BrowserWindow, nativeTheme, app } from "electron"
-import path = require("path")
+import path from 'path';
 import { setThemeListener } from "./settings"
 import { setUtilsListeners } from "./utils"
 
@@ -125,3 +125,43 @@ export class WindowManager {
         return this.mainWindow !== null && !this.mainWindow.isDestroyed()
     }
 }
+
+// Automatisch Preload für alle Gast-Inhalte (Webviews / BrowserViews) setzen
+// und Zoom nur für diese Inhalte erlauben. Haupt-UI bleibt auf 1..1 Zoom.
+app.on('web-contents-created', (_event, contents) => {
+  try {
+    const type = contents.getType(); // 'window', 'webview', 'browserView', ...
+    // Pfad zur webview-preload.js; anpassen falls Build-Output anders ist
+    const preloadPath = path.join(__dirname, '..', 'renderer', 'webview-preload.js');
+
+    if (type === 'webview' || type === 'browserView') {
+      // Setze Preload für die Session der WebContents (wirkt auf diese und zukünftige Seiten in dieser Session)
+      try {
+        contents.session.setPreloads?.([preloadPath]);
+      } catch {
+        // ignore
+      }
+
+      // Erlaube Pinch/Visual Zoom nur für Gast-Inhalte
+      try {
+        const p = (contents as any).setVisualZoomLevelLimits?.(1, 3);
+        if (p && typeof p.then === 'function') p.catch(() => {});
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    // Für normale Fenster (Haupt-UI) Pinch/Zoom deaktivieren (1..1)
+    if (type === 'window') {
+      try {
+        const p = (contents as any).setVisualZoomLevelLimits?.(1, 1);
+        if (p && typeof p.then === 'function') p.catch(() => {});
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // ignore overall errors
+  }
+});
