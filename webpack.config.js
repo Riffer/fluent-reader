@@ -1,5 +1,6 @@
 const HtmlWebpackPlugin = require("html-webpack-plugin")
 const NodePolyfillPlugin = require("node-polyfill-webpack-plugin")
+const CopyPlugin = require("copy-webpack-plugin")
 
 module.exports = [
     {
@@ -76,6 +77,14 @@ module.exports = [
             new NodePolyfillPlugin(),
             new HtmlWebpackPlugin({
                 template: "./src/index.html",
+            }),
+            new CopyPlugin({
+                patterns: [
+                    {
+                        from: "src/renderer/webview-preload.js",
+                        to: "webview-preload.js",
+                    },
+                ],
             }),
         ],
     },

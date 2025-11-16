@@ -65,11 +65,11 @@ export class WindowManager {
                     webviewTag: true,
                     contextIsolation: true,
                     spellcheck: false,
+                    //worldSafeExecuteJavaScript: true,
                     preload: path.join(
                         app.getAppPath(),
                         (app.isPackaged ? "dist/" : "") + "preload.js"
-                    ),
-                },
+                    ),                },
             })
             this.mainWindowState.manage(this.mainWindow)
             this.mainWindow.on("ready-to-show", () => {
@@ -126,42 +126,16 @@ export class WindowManager {
     }
 }
 
-// Automatisch Preload für alle Gast-Inhalte (Webviews / BrowserViews) setzen
-// und Zoom nur für diese Inhalte erlauben. Haupt-UI bleibt auf 1..1 Zoom.
-app.on('web-contents-created', (_event, contents) => {
-  try {
-    const type = contents.getType(); // 'window', 'webview', 'browserView', ...
-    // Pfad zur webview-preload.js; anpassen falls Build-Output anders ist
-    const preloadPath = path.join(__dirname, '..', 'renderer', 'webview-preload.js');
+// Preload-Pfad für Webviews
+const getWebviewPreloadPath = () => {
+  return path.join(
+    app.getAppPath(),
+    app.isPackaged ? "dist/webview-preload.js" : "src/renderer/webview-preload.js"
+  );
+};
 
-    if (type === 'webview' || type === 'browserView') {
-      // Setze Preload für die Session der WebContents (wirkt auf diese und zukünftige Seiten in dieser Session)
-      try {
-        contents.session.setPreloads?.([preloadPath]);
-      } catch {
-        // ignore
-      }
-
-      // Erlaube Pinch/Visual Zoom nur für Gast-Inhalte
-      try {
-        const p = (contents as any).setVisualZoomLevelLimits?.(1, 3);
-        if (p && typeof p.then === 'function') p.catch(() => {});
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
-    // Für normale Fenster (Haupt-UI) Pinch/Zoom deaktivieren (1..1)
-    if (type === 'window') {
-      try {
-        const p = (contents as any).setVisualZoomLevelLimits?.(1, 1);
-        if (p && typeof p.then === 'function') p.catch(() => {});
-      } catch {
-        // ignore
-      }
-    }
-  } catch {
-    // ignore overall errors
-  }
+// Globale IPC oder Funktion exportieren, damit React/Renderer den Pfad abfragen kann
+app.on('ready', () => {
+  // Speichere den Pfad in einer globalen Variable für den Renderer-Prozess
+  (global as any).webviewPreloadPath = getWebviewPreloadPath();
 });

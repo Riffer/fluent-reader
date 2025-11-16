@@ -535,6 +535,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             ? this.props.item.link
                             : this.articleView()
                     }
+                    preload="webview-preload.js"
                     allowpopups={"true" as unknown as boolean}
                     webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
                     partition={this.state.loadWebpage ? "sandbox" : undefined}
