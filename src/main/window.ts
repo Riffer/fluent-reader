@@ -1,5 +1,5 @@
 import windowStateKeeper = require("electron-window-state")
-import { BrowserWindow, nativeTheme, app } from "electron"
+import { BrowserWindow, nativeTheme, app, ipcMain } from "electron"
 import path from 'path';
 import { setThemeListener } from "./settings"
 import { setUtilsListeners } from "./utils"
@@ -26,6 +26,13 @@ export class WindowManager {
     private setListeners = () => {
         setThemeListener(this)
         setUtilsListeners(this)
+
+        // Weiterleitung von Zoom-Änderungen aus Webviews -> Renderer
+        ipcMain.on("webview-zoom-changed", (_event, zoom: number) => {
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send("webview-zoom-changed", zoom)
+            }
+        })
 
         app.on("second-instance", () => {
             if (this.mainWindow !== null) {
@@ -65,11 +72,13 @@ export class WindowManager {
                     webviewTag: true,
                     contextIsolation: true,
                     spellcheck: false,
-                    //worldSafeExecuteJavaScript: true,
+                    // GPU-Optimierungen für geschmeidiges Scrollen
+                    v8CacheOptions: "bypassHeatCheck",
                     preload: path.join(
                         app.getAppPath(),
                         (app.isPackaged ? "dist/" : "") + "preload.js"
-                    ),                },
+                    ),
+                },
             })
             this.mainWindowState.manage(this.mainWindow)
             this.mainWindow.on("ready-to-show", () => {

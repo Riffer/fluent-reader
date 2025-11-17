@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["DOM", "ES2019"],
+    "types": ["dom"]
+  },
+  "include": [
+    "src/index.tsx",
+    "src/components/**/*.tsx",
+    "src/containers/**/*.tsx",
+    "src/scripts/**/*.ts"
+  ]
+}

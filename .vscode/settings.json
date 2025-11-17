@@ -1,0 +1,5 @@
+{
+    "terminal.integrated.scrollback": 200000,
+    "terminal.integrated.fontSize": 14,
+    "terminal.integrated.fontFamily": "Consolas",
+}

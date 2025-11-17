@@ -20,6 +20,17 @@ import {
 import { shareSubmenu } from "./context-menu"
 import { platformCtrl, decodeFetchResponse } from "../scripts/utils"
 
+// Electron nur importieren, wenn im Renderer-Process
+let ipcRenderer: any = null;
+if (typeof window !== 'undefined' && (window as any).require) {
+  try {
+    ipcRenderer = (window as any).require('electron').ipcRenderer;
+  } catch (e) {
+    // Fallback: Über Preload-API
+    ipcRenderer = (window as any).ipcRenderer;
+  }
+}
+
 const FONT_SIZE_OPTIONS = [8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
 type ArticleProps = {
@@ -54,6 +65,8 @@ type ArticleState = {
     loaded: boolean
     error: boolean
     errorDescription: string
+    webviewVisible: boolean
+    imageZoom: number
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -70,14 +83,51 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             loaded: false,
             error: false,
             errorDescription: "",
+            webviewVisible: false,
+            imageZoom: 1,
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
         window.utils.addWebviewKeyupListener(this.keyUpHandler)
         window.utils.addWebviewErrorListener(this.webviewError)
 
+        // IPC-Listener für Zoom-Änderungen vom Preload-Script
+        if (ipcRenderer) {
+            ipcRenderer.on('webview-zoom-changed', (event: any, zoomLevel: number) => {
+                this.props.updateDefaultZoom(this.props.source, zoomLevel);
+            });
+        }
+
         if (props.source.openTarget === SourceOpenTarget.FullContent)
             this.loadFull()
+    }
+
+    private sendZoomToPreload = (zoom: number) => {
+        if (!this.webview) return;
+        try {
+            this.webview.send('set-webview-zoom', zoom);
+        } catch (e) {
+            // Falls das Webview noch nicht bereit ist, nach dom-ready einmalig senden
+            const once = () => {
+                try { this.webview.send('set-webview-zoom', zoom); } catch {}
+                this.webview.removeEventListener('dom-ready', once as any);
+            };
+            try { this.webview.addEventListener('dom-ready', once as any); } catch {}
+        }
+    }
+
+    private sendImageZoomToPreload = (imageZoom: number) => {
+        if (!this.webview) return;
+        try {
+            this.webview.send('set-image-zoom', imageZoom);
+        } catch (e) {
+            // Fallback nach dom-ready
+            const once = () => {
+                try { this.webview.send('set-image-zoom', imageZoom); } catch {}
+                this.webview.removeEventListener('dom-ready', once as any);
+            };
+            try { this.webview.addEventListener('dom-ready', once as any); } catch {}
+        }
     }
 
     setFontSize = (size: number) => {
@@ -254,16 +304,40 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.toggleWebpage()
                     break
                 case "+":
-                    this.webview.setZoomFactor(this.webview.getZoomFactor() + 0.25);
-                    this.updateDefaultZoom(this.webview.getZoomFactor());
+                    const newZoomUp = this.webview.getZoomFactor() + 0.25;
+                    this.webview.setZoomFactor(newZoomUp);
+                    this.updateDefaultZoom(newZoomUp);
+                    // An Preload mitteilen (robust)
+                    this.sendZoomToPreload(newZoomUp);
                     break;
                 case "-":
-                    this.webview.setZoomFactor(this.webview.getZoomFactor()-0.25);
-                    this.updateDefaultZoom(this.webview.getZoomFactor());
+                    const newZoomDown = this.webview.getZoomFactor() - 0.25;
+                    this.webview.setZoomFactor(newZoomDown);
+                    this.updateDefaultZoom(newZoomDown);
+                    // An Preload mitteilen (robust)
+                    this.sendZoomToPreload(newZoomDown);
                     break;
                 case "#":
                     this.webview.setZoomFactor(1.0);
-                    this.updateDefaultZoom(this.webview.getZoomFactor());
+                    this.updateDefaultZoom(1.0);
+                    // An Preload mitteilen (robust)
+                    this.sendZoomToPreload(1.0);
+                    break;
+                case "*":
+                    // Strg+Shift+8: Image-Zoom vergrößern (Strg ist bereits gedrückt, daher * statt +)
+                    if (input.shift) {
+                        const newImageZoomUp = this.state.imageZoom + 0.25;
+                        this.setState({ imageZoom: newImageZoomUp });
+                        this.sendImageZoomToPreload(newImageZoomUp);
+                    }
+                    break;
+                case "_":
+                    // Strg+Shift+Minus: Image-Zoom verkleinern
+                    if (input.shift) {
+                        const newImageZoomDown = this.state.imageZoom - 0.25;
+                        this.setState({ imageZoom: newImageZoomDown });
+                        this.sendImageZoomToPreload(newImageZoomDown);
+                    }
                     break;
                 case "w":
                 case "W":
@@ -291,14 +365,34 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
+    // Früh beim Start der Navigation Zoom setzen und Sichtbarkeit aktivieren
+    webviewStartLoadingEarly = () => {
+        if (!this.webview) return;
+        const targetZoom = this.props.source.defaultZoom;
+        try {
+            if (this.webview.getZoomFactor() !== targetZoom) {
+                this.webview.setZoomFactor(targetZoom);
+            }
+            try { this.webview.send('set-webview-zoom', targetZoom); } catch {}
+        } catch {}
+        if (!this.state.webviewVisible) this.setState({ webviewVisible: true });
+    }
+
     webviewStartLoading = () => { 
-        if (this.webview.getZoomFactor() !== this.props.source.defaultZoom )
-            this.webview.setZoomFactor(this.props.source.defaultZoom)
+        if (this.webview.getZoomFactor() !== this.props.source.defaultZoom) {
+            this.webview.setZoomFactor(this.props.source.defaultZoom);
+            // Auch an Preload-Script mitteilen
+            this.sendZoomToPreload(this.props.source.defaultZoom);
+        }
+        if (!this.state.webviewVisible) this.setState({ webviewVisible: true });
     }
     webviewLoaded = () => {
         this.setState({ loaded: true })
-        if (this.webview.getZoomFactor() !== this.props.source.defaultZoom)
-            this.webview.setZoomFactor(this.props.source.defaultZoom)
+        if (this.webview.getZoomFactor() !== this.props.source.defaultZoom) {
+            this.webview.setZoomFactor(this.props.source.defaultZoom);
+            // Auch an Preload-Script mitteilen
+            this.sendZoomToPreload(this.props.source.defaultZoom);
+        }
     }
     webviewError = (reason: string) => {
         this.setState({ error: true, errorDescription: reason })
@@ -319,8 +413,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             if (webview) {
                 webview.focus()
                 this.setState({ loaded: false, error: false })
+                // Vor dem Laden: Zoom direkt setzen und sichtbar schalten
+                this.webviewStartLoadingEarly()
                 webview.addEventListener("did-stop-loading", this.webviewLoaded)
+                webview.addEventListener("did-start-loading", this.webviewStartLoadingEarly)
                 webview.addEventListener("dom-ready", this.webviewStartLoading)
+                // Events aus sendToHost (Preload -> Renderer) entgegennehmen
+                webview.addEventListener('ipc-message', (e: any) => {
+                    try {
+                        if (e && e.channel === 'webview-zoom-changed' && typeof e.args?.[0] === 'number') {
+                            this.props.updateDefaultZoom(this.props.source, e.args[0])
+                        }
+                        if (e && e.channel === 'webview-image-zoom-changed' && typeof e.args?.[0] === 'number') {
+                            this.setState({ imageZoom: e.args[0] })
+                        }
+                    } catch {}
+                })
                 let card = document.querySelector(
                     `#refocus div[data-iid="${this.props.item._id}"]`
                 ) as HTMLElement
@@ -349,6 +457,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             `#refocus div[data-iid="${this.props.item._id}"]`
         ) as HTMLElement
         if (refocus) refocus.focus()
+        
+        // IPC-Listener cleanup
+        if (ipcRenderer) {
+            ipcRenderer.removeAllListeners('webview-zoom-changed');
+        }
     }
 
     toggleWebpage = () => {
@@ -525,6 +638,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 <webview
                     id="article"
                     className={this.state.error ? "error" : ""}
+                    style={{ visibility: this.state.webviewVisible ? "visible" : "hidden" }}
                     key={
                         this.props.item._id +
                         (this.state.loadWebpage ? "_" : "") +
@@ -535,7 +649,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             ? this.props.item.link
                             : this.articleView()
                     }
-                    preload="webview-preload.js"
+                    preload={(window as any).webviewPreloadPath || 'webview-preload.js'}
                     allowpopups={"true" as unknown as boolean}
                     webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
                     partition={this.state.loadWebpage ? "sandbox" : undefined}

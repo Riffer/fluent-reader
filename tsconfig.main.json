@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2019"],
+    "types": ["node"],
+    "outDir": "dist"
+  },
+  "include": [
+    "src/electron.ts",
+    "src/preload.ts",
+    "src/main/**/*.ts"
+  ]
+}

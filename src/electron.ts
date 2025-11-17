@@ -105,13 +105,20 @@ if (process.platform === "darwin") {
 
 const winManager = new WindowManager()
 
-app.commandLine.appendSwitch("force_low_power_gpu","true");
-app.commandLine.appendSwitch("touch","true");
-app.commandLine.appendSwitch("touch-events","true");
-app.commandLine.appendSwitch("enable-pinch","true");
-app.commandLine.appendSwitch("enable-viewport","true");
+// Workaround für GPU-Crashes: Software-Rendering mit Skia statt GPU
+// Das exit_code=-1073740791 deutet auf GPU-Hardware-Inkompatibilität hin
+if (process.platform === "win32") {
+    // Windows: SwiftShader (Software-Rendering) verwenden - stabiler aber immer noch optimiert
+    app.commandLine.appendSwitch("use-gl", "swiftshader");
+    app.commandLine.appendSwitch("disable-gpu-compositing");
+} else {
+    app.commandLine.appendSwitch("disable-gpu");
+}
 
-console.debug("touch or not touch that is here the question");
+// Touch-Support
+app.commandLine.appendSwitch("touch-events", "enabled");
+
+console.debug("GPU disabled - using software rendering for stability");
 
 app.on("window-all-closed", () => {
     if (winManager.hasWindow()) {

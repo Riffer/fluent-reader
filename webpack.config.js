@@ -15,7 +15,14 @@ module.exports = [
                     resolve: {
                         extensions: [".ts", ".js"],
                     },
-                    use: [{ loader: "ts-loader" }],
+                    use: [{
+                        loader: "ts-loader",
+                        options: {
+                            configFile: "tsconfig.main.json",
+                            onlyCompileBundledFiles: true,
+                            transpileOnly: true
+                        }
+                    }],
                 },
             ],
         },
@@ -40,7 +47,14 @@ module.exports = [
                     resolve: {
                         extensions: [".ts", ".js"],
                     },
-                    use: [{ loader: "ts-loader" }],
+                    use: [{
+                        loader: "ts-loader",
+                        options: {
+                            configFile: "tsconfig.main.json",
+                            onlyCompileBundledFiles: true,
+                            transpileOnly: true
+                        }
+                    }],
                 },
             ],
         },
@@ -65,7 +79,14 @@ module.exports = [
                     resolve: {
                         extensions: [".ts", ".tsx", ".js"],
                     },
-                    use: [{ loader: "ts-loader" }],
+                    use: [{
+                        loader: "ts-loader",
+                        options: {
+                            configFile: "tsconfig.renderer.json",
+                            onlyCompileBundledFiles: true,
+                            transpileOnly: true
+                        }
+                    }],
                 },
             ],
         },
