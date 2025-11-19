@@ -49,7 +49,7 @@ export class RSSSource {
     textDir: SourceTextDirection
     hidden: boolean
 
-    constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null, defaultZoom = 1) {
+    constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null, defaultZoom = 0) {
         this.url = url
         this.name = name
         this.openTarget = openTarget ?? SourceOpenTarget.Local
@@ -308,7 +308,7 @@ export function addSource(
     name: string = null,
     batch = false,
     openTarget = null,
-    defaultZoom = 1
+    defaultZoom = 0
 ): AppThunk<Promise<number>> {
     return async (dispatch, getState) => {
         const app = getState().app

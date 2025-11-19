@@ -227,7 +227,7 @@ function outlineToSource(
     if (openTargetString in SourceOpenTarget)
         openTarget = SourceOpenTarget[openTargetString];
     let defaultZoomString = outline.getAttribute("defaultZoom")
-    let defaultZoom = 1 
+    let defaultZoom = 0 
     if (!isNaN(Number(defaultZoomString)))
         defaultZoom = Number(defaultZoomString) 
     

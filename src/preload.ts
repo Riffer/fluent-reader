@@ -24,4 +24,21 @@ contextBridge.exposeInMainWorld("ipcRenderer", {
     },
 })
 
+// Deaktiviere Standard-Zoom-Shortcuts im Hauptfenster
+// Der Zoom wird nur in WebView-Tags über deren Preload-Script verwaltet
+if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+            // Blockiere Standard-Zoom-Shortcuts
+            if (e.key === '+' || e.key === '=' || e.key === 'Add') {
+                e.preventDefault()
+            } else if (e.key === '-' || e.key === 'Subtract') {
+                e.preventDefault()
+            } else if (e.key === '0' || e.key === 'Numpad0') {
+                e.preventDefault()
+            }
+        }
+    }, true)
+}
+
 

@@ -1,178 +1,195 @@
-// Preload für Webviews: Pinch / Ctrl+Wheel Zoom nur für den Webview-Inhalt
+// Preload für Webviews: Echter Zoom via CSS-Transform (Chrome-ähnlich)
 try {
-  const { webFrame, ipcRenderer } = require('electron');
+  const { ipcRenderer } = require('electron');
 
-  let zoom = 1;
-  const MIN_ZOOM = 0.5;
-  const MAX_ZOOM = 3.0;
+  let zoomLevel = 0; // zoomLevel: 0 = 100%, 1 = 110%, -1 = 90%, etc.
+  const MIN_ZOOM_LEVEL = 0;  // 1.0x (100%) - Zoom startet bei 1
+  const MAX_ZOOM_LEVEL = 17; // ~5x (500%)
 
-  // Image-Zoom (Strg+Pinch/Strg+Wheel): nur Hauptbild skalieren
-  let imageZoom = 1;
-  const MIN_IMAGE_ZOOM = 0.5;
-  const MAX_IMAGE_ZOOM = 3.0;
-  let mainImages = []; // Array statt einzelnes Bild
-  let imageZoomStyle = null;
-  const IMAGE_SIZE_TOLERANCE = 0.85; // 85% der max-Größe werden als "gleich groß" behandelt
-
-  // Hilfsfunktion zum Anwenden und Speichern des Zoom-Levels
-  function applyZoom(newZoom, options = { notify: true }) {
-    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
-    try { 
-      webFrame.setZoomFactor(zoom); 
-      // Zoom-Level an Hauptprozess senden für Persistierung (nur bei User-Gesten)
-      if (options.notify) {
-        try { ipcRenderer.send('webview-zoom-changed', zoom); } catch {}
-        // Zusätzlich direkt an den Embedder senden (zuverlässiger für den Host-Renderer)
-        try { ipcRenderer.sendToHost('webview-zoom-changed', zoom); } catch {}
-      }
-    } catch {}
+  // Konvertierung: zoomLevel -> Faktor
+  function zoomLevelToFactor(level) {
+    return Math.pow(1.1, level);
   }
 
-  // Hilfsfunktion: gerenderte Größe des Bildes ermitteln (BoundingClientRect = das was der User sieht)
-  function getRenderedSize(img) {
-    const rect = img.getBoundingClientRect();
-    return {
-      width: rect.width,
-      height: rect.height,
-      area: rect.width * rect.height
-    };
+  // Konvertierung: Faktor -> zoomLevel
+  function factorToZoomLevel(factor) {
+    return Math.log(factor) / Math.log(1.1);
   }
 
-  // Hauptbild(er) erkennen (Heuristik: größte Bilder + ähnlich große Bilder)
-  function findMainImages() {
-    const images = Array.from(document.querySelectorAll('img')).filter(img => {
-      if (!img.offsetParent) return false; // unsichtbar
-      const rect = img.getBoundingClientRect();
-      if (rect.width < 100 || rect.height < 100) return false; // zu klein
-      const parent = img.closest('header, footer, nav');
-      if (parent) return false; // in Navigation/Header/Footer
-      return true;
-    });
-    if (!images.length) return [];
-    
-    // Größtes Bild nach GERENDETER Größe finden (was der User sieht)
-    const maxImage = images.reduce((max, img) => {
-      const maxSize = getRenderedSize(max);
-      const imgSize = getRenderedSize(img);
-      return imgSize.area > maxSize.area ? img : max;
-    });
-    
-    const maxSize = getRenderedSize(maxImage);
-    const minArea = maxSize.area * IMAGE_SIZE_TOLERANCE;
-    
-    // Alle Bilder mit ähnlich großer gerendeter Größe sammeln
-    const result = images.filter(img => {
-      const size = getRenderedSize(img);
-      return size.area >= minArea;
-    });
-    
-    return result;
-  }
-
-  // Findet die direkten Container (tr, td, div, etc.) der Hauptbilder
-  function findImageContainers() {
-    const containers = new Set();
-    mainImages.forEach(img => {
-      // Suche den nächsten aussagekräftigen Container: tr, td, div (aber nicht body/html)
-      let parent = img.parentElement;
-      let depth = 0;
-      while (parent && parent !== document.body && depth < 5) {
-        if (parent.tagName.match(/^(TR|TD|TH|DIV|FIGURE|ARTICLE|SECTION)$/i)) {
-          containers.add(parent);
-          break;
-        }
-        parent = parent.parentElement;
-        depth++;
-      }
-    });
-    return Array.from(containers);
-  }
-
-  // Image-Zoom anwenden (CSS-basiert, width-basiert statt transform-scale)
-  function applyImageZoom(newImageZoom, options = { notify: true }) {
-    imageZoom = Math.min(MAX_IMAGE_ZOOM, Math.max(MIN_IMAGE_ZOOM, newImageZoom));
-    
-    // Hauptbilder suchen/aktualisieren
-    if (!mainImages || mainImages.length === 0) {
-      mainImages = findMainImages();
-    }
-    
-    if (mainImages && mainImages.length > 0) {
-      // Stylesheet einmalig erstellen/finden
-      if (!imageZoomStyle) {
-        imageZoomStyle = document.createElement('style');
-        imageZoomStyle.id = 'fr-image-zoom-style';
-        document.head.appendChild(imageZoomStyle);
-      }
-      
-      // Alle Bilder mit eindeutigem Marker markieren (falls nicht)
-      mainImages.forEach(img => {
-        if (!img.dataset.frMainImage) {
-          img.dataset.frMainImage = 'true';
-        }
-      });
-      
-      // CSS Rule: Bilder durch width-Anpassung skalieren (beeinflusst den Layout-Flow)
-      imageZoomStyle.textContent = `
-        img[data-fr-main-image="true"] {
-          display: block;
-          width: ${100 * imageZoom}% !important;
-          height: auto !important;
-          max-width: none !important;
-          margin-left: auto;
-          margin-right: auto;
-        }
+  // Hilfsfunktion: Erstelle Wrapper für den Zoom (separater Scroll-Container)
+  function ensureZoomContainer() {
+    let wrapper = document.getElementById('fr-zoom-wrapper');
+    if (!wrapper) {
+      wrapper = document.createElement('div');
+      wrapper.id = 'fr-zoom-wrapper';
+      wrapper.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        z-index: 0;
       `;
       
-      if (options.notify) {
-        try { ipcRenderer.sendToHost('webview-image-zoom-changed', imageZoom); } catch {}
+      let container = document.createElement('div');
+      container.id = 'fr-zoom-container';
+      container.style.cssText = `
+        transform-origin: top left;
+        transition: none;
+        will-change: transform;
+      `;
+      
+      // Bewege den Body-Inhalt in den Container
+      while (document.body.firstChild) {
+        container.appendChild(document.body.firstChild);
       }
+      wrapper.appendChild(container);
+      document.body.appendChild(wrapper);
+      
+      // Stylesheet für HTML, Body und Container
+      const style = document.createElement('style');
+      style.id = 'fr-zoom-style';
+      style.textContent = `
+        html, body {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          height: 100%;
+        }
+        body {
+          overflow: hidden;
+        }
+        #fr-zoom-wrapper {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          overflow: auto;
+          overflow-x: hidden;
+        }
+        /* Verstecke nur die horizontale Scrollbar, vertikale bleibt sichtbar */
+        #fr-zoom-wrapper::-webkit-scrollbar {
+          width: auto;
+          height: 0;
+        }
+        /* Firefox: Verstecke horizontale Scrollbar */
+        #fr-zoom-wrapper {
+          scrollbar-width: auto;
+        }
+        #fr-zoom-container {
+          transform-origin: top left;
+          will-change: transform;
+          margin: 0;
+          padding: 0;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    return wrapper.querySelector('#fr-zoom-container');
+  }
+
+  // Wende Zoom auf Container an
+  function applyZoom(newZoomLevel, options = { notify: true }) {
+    zoomLevel = Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, newZoomLevel));
+    const factor = zoomLevelToFactor(zoomLevel);
+    
+    // Stelle sicher, dass der Container existiert
+    const container = ensureZoomContainer();
+    
+    // Wende Transform an
+    container.style.transform = `scale(${factor})`;
+    
+    // Sende Notification
+    if (options.notify) {
+      try { ipcRenderer.send('webview-zoom-changed', zoomLevel); } catch {}
+      try { ipcRenderer.sendToHost('webview-zoom-changed', zoomLevel); } catch {}
     }
   }
 
-  // Initial setzen
-  // WICHTIG: initial nicht melden, sonst wird ein gespeichertes Zoom auf 1 überschrieben
-  applyZoom(zoom, { notify: false });
+  // Wende Zoom zentriert zur Mausposition an (Chrome-ähnlich)
+  function applyZoomAt(newZoomLevel, mouseX, mouseY, options = { notify: true }) {
+    const oldFactor = zoomLevelToFactor(zoomLevel);
+    zoomLevel = Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, newZoomLevel));
+    const newFactor = zoomLevelToFactor(zoomLevel);
+    
+    const container = ensureZoomContainer();
+    const wrapper = container.parentElement;
+    
+    // Aktuelle Scrollposition vom Wrapper
+    const scrollX = wrapper.scrollLeft || 0;
+    const scrollY = wrapper.scrollTop || 0;
+    
+    // Punkt unter der Maus im ungeskalten Raum
+    const docPointX = (mouseX + scrollX) / oldFactor;
+    const docPointY = (mouseY + scrollY) / oldFactor;
+    
+    // Setze Scale
+    container.style.transform = `scale(${newFactor})`;
+    
+    // Berechne neue Scrollposition
+    const newScrollX = Math.max(0, docPointX * newFactor - mouseX);
+    const newScrollY = Math.max(0, docPointY * newFactor - mouseY);
+    
+    // Scrollen mit requestAnimationFrame
+    requestAnimationFrame(() => {
+      wrapper.scrollLeft = newScrollX;
+      wrapper.scrollTop = newScrollY;
+    });
+    
+    // Sende Notification
+    if (options.notify) {
+      try { ipcRenderer.send('webview-zoom-changed', zoomLevel); } catch {}
+      try { ipcRenderer.sendToHost('webview-zoom-changed', zoomLevel); } catch {}
+    }
+  }
 
-  // Listener für Zoom-Änderungen vom Hauptprozess (z.B. beim Laden)
-  ipcRenderer.on('set-webview-zoom', (event, zoomLevel) => {
-    zoom = zoomLevel;
-    // Vom Host gesetzte Werte nicht zurückmelden, um Schleifen/Duplikate zu vermeiden
-    applyZoom(zoom, { notify: false });
+  // Initial: Warte auf DOM
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      applyZoom(zoomLevel, { notify: false });
+    });
+  } else {
+    applyZoom(zoomLevel, { notify: false });
+  }
+
+  // Listener für externe Zoom-Befehle
+  ipcRenderer.on('set-webview-zoom', (event, zoomLevel_) => {
+    zoomLevel = zoomLevel_;
+    applyZoom(zoomLevel, { notify: false });
   });
 
-  // Fallback: Nachrichten vom Embedder via postMessage akzeptieren
+  // Fallback: postMessage von Embedder
   window.addEventListener('message', (event) => {
     try {
       const data = event && event.data;
       if (!data || typeof data !== 'object') return;
-      if (data.type === 'set-webview-zoom' && typeof data.zoom === 'number') {
-        zoom = data.zoom;
-        applyZoom(zoom, { notify: false });
-      }
-      if (data.type === 'set-image-zoom' && typeof data.zoom === 'number') {
-        imageZoom = data.zoom;
-        applyImageZoom(imageZoom, { notify: false });
+      if (data.type === 'set-webview-zoom' && typeof data.zoomLevel === 'number') {
+        zoomLevel = data.zoomLevel;
+        applyZoom(zoomLevel, { notify: false });
       }
     } catch {}
   });
 
-  // Ctrl+Wheel Zoom (Maus und Touchpad)
+  // Ctrl+Wheel Zoom
   window.addEventListener('wheel', (e) => {
     try {
       if (e.ctrlKey) {
         e.preventDefault();
         const delta = -e.deltaY;
-        const factor = Math.pow(1.003, delta);
-        // Strg+Wheel: Image-Zoom
-        applyImageZoom(imageZoom * factor, { notify: true });
+        // Noch schneller! (1.012 statt 1.006)
+        const factor = Math.pow(1.012, delta);
+        const currentFactor = zoomLevelToFactor(zoomLevel);
+        const newFactor = currentFactor * factor;
+        applyZoomAt(factorToZoomLevel(newFactor), e.clientX, e.clientY, { notify: true });
       }
     } catch {}
   }, { passive: false });
 
-  // Touch Pinch-Zoom (für Windows-Touchscreens)
+  // Touch Pinch-Zoom
   let lastDistance = 0;
-  let touchStartZoom = zoom;
+  let touchStartZoomLevel = zoomLevel;
 
   window.addEventListener('touchstart', (e) => {
     try {
@@ -183,10 +200,7 @@ try {
           touch2.clientX - touch1.clientX,
           touch2.clientY - touch1.clientY
         );
-        // Merke: ist es eine Strg-Taste gedrückt? Leider per Touch nicht erkennbar.
-        // Wir nutzen: wenn Meta (CMD) gedrückt ist, dann Image-Zoom, sonst Page-Zoom.
-        // Fallback: immer Page-Zoom bei Touch, Image-Zoom nur per Strg+Wheel
-        touchStartZoom = zoom;
+        touchStartZoomLevel = zoomLevel;
       }
     } catch {}
   }, { passive: false });
@@ -202,7 +216,9 @@ try {
           touch2.clientY - touch1.clientY
         );
         const scale = currentDistance / lastDistance;
-        applyZoom(touchStartZoom * scale, { notify: true });
+        const startFactor = zoomLevelToFactor(touchStartZoomLevel);
+        const newFactor = startFactor * scale;
+        applyZoom(factorToZoomLevel(newFactor), { notify: true });
       }
     } catch {}
   }, { passive: false });
@@ -211,12 +227,14 @@ try {
     lastDistance = 0;
   });
 
-  // Fallback: Gesture-Events (macOS)
+  // macOS Gesture-Events
   window.addEventListener('gesturechange', (e) => {
     try {
       e.preventDefault();
       const scale = typeof e.scale === 'number' ? e.scale : 1;
-      applyZoom(zoom * scale, { notify: true });
+      const currentFactor = zoomLevelToFactor(zoomLevel);
+      const newFactor = currentFactor * scale;
+      applyZoom(factorToZoomLevel(newFactor), { notify: true });
     } catch {}
   }, { passive: false });
 

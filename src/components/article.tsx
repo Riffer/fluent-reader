@@ -66,7 +66,7 @@ type ArticleState = {
     error: boolean
     errorDescription: string
     webviewVisible: boolean
-    imageZoom: number
+    zoom: number
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -84,7 +84,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             error: false,
             errorDescription: "",
             webviewVisible: false,
-            imageZoom: 1,
+            zoom: 0,
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -110,20 +110,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Falls das Webview noch nicht bereit ist, nach dom-ready einmalig senden
             const once = () => {
                 try { this.webview.send('set-webview-zoom', zoom); } catch {}
-                this.webview.removeEventListener('dom-ready', once as any);
-            };
-            try { this.webview.addEventListener('dom-ready', once as any); } catch {}
-        }
-    }
-
-    private sendImageZoomToPreload = (imageZoom: number) => {
-        if (!this.webview) return;
-        try {
-            this.webview.send('set-image-zoom', imageZoom);
-        } catch (e) {
-            // Fallback nach dom-ready
-            const once = () => {
-                try { this.webview.send('set-image-zoom', imageZoom); } catch {}
                 this.webview.removeEventListener('dom-ready', once as any);
             };
             try { this.webview.addEventListener('dom-ready', once as any); } catch {}
@@ -304,39 +290,38 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.toggleWebpage()
                     break
                 case "+":
-                    const newZoomUp = this.webview.getZoomFactor() + 0.25;
-                    this.webview.setZoomFactor(newZoomUp);
-                    this.updateDefaultZoom(newZoomUp);
-                    // An Preload mitteilen (robust)
+                    const newZoomUp = (this.state.zoom || 0) + 1;
+                    this.setState({ zoom: newZoomUp });
                     this.sendZoomToPreload(newZoomUp);
+                    this.updateDefaultZoom(newZoomUp);
                     break;
                 case "-":
-                    const newZoomDown = this.webview.getZoomFactor() - 0.25;
-                    this.webview.setZoomFactor(newZoomDown);
-                    this.updateDefaultZoom(newZoomDown);
-                    // An Preload mitteilen (robust)
+                    const newZoomDown = (this.state.zoom || 0) - 1;
+                    this.setState({ zoom: newZoomDown });
                     this.sendZoomToPreload(newZoomDown);
+                    this.updateDefaultZoom(newZoomDown);
                     break;
                 case "#":
-                    this.webview.setZoomFactor(1.0);
-                    this.updateDefaultZoom(1.0);
-                    // An Preload mitteilen (robust)
-                    this.sendZoomToPreload(1.0);
+                    this.setState({ zoom: 0 });
+                    this.sendZoomToPreload(0);
+                    this.updateDefaultZoom(0);
                     break;
                 case "*":
-                    // Strg+Shift+8: Image-Zoom vergrößern (Strg ist bereits gedrückt, daher * statt +)
+                    // Strg+Shift+8: Zoom vergrößern
                     if (input.shift) {
-                        const newImageZoomUp = this.state.imageZoom + 0.25;
-                        this.setState({ imageZoom: newImageZoomUp });
-                        this.sendImageZoomToPreload(newImageZoomUp);
+                        const newZoomUp = (this.state.zoom || 0) + 1;
+                        this.setState({ zoom: newZoomUp });
+                        this.sendZoomToPreload(newZoomUp);
+                        this.updateDefaultZoom(newZoomUp);
                     }
                     break;
                 case "_":
-                    // Strg+Shift+Minus: Image-Zoom verkleinern
+                    // Strg+Shift+Minus: Zoom verkleinern
                     if (input.shift) {
-                        const newImageZoomDown = this.state.imageZoom - 0.25;
-                        this.setState({ imageZoom: newImageZoomDown });
-                        this.sendImageZoomToPreload(newImageZoomDown);
+                        const newZoomDown = (this.state.zoom || 0) - 1;
+                        this.setState({ zoom: newZoomDown });
+                        this.sendZoomToPreload(newZoomDown);
+                        this.updateDefaultZoom(newZoomDown);
                     }
                     break;
                 case "w":
@@ -368,31 +353,28 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     // Früh beim Start der Navigation Zoom setzen und Sichtbarkeit aktivieren
     webviewStartLoadingEarly = () => {
         if (!this.webview) return;
-        const targetZoom = this.props.source.defaultZoom;
+        const targetZoom = this.props.source.defaultZoom || 0;
         try {
-            if (this.webview.getZoomFactor() !== targetZoom) {
-                this.webview.setZoomFactor(targetZoom);
-            }
-            try { this.webview.send('set-webview-zoom', targetZoom); } catch {}
+            // Verwende echten Zoom-Level statt Skalierung
+            this.webview.send('set-webview-zoom', targetZoom);
         } catch {}
         if (!this.state.webviewVisible) this.setState({ webviewVisible: true });
     }
 
     webviewStartLoading = () => { 
-        if (this.webview.getZoomFactor() !== this.props.source.defaultZoom) {
-            this.webview.setZoomFactor(this.props.source.defaultZoom);
-            // Auch an Preload-Script mitteilen
-            this.sendZoomToPreload(this.props.source.defaultZoom);
-        }
+        const targetZoom = this.props.source.defaultZoom || 0;
+        try {
+            // Verwende echten Zoom-Level statt Skalierung
+            this.webview.send('set-webview-zoom', targetZoom);
+        } catch {}
         if (!this.state.webviewVisible) this.setState({ webviewVisible: true });
     }
     webviewLoaded = () => {
         this.setState({ loaded: true })
-        if (this.webview.getZoomFactor() !== this.props.source.defaultZoom) {
-            this.webview.setZoomFactor(this.props.source.defaultZoom);
-            // Auch an Preload-Script mitteilen
-            this.sendZoomToPreload(this.props.source.defaultZoom);
-        }
+        const targetZoom = this.props.source.defaultZoom || 0;
+        try {
+            this.sendZoomToPreload(targetZoom);
+        } catch {}
     }
     webviewError = (reason: string) => {
         this.setState({ error: true, errorDescription: reason })
@@ -423,9 +405,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     try {
                         if (e && e.channel === 'webview-zoom-changed' && typeof e.args?.[0] === 'number') {
                             this.props.updateDefaultZoom(this.props.source, e.args[0])
-                        }
-                        if (e && e.channel === 'webview-image-zoom-changed' && typeof e.args?.[0] === 'number') {
-                            this.setState({ imageZoom: e.args[0] })
                         }
                     } catch {}
                 })
@@ -651,6 +630,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     }
                     preload={(window as any).webviewPreloadPath || 'webview-preload.js'}
                     allowpopups={"true" as unknown as boolean}
+                    disableguestresize={"false" as unknown as boolean}
                     webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
                     partition={this.state.loadWebpage ? "sandbox" : undefined}
                     allowFullScreen={"true" as unknown as boolean}

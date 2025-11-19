@@ -80,6 +80,9 @@ export class WindowManager {
                     ),
                 },
             })
+            
+            // Zoom wird ausschließlich in den WebView-Tags verwaltet (via Preload-Script)
+            // NICHT auf dem Hauptfenster setzen!
             this.mainWindowState.manage(this.mainWindow)
             this.mainWindow.on("ready-to-show", () => {
                 this.mainWindow.show()
