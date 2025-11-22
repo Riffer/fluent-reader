@@ -72,13 +72,17 @@ export class WindowManager {
                     webviewTag: true,
                     contextIsolation: true,
                     spellcheck: false,
-                    // GPU-Optimierungen für geschmeidiges Scrollen
+                    // GPU-Optimierungen für geschmeidiges Scrollen und Hardware-Beschleunigung
                     v8CacheOptions: "bypassHeatCheck",
                     preload: path.join(
                         app.getAppPath(),
                         (app.isPackaged ? "dist/" : "") + "preload.js"
                     ),
-                },
+                    // GPU-Unterstützung aktivieren für bessere Rendering-Performance
+                    // @ts-ignore - neuere Electron API für GPU-Aktualisierung
+                    gpuPreference: 'high-performance',
+                    enablePlugins: false,
+                } as any,
             })
             this.mainWindowState.manage(this.mainWindow)
             this.mainWindow.on("ready-to-show", () => {

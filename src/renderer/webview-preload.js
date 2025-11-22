@@ -112,15 +112,18 @@ try {
         }
       });
       
-      // CSS Rule: Bilder durch width-Anpassung skalieren (beeinflusst den Layout-Flow)
+      // CSS Rule: Bilder durch GPU-beschleunigten Transform skalieren (keine Reflow)
       imageZoomStyle.textContent = `
         img[data-fr-main-image="true"] {
           display: block;
-          width: ${100 * imageZoom}% !important;
+          transform: scale(${imageZoom});
+          transform-origin: center top;
+          will-change: transform;
+          max-width: 100% !important;
           height: auto !important;
-          max-width: none !important;
           margin-left: auto;
           margin-right: auto;
+          transition: transform 0.1s ease-out;
         }
       `;
       

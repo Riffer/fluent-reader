@@ -367,26 +367,37 @@ export function feedReducer(
             switch (action.status) {
                 case ActionStatus.Success: {
                     let nextState = { ...state }
+                    const existingIds = new Set<number>()
+                    
                     for (let feed of Object.values(state)) {
+                        // Clear existing IDs for each feed
+                        existingIds.clear()
+                        for (let id of feed.iids) {
+                            existingIds.add(id)
+                        }
+                        
                         if (feed.loaded) {
-                            let items = action.items.filter(
+                            let newItems = action.items.filter(
                                 i =>
                                     feed.sids.includes(i.source) &&
-                                    FeedFilter.testItem(feed.filter, i)
+                                    FeedFilter.testItem(feed.filter, i) &&
+                                    !existingIds.has(i._id) // Don't add if already exists
                             )
-                            if (items.length > 0) {
-                                let oldItems = feed.iids.map(
-                                    id => action.itemState[id]
-                                )
-                                let nextItems = mergeSortedArrays(
-                                    oldItems,
-                                    items,
-                                    (a, b) =>
-                                        b.date.getTime() - a.date.getTime()
-                                )
+                            if (newItems.length > 0) {
+                                // Merge new items with existing items and sort by date
+                                let allIds = [...feed.iids, ...newItems.map(i => i._id)]
+                                // Create a map for quick lookup of new items
+                                let newItemMap = new Map(newItems.map(i => [i._id, i]))
+                                
+                                // Get all items with their data from action.itemState or newItemMap
+                                let allItems = allIds
+                                    .map(id => action.itemState[id] || newItemMap.get(id))
+                                    .filter((item): item is RSSItem => item !== undefined)
+                                    .sort((a, b) => b.date.getTime() - a.date.getTime())
+                                
                                 nextState[feed._id] = {
                                     ...feed,
-                                    iids: nextItems.map(i => i._id),
+                                    iids: allItems.map(i => i._id),
                                 }
                             }
                         }

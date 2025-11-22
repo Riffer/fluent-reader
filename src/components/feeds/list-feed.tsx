@@ -16,6 +16,26 @@ import CompactCard from "../cards/compact-card"
 import { Card } from "../cards/card"
 
 class ListFeed extends React.Component<FeedProps> {
+    componentDidMount() {
+        // Passive scroll listener für bessere Performance
+        const scrollContainer = document.getElementById("refocus")
+        if (scrollContainer) {
+            scrollContainer.addEventListener('scroll', this.handleScroll, { passive: true })
+        }
+    }
+
+    componentWillUnmount() {
+        const scrollContainer = document.getElementById("refocus")
+        if (scrollContainer) {
+            scrollContainer.removeEventListener('scroll', this.handleScroll)
+        }
+    }
+
+    handleScroll = (e: Event) => {
+        // Passive scroll handling - keine Layout-triggernde Operationen hier
+        // Das List-Component handhabt Virtualisierung automatisch
+    }
+
     onRenderItem = (item: RSSItem) => {
         const props = {
             feedId: this.props.feed._id,
@@ -86,6 +106,10 @@ class ListFeed extends React.Component<FeedProps> {
                         onRenderCell={this.onRenderItem}
                         ignoreScrollingState
                         usePageCache
+                        getPageHeight={() => {
+                            // Bessere Seitenhöhen-Berechnung für Virtualisierung
+                            return window.innerHeight
+                        }}
                     />
                     {this.props.feed.loaded && !this.props.feed.allLoaded ? (
                         <div className="load-more-wrapper">

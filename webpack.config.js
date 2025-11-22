@@ -20,7 +20,8 @@ module.exports = [
                         options: {
                             configFile: "tsconfig.main.json",
                             onlyCompileBundledFiles: true,
-                            transpileOnly: true
+                            transpileOnly: true,
+                            experimentalFileCaching: true
                         }
                     }],
                 },
@@ -52,7 +53,8 @@ module.exports = [
                         options: {
                             configFile: "tsconfig.main.json",
                             onlyCompileBundledFiles: true,
-                            transpileOnly: true
+                            transpileOnly: true,
+                            experimentalFileCaching: true
                         }
                     }],
                 },

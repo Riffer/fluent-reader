@@ -651,7 +651,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     }
                     preload={(window as any).webviewPreloadPath || 'webview-preload.js'}
                     allowpopups={"true" as unknown as boolean}
-                    webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
+                    webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required,enableBlinkFeatures=SharedArrayBuffer"
                     partition={this.state.loadWebpage ? "sandbox" : undefined}
                     allowFullScreen={"true" as unknown as boolean}
                 />

@@ -7,8 +7,9 @@
     }
 }
 .article-wrapper {
+    position: relative;
     margin: 32px auto 0;
-    width: 860px;
+    width: min(860px, calc(100% - 64px));
     height: calc(100% - 50px);
     background-color: var(--white);
     box-shadow: 0 6.4px 14.4px 0 rgba(0, 0, 0, 0.132),
@@ -25,10 +26,10 @@
     top: calc(50% - 32px);
 }
 .article-container .btn-group.prev {
-    left: calc(50% - 486px);
+    left: -64px;
 }
 .article-container .btn-group.next {
-    right: calc(50% - 486px);
+    right: -64px;
 }
 .article {
     height: 100%;
