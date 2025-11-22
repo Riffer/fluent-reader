@@ -1,11 +1,15 @@
 import { ipcMain, app } from "electron"
 import { extract, extractFromHtml } from "@extractus/article-extractor"
+import { initializeCookieTransformations } from "./cookie-transformations"
 
 /**
  * Register IPC handlers for article extraction
  * Allows renderer process to use article-extractor via IPC
  */
 export function setupArticleExtractorHandlers() {
+    // Initialize cookie/consent banner removal transformations
+    initializeCookieTransformations()
+
     // Get application path for WebView to load article.html
     ipcMain.handle("get-app-path", (event) => {
         try {
