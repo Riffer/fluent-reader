@@ -90,9 +90,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 this.props.updateDefaultZoom(this.props.source, zoomLevel);
             });
         }
-
         if (props.source.openTarget === SourceOpenTarget.FullContent) {
-            console.log("[constructor] Calling loadFull from constructor")
             this.loadFull()
         }
     }
@@ -389,7 +387,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             (window as any).ipcRenderer.invoke('get-app-path').then((path: string) => {
                 if (path) {
                     this.setState({ appPath: path })
-                    console.log("[componentDidMount] App path loaded:", path)
                 }
             }).catch((err: any) => {
                 console.error("[componentDidMount] Failed to get app path:", err)
@@ -499,14 +496,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             if (link === this.props.item.link) {
                 // If extraction successful, use extracted content; otherwise use fetched HTML
                 const contentToUse = (article && article.content) ? article.content : html
-                console.log("[loadFull] Extraction complete, content length:", contentToUse.length)
                 this.setState({ 
                     fullContent: contentToUse, 
                     loaded: true,
                     isLoadingFull: false,
                     webviewVisible: true
-                }, () => {
-                    console.log("[loadFull] State updated, articleView URL:", this.articleView().substring(0, 100))
                 })
             }
         } catch (err) {
@@ -570,7 +564,6 @@ body.vertical { writing-mode: vertical-rl; }
 <body>
     <div id="main"></div>
     <script>
-console.log("[article.js] Script loaded via data: URL")
 
 function get(name) {
     if (name = (new RegExp('[?&]' + encodeURIComponent(name) + '=([^&]*)')).exec(location.search))
@@ -593,12 +586,10 @@ let font = get("f")
 if (font) document.body.style.fontFamily = \`"\${font}"\`
 let url = get("u")
 getArticle(url).then(article => {
-    console.log("[article.js] getArticle resolved, article length:", article.length)
     let domParser = new DOMParser()
     let dom = domParser.parseFromString(get("h"), "text/html")
     let articleEl = dom.getElementsByTagName("article")[0]
     if (!articleEl) {
-        console.error("[article.js] No article element found in header, creating one")
         articleEl = dom.createElement("article")
         if (dom.body) dom.body.appendChild(articleEl)
     }
@@ -616,10 +607,8 @@ getArticle(url).then(article => {
         e.href = e.href
     }
     let main = document.getElementById("main")
-    console.log("[article.js] main element found:", main !== null)
     main.innerHTML = dom.body.innerHTML
     main.classList.add("show")
-    console.log("[article.js] Content rendered and show class added")
 }).catch(err => {
     console.error("[article.js] Error loading article:", err)
 })
@@ -632,7 +621,6 @@ getArticle(url).then(article => {
         )}&s=${this.state.fontSize}&d=${this.props.source.textDir}&u=${
             this.props.item.link
         }`
-        console.log("[articleView] Generated data: URL with content length:", a.length)
         return url
     }
 
