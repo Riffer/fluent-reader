@@ -3,6 +3,7 @@ import { BrowserWindow, nativeTheme, app, ipcMain } from "electron"
 import path from 'path';
 import { setThemeListener } from "./settings"
 import { setUtilsListeners } from "./utils"
+import { setupArticleExtractorHandlers } from "./article-extractor"
 
 export class WindowManager {
     mainWindow: BrowserWindow = null
@@ -26,6 +27,7 @@ export class WindowManager {
     private setListeners = () => {
         setThemeListener(this)
         setUtilsListeners(this)
+        setupArticleExtractorHandlers()
 
         // Weiterleitung von Zoom-Änderungen aus Webviews -> Renderer
         ipcMain.on("webview-zoom-changed", (_event, zoom: number) => {

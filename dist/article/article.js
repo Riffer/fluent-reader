@@ -12,12 +12,9 @@ if (dir === "1") {
     });
 }
 async function getArticle(url) {
-    let article = get("a")
-    if (get("m") === "1") {
-        return (await Mercury.parse(url, {html: article})).content || ""
-    } else {
-        return article
-    }
+    // Article extraction is now done in the backend (article.tsx)
+    // This function simply returns the pre-extracted content from the backend
+    return get("a") || ""
 }
 document.documentElement.style.fontSize = get("s") + "px"
 let font = get("f")

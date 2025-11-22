@@ -20,17 +20,6 @@ import {
 import { shareSubmenu } from "./context-menu"
 import { platformCtrl, decodeFetchResponse } from "../scripts/utils"
 
-// Electron nur importieren, wenn im Renderer-Process
-let ipcRenderer: any = null;
-if (typeof window !== 'undefined' && (window as any).require) {
-  try {
-    ipcRenderer = (window as any).require('electron').ipcRenderer;
-  } catch (e) {
-    // Fallback: Über Preload-API
-    ipcRenderer = (window as any).ipcRenderer;
-  }
-}
-
 const FONT_SIZE_OPTIONS = [8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
 type ArticleProps = {
@@ -67,6 +56,7 @@ type ArticleState = {
     errorDescription: string
     webviewVisible: boolean
     zoom: number
+    isLoadingFull: boolean
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -85,6 +75,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             errorDescription: "",
             webviewVisible: false,
             zoom: 0,
+            isLoadingFull: false,
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -92,14 +83,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         window.utils.addWebviewErrorListener(this.webviewError)
 
         // IPC-Listener für Zoom-Änderungen vom Preload-Script
-        if (ipcRenderer) {
-            ipcRenderer.on('webview-zoom-changed', (event: any, zoomLevel: number) => {
+        if ((window as any).ipcRenderer) {
+            (window as any).ipcRenderer.on('webview-zoom-changed', (event: any, zoomLevel: number) => {
                 this.props.updateDefaultZoom(this.props.source, zoomLevel);
             });
         }
 
-        if (props.source.openTarget === SourceOpenTarget.FullContent)
+        if (props.source.openTarget === SourceOpenTarget.FullContent) {
+            console.log("[constructor] Calling loadFull from constructor")
             this.loadFull()
+        }
     }
 
     private sendZoomToPreload = (zoom: number) => {
@@ -418,15 +411,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     componentDidUpdate = (prevProps: ArticleProps) => {
         if (prevProps.item._id != this.props.item._id) {
+            const loadFull = this.props.source.openTarget === SourceOpenTarget.FullContent
             this.setState({
                 loadWebpage:
                     this.props.source.openTarget === SourceOpenTarget.Webpage,
-                loadFull:
-                    this.props.source.openTarget ===
-                    SourceOpenTarget.FullContent,
+                loadFull: loadFull,
+                fullContent: "",
+                isLoadingFull: false,
+            }, () => {
+                if (loadFull) {
+                    this.setState({ isLoadingFull: true })
+                    this.loadFull()
+                }
             })
-            if (this.props.source.openTarget === SourceOpenTarget.FullContent)
-                this.loadFull()
+        } else if (prevProps.source.openTarget !== this.props.source.openTarget) {
+            // If openTarget changes, update the state
+            const loadFull = this.props.source.openTarget === SourceOpenTarget.FullContent
+            this.setState({
+                loadWebpage:
+                    this.props.source.openTarget === SourceOpenTarget.Webpage,
+                loadFull: loadFull,
+            })
         }
         this.componentDidMount()
     }
@@ -438,8 +443,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (refocus) refocus.focus()
         
         // IPC-Listener cleanup
-        if (ipcRenderer) {
-            ipcRenderer.removeAllListeners('webview-zoom-changed');
+        if ((window as any).ipcRenderer) {
+            (window as any).ipcRenderer.removeAllListeners('webview-zoom-changed');
         }
     }
 
@@ -461,27 +466,43 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.props.item.link.startsWith("https://") ||
             this.props.item.link.startsWith("http://")
         ) {
-            this.setState({ loadFull: true, loadWebpage: false })
+            this.setState({ loadFull: true, loadWebpage: false, webviewVisible: true })
             this.loadFull()
         }
     }
     loadFull = async () => {
-        this.setState({ fullContent: "", loaded: false, error: false })
+        this.setState({ loaded: false, error: false })
 
         const link = this.props.item.link
         try {
+            // Fetch the full webpage
             const result = await fetch(link)
-            if (!result || !result.ok) throw new Error()
+            if (!result || !result.ok) throw new Error("Failed to fetch URL")
             const html = await decodeFetchResponse(result, true)
+            
+            // Use article-extractor via IPC to extract clean article content
+            const article = await window.articleExtractor.extractFromHtml(html, link)
             if (link === this.props.item.link) {
-                this.setState({ fullContent: html })
+                // If extraction successful, use extracted content; otherwise use fetched HTML
+                const contentToUse = (article && article.content) ? article.content : html
+                this.setState({ 
+                    fullContent: contentToUse, 
+                    loaded: true,
+                    isLoadingFull: false,
+                    webviewVisible: true
+                })
             }
-        } catch {
+        } catch (err) {
+            console.error("Article loading failed:", err)
             if (link === this.props.item.link) {
-                this.setState({
+                // Fallback to item content on error
+                this.setState({ 
+                    fullContent: this.props.item.content,
                     loaded: true,
                     error: true,
-                    errorDescription: "MERCURY_PARSER_FAILURE",
+                    errorDescription: "ARTICLE_EXTRACTION_FAILURE",
+                    isLoadingFull: false,
+                    webviewVisible: true
                 })
             }
         }
@@ -507,14 +528,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 </>
             )
         )
-        return `article/article.html?a=${a}&h=${h}&f=${encodeURIComponent(
+        const url = `article/article.html?a=${a}&h=${h}&f=${encodeURIComponent(
             this.state.fontFamily
         )}&s=${this.state.fontSize}&d=${this.props.source.textDir}&u=${
             this.props.item.link
-        }&m=${this.state.loadFull ? 1 : 0}`
+        }`
+        return url
     }
 
-    render = () => (
+    render = () => {
+        return (
         <FocusZone className="article">
             <Stack horizontal style={{ height: 36 }}>
                 <span style={{ width: 96 }}></span>
@@ -613,7 +636,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     />
                 </Stack>
             </Stack>
-            {(!this.state.loadFull || this.state.fullContent) && (
+            {(!this.state.loadFull && !this.state.loadWebpage) || (this.state.loadFull && this.state.fullContent) ? (
                 <webview
                     id="article"
                     className={this.state.error ? "error" : ""}
@@ -621,7 +644,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     key={
                         this.props.item._id +
                         (this.state.loadWebpage ? "_" : "") +
-                        (this.state.loadFull ? "__" : "")
+                        (this.state.loadFull ? "__" : "") +
+                        (this.state.fullContent ? "_content" : "")
                     }
                     src={
                         this.state.loadWebpage
@@ -634,7 +658,25 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
                     partition={this.state.loadWebpage ? "sandbox" : undefined}
                     allowFullScreen={"true" as unknown as boolean}
+                    ref={(webview) => {
+                        if (webview) {
+                            this.webview = webview as any
+                            // Set up event listeners
+                            try {
+                                webview.addEventListener('did-start-loading', this.webviewStartLoadingEarly)
+                                webview.addEventListener('did-stop-loading', this.webviewLoaded)
+                            } catch {}
+                        }
+                    }}
                 />
+            ) : (
+                <Stack
+                    className="loading-prompt"
+                    verticalAlign="center"
+                    horizontalAlign="center"
+                    tokens={{ childrenGap: 12 }}>
+                    <Spinner ariaLive="assertive" />
+                </Stack>
             )}
             {this.state.error && (
                 <Stack
@@ -660,7 +702,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 </Stack>
             )}
         </FocusZone>
-    )
+        )
+    }
 }
 
 export default Article
