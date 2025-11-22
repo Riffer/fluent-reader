@@ -57,6 +57,7 @@ type ArticleState = {
     webviewVisible: boolean
     zoom: number
     isLoadingFull: boolean
+    appPath: string
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -76,6 +77,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             webviewVisible: false,
             zoom: 0,
             isLoadingFull: false,
+            appPath: "",
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -382,6 +384,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     componentDidMount = () => {
+        // Load app path for WebView article.html loading
+        if (!this.state.appPath && (window as any).ipcRenderer) {
+            (window as any).ipcRenderer.invoke('get-app-path').then((path: string) => {
+                if (path) {
+                    this.setState({ appPath: path })
+                    console.log("[componentDidMount] App path loaded:", path)
+                }
+            }).catch((err: any) => {
+                console.error("[componentDidMount] Failed to get app path:", err)
+            })
+        }
+        
         let webview = document.getElementById("article") as Electron.WebviewTag
         if (webview != this.webview) {
             this.webview = webview
@@ -485,11 +499,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             if (link === this.props.item.link) {
                 // If extraction successful, use extracted content; otherwise use fetched HTML
                 const contentToUse = (article && article.content) ? article.content : html
+                console.log("[loadFull] Extraction complete, content length:", contentToUse.length)
                 this.setState({ 
                     fullContent: contentToUse, 
                     loaded: true,
                     isLoadingFull: false,
                     webviewVisible: true
+                }, () => {
+                    console.log("[loadFull] State updated, articleView URL:", this.articleView().substring(0, 100))
                 })
             }
         } catch (err) {
@@ -528,11 +545,94 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 </>
             )
         )
-        const url = `article/article.html?a=${a}&h=${h}&f=${encodeURIComponent(
+        // Use data: URL instead of file:// to avoid WebView issues with external files
+        // The HTML is embedded as base64 data URL with inline JavaScript
+        const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
+    <title>Article</title>
+    <link rel="stylesheet" href="file://${this.state.appPath ? this.state.appPath.replace(/\\\\/g, '/') : '/'}/article/article.css" />
+    <style>
+html, body { margin: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
+body { padding: 12px 96px 32px; overflow: hidden scroll; }
+body.rtl { direction: rtl; }
+body.vertical { writing-mode: vertical-rl; }
+#main { display: none; max-width: 700px; margin: auto; }
+#main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+#main > p.title { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; margin-block-end: 0; }
+#main > p.date { color: #666; font-size: 0.875rem; margin-block-start: 0.5rem; }
+    </style>
+</head>
+<body>
+    <div id="main"></div>
+    <script>
+console.log("[article.js] Script loaded via data: URL")
+
+function get(name) {
+    if (name = (new RegExp('[?&]' + encodeURIComponent(name) + '=([^&]*)')).exec(location.search))
+        return decodeURIComponent(name[1]);
+}
+let dir = get("d")
+if (dir === "1") {
+    document.body.classList.add("rtl")
+} else if (dir === "2") {
+    document.body.classList.add("vertical")
+    document.body.addEventListener("wheel", (evt) => {
+        document.scrollingElement.scrollLeft -= evt.deltaY;
+    });
+}
+async function getArticle(url) {
+    return get("a") || ""
+}
+document.documentElement.style.fontSize = get("s") + "px"
+let font = get("f")
+if (font) document.body.style.fontFamily = \`"\${font}"\`
+let url = get("u")
+getArticle(url).then(article => {
+    console.log("[article.js] getArticle resolved, article length:", article.length)
+    let domParser = new DOMParser()
+    let dom = domParser.parseFromString(get("h"), "text/html")
+    let articleEl = dom.getElementsByTagName("article")[0]
+    if (!articleEl) {
+        console.error("[article.js] No article element found in header, creating one")
+        articleEl = dom.createElement("article")
+        if (dom.body) dom.body.appendChild(articleEl)
+    }
+    articleEl.innerHTML = article
+    let baseEl = dom.createElement('base')
+    baseEl.setAttribute('href', url.split("/").slice(0, 3).join("/"))
+    dom.head.append(baseEl)
+    for (let s of dom.getElementsByTagName("script")) {
+        s.parentNode.removeChild(s)
+    }
+    for (let e of dom.querySelectorAll("*[src]")) {
+        e.src = e.src
+    }
+    for (let e of dom.querySelectorAll("*[href]")) {
+        e.href = e.href
+    }
+    let main = document.getElementById("main")
+    console.log("[article.js] main element found:", main !== null)
+    main.innerHTML = dom.body.innerHTML
+    main.classList.add("show")
+    console.log("[article.js] Content rendered and show class added")
+}).catch(err => {
+    console.error("[article.js] Error loading article:", err)
+})
+    </script>
+</body>
+</html>`
+        
+        const url = `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}?a=${a}&h=${h}&f=${encodeURIComponent(
             this.state.fontFamily
         )}&s=${this.state.fontSize}&d=${this.props.source.textDir}&u=${
             this.props.item.link
         }`
+        console.log("[articleView] Generated data: URL with content length:", a.length)
         return url
     }
 
@@ -645,7 +745,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         this.props.item._id +
                         (this.state.loadWebpage ? "_" : "") +
                         (this.state.loadFull ? "__" : "") +
-                        (this.state.fullContent ? "_content" : "")
+                        (this.state.fullContent ? "_content" : "") +
+                        (this.state.appPath ? "_app" : "")
                     }
                     src={
                         this.state.loadWebpage

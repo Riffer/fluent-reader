@@ -1,4 +1,4 @@
-import { ipcMain } from "electron"
+import { ipcMain, app } from "electron"
 import { extract, extractFromHtml } from "@extractus/article-extractor"
 
 /**
@@ -6,6 +6,18 @@ import { extract, extractFromHtml } from "@extractus/article-extractor"
  * Allows renderer process to use article-extractor via IPC
  */
 export function setupArticleExtractorHandlers() {
+    // Get application path for WebView to load article.html
+    ipcMain.handle("get-app-path", (event) => {
+        try {
+            const appPath = app.getAppPath()
+            console.log("[article-extractor] App path:", appPath)
+            return appPath
+        } catch (error) {
+            console.error("[article-extractor] Failed to get app path:", error)
+            return null
+        }
+    })
+
     // Extract article from URL
     ipcMain.handle("extract-article", async (event, url: string) => {
         try {

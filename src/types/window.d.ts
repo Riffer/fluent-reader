@@ -25,6 +25,11 @@ declare global {
         articleExtractor: ArticleExtractorBridge
 
         /**
+         * Article HTML base path for WebView (exposed from preload.ts)
+         */
+        articleHtmlPath: string
+
+        /**
          * Limited IPC renderer for specific channels
          */
         ipcRenderer: {

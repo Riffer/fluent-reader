@@ -1,3 +1,5 @@
+console.log("[article.js] Script loaded, location.search:", location.search.substring(0, 100))
+
 function get(name) {
     if (name = (new RegExp('[?&]' + encodeURIComponent(name) + '=([^&]*)')).exec(location.search))
         return decodeURIComponent(name[1]);
@@ -21,6 +23,7 @@ let font = get("f")
 if (font) document.body.style.fontFamily = `"${font}"`
 let url = get("u")
 getArticle(url).then(article => {
+    console.log("[article.js] getArticle resolved, article length:", article.length)
     let domParser = new DOMParser()
     let dom = domParser.parseFromString(get("h"), "text/html")
     dom.getElementsByTagName("article")[0].innerHTML = article
@@ -37,6 +40,10 @@ getArticle(url).then(article => {
         e.href = e.href
     }
     let main = document.getElementById("main")
+    console.log("[article.js] main element found:", main !== null)
     main.innerHTML = dom.body.innerHTML
     main.classList.add("show")
+    console.log("[article.js] Content rendered and show class added")
+}).catch(err => {
+    console.error("[article.js] Error loading article:", err)
 })
