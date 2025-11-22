@@ -736,7 +736,7 @@ getArticle(url).then(article => {
                     />
                 </Stack>
             </Stack>
-            {(!this.state.loadFull && !this.state.loadWebpage) || (this.state.loadFull && this.state.fullContent) ? (
+            {(!this.state.loadFull && !this.state.loadWebpage) || (this.state.loadFull && this.state.fullContent) || this.state.loadWebpage ? (
                 <webview
                     id="article"
                     className={this.state.error ? "error" : ""}
