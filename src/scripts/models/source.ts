@@ -200,7 +200,6 @@ export function initSourcesFailure(err): SourceActionTypes {
 }
 
 async function unreadCount(sources: SourceState): Promise<SourceState> {
-    console.log("update unreadCount")
     const rows = await db.itemsDB
         .select(db.items.source, lf.fn.count(db.items._id))
         .from(db.items)
@@ -214,8 +213,6 @@ async function unreadCount(sources: SourceState): Promise<SourceState> {
 }
 
 export function updateUnreadCounts(): AppThunk<Promise<void>> {
-    console.log("update unreadCounts")
-
     return async (dispatch, getState) => {
         const sources: SourceState = {}
         for (let source of Object.values(getState().sources)) {
