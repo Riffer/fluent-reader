@@ -21,7 +21,7 @@ try {
   function ensureZoomContainer() {
     let wrapper = document.getElementById('fr-zoom-wrapper');
     if (!wrapper) {
-      // Erstelle Wrapper als scrollbarer Container
+      // Erstelle Wrapper als Fixed Viewport (nicht scrollbar)
       wrapper = document.createElement('div');
       wrapper.id = 'fr-zoom-wrapper';
       wrapper.style.cssText = `
@@ -30,25 +30,24 @@ try {
         left: 0;
         width: 100%;
         height: 100%;
-        overflow: auto;
+        overflow: hidden;
         z-index: 0;
         margin: 0;
         padding: 0;
       `;
       
-      // Erstelle inneren Container für Transform
+      // Erstelle inneren Container für Transform (dieser scrollt!)
       let container = document.createElement('div');
       container.id = 'fr-zoom-container';
       container.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
         transform-origin: top left;
         transition: none;
         will-change: transform;
         margin: 0;
         padding: 0;
-        display: inline-block;
-        width: auto;
-        white-space: pre-wrap;
-        word-wrap: break-word;
       `;
       
       // Kopiere alle HTML-Attribute zu Wrapper
@@ -86,22 +85,22 @@ try {
           padding: 0;
           overflow: hidden;
         }
-        #fr-zoom-wrapper {
+        #fr-zoom-container {
           scrollbar-width: thin;
           scrollbar-color: rgba(0, 0, 0, 0.3) transparent;
         }
-        #fr-zoom-wrapper::-webkit-scrollbar {
+        #fr-zoom-container::-webkit-scrollbar {
           width: 8px;
           height: 0px;
         }
-        #fr-zoom-wrapper::-webkit-scrollbar-track {
+        #fr-zoom-container::-webkit-scrollbar-track {
           background: transparent;
         }
-        #fr-zoom-wrapper::-webkit-scrollbar-thumb {
+        #fr-zoom-container::-webkit-scrollbar-thumb {
           background: rgba(0, 0, 0, 0.3);
           border-radius: 4px;
         }
-        #fr-zoom-wrapper::-webkit-scrollbar-thumb:hover {
+        #fr-zoom-container::-webkit-scrollbar-thumb:hover {
           background: rgba(0, 0, 0, 0.5);
         }
       `;
@@ -110,16 +109,46 @@ try {
     return wrapper.querySelector('#fr-zoom-container');
   }
 
-  // Wende Zoom auf Container an
+  // Wende Zoom auf Container an - verankert am aktuellen Viewport-Center
   function applyZoom(newZoomLevel, options = { notify: true }) {
-    zoomLevel = Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, newZoomLevel));
-    const factor = zoomLevelToFactor(zoomLevel);
-    
     // Stelle sicher, dass der Container existiert
     const container = ensureZoomContainer();
+    const wrapper = container.parentElement;
     
-    // Wende Transform an
-    container.style.transform = `scale(${factor})`;
+    if (!wrapper) return;
+    
+    const oldFactor = zoomLevelToFactor(zoomLevel);
+    zoomLevel = Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, newZoomLevel));
+    const newFactor = zoomLevelToFactor(zoomLevel);
+    
+    // Hole die ursprüngliche Scroll-Position des inneren Body-Content
+    const innerContent = container.querySelector('body') || container.firstChild;
+    const viewportCenterX = (container.scrollLeft || 0) + wrapper.clientWidth / 2;
+    const viewportCenterY = (container.scrollTop || 0) + wrapper.clientHeight / 2;
+    
+    // Position im ungeskalten Raum
+    const docCenterX = viewportCenterX / oldFactor;
+    const docCenterY = viewportCenterY / oldFactor;
+    
+    // Berechne neue Container-Größe basierend auf Skalierung
+    const newContainerWidth = wrapper.clientWidth / newFactor;
+    const newContainerHeight = wrapper.clientHeight / newFactor;
+    
+    // Setze Container-Größe und Scroll-Overflow
+    container.style.width = newContainerWidth + 'px';
+    container.style.height = newContainerHeight + 'px';
+    container.style.overflow = 'auto';
+    
+    // Wende Scale an
+    container.style.transform = `scale(${newFactor})`;
+    
+    // Berechne neue Scroll-Position, um die Viewport-Mitte beizubehalten
+    requestAnimationFrame(() => {
+      const newScrollX = Math.max(0, docCenterX * newFactor - wrapper.clientWidth / 2);
+      const newScrollY = Math.max(0, docCenterY * newFactor - wrapper.clientHeight / 2);
+      container.scrollLeft = newScrollX / newFactor;
+      container.scrollTop = newScrollY / newFactor;
+    });
     
     // Sende Notification
     if (options.notify) {
