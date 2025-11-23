@@ -240,7 +240,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     keyUpHandler = (input: Electron.Input) => {
-        // Handler for key up events
+        // Reserved for future key-up event handling
     }
 
     keyDownHandler = (input: Electron.Input) => {
