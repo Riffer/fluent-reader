@@ -306,6 +306,29 @@ try {
     } catch {}
   }, { passive: false });
 
+  // Arrow key navigation - send to parent via webContents
+  // This allows left/right arrow keys to navigate articles even when focus is on webview
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      // Send message to parent window/renderer to handle navigation
+      try {
+        ipcRenderer.sendToHost('article-nav', {
+          direction: e.key === 'ArrowLeft' ? -1 : 1
+        });
+        e.preventDefault();
+      } catch {}
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      // Handle up/down arrow scrolling within the webview
+      try {
+        const container = document.getElementById('fr-zoom-container') || document.body;
+        const scrollAmount = 50; // pixels per arrow press
+        const direction = e.key === 'ArrowUp' ? -1 : 1;
+        container.scrollTop += scrollAmount * direction;
+        e.preventDefault();
+      } catch {}
+    }
+  });
+
 } catch {
   // Fehlerbehandlung: Stille Fehlerignorierung
 }

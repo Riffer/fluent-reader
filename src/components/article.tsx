@@ -576,6 +576,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     try {
                         if (e && e.channel === 'webview-zoom-changed' && typeof e.args?.[0] === 'number') {
                             this.props.updateDefaultZoom(this.props.source, e.args[0])
+                        } else if (e && e.channel === 'article-nav' && e.args?.[0]) {
+                            // Handle left/right arrow navigation from webview
+                            const direction = e.args[0].direction;
+                            this.props.offsetItem(direction);
                         }
                     } catch {}
                 })
@@ -600,6 +604,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 if (loadFull) {
                     this.setState({ isLoadingFull: true })
                     this.loadFull()
+                } else if (this.state.loadWebpage) {
+                    // For webpage: focus after dom-ready
+                    if (this.webview) {
+                        const focusOnReady = () => {
+                            this.webview.focus()
+                            this.webview.removeEventListener('dom-ready', focusOnReady)
+                        }
+                        this.webview.addEventListener('dom-ready', focusOnReady)
+                    }
+                } else {
+                    // For regular feed content: focus immediately
+                    this.focusWebviewAfterLoad()
                 }
             })
         } else if (prevProps.source.openTarget !== this.props.source.openTarget) {
@@ -612,6 +628,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             })
         }
         this.componentDidMount()
+    }
+    
+    // Focus webview after full content is loaded
+    private focusWebviewAfterLoad = () => {
+        if (this.webview) {
+            this.webview.focus()
+        }
     }
 
     componentWillUnmount = () => {
@@ -641,7 +664,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.props.item.link.startsWith("https://") ||
             this.props.item.link.startsWith("http://")
         ) {
-            this.setState({ loadWebpage: true, loadFull: false })
+            this.setState({ loadWebpage: true, loadFull: false }, () => {
+                // Focus webview after switching to webpage mode
+                if (this.webview) {
+                    const focusOnReady = () => {
+                        this.webview.focus()
+                        this.webview.removeEventListener('dom-ready', focusOnReady)
+                    }
+                    this.webview.addEventListener('dom-ready', focusOnReady)
+                }
+            })
         }
     }
 
@@ -652,8 +684,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.props.item.link.startsWith("https://") ||
             this.props.item.link.startsWith("http://")
         ) {
-            this.setState({ loadFull: true, loadWebpage: false, webviewVisible: true })
-            this.loadFull()
+            this.setState({ loadFull: true, loadWebpage: false, webviewVisible: true }, () => {
+                // Focus webview after switching to full content mode
+                this.loadFull()
+            })
         }
     }
     loadFull = async () => {
@@ -702,6 +736,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     loaded: true,
                     isLoadingFull: false,
                     webviewVisible: true
+                }, () => {
+                    // Focus webview after full content is rendered
+                    this.focusWebviewAfterLoad()
                 })
             }
         } catch (err) {
@@ -715,6 +752,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     errorDescription: "ARTICLE_EXTRACTION_FAILURE",
                     isLoadingFull: false,
                     webviewVisible: true
+                }, () => {
+                    // Focus webview after fallback content is rendered
+                    this.focusWebviewAfterLoad()
                 })
             }
         }
