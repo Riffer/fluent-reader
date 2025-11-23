@@ -109,8 +109,8 @@ try {
     return wrapper.querySelector('#fr-zoom-container');
   }
 
-  // Wende Zoom auf Container an - verankert am aktuellen Viewport-Center
-  function applyZoom(newZoomLevel, options = { notify: true }) {
+  // Wende Zoom auf Container an - Zoom kann von einem beliebigen Punkt aus erfolgen
+  function applyZoom(newZoomLevel, options = { notify: true, zoomPointX: null, zoomPointY: null, preserveScroll: true }) {
     // Stelle sicher, dass der Container existiert
     const container = ensureZoomContainer();
     const wrapper = container.parentElement;
@@ -121,14 +121,29 @@ try {
     zoomLevel = Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, newZoomLevel));
     const newFactor = zoomLevelToFactor(zoomLevel);
     
-    // Hole die ursprüngliche Scroll-Position des inneren Body-Content
-    const innerContent = container.querySelector('body') || container.firstChild;
-    const viewportCenterX = (container.scrollLeft || 0) + wrapper.clientWidth / 2;
-    const viewportCenterY = (container.scrollTop || 0) + wrapper.clientHeight / 2;
+    // Aktuelle Scroll-Position
+    const currentScrollX = container.scrollLeft || 0;
+    const currentScrollY = container.scrollTop || 0;
     
-    // Position im ungeskalten Raum
-    const docCenterX = viewportCenterX / oldFactor;
-    const docCenterY = viewportCenterY / oldFactor;
+    // Hole Zoom-Punkt: Standard = Viewport-Mitte, oder Custom Point
+    let zoomPointX = options.zoomPointX;
+    let zoomPointY = options.zoomPointY;
+    
+    if (zoomPointX === null || zoomPointY === null) {
+      if (options.preserveScroll) {
+        // Bewahre aktuelle Scroll-Position: zoomt vom oberen-linken Rand des aktuellen Views
+        zoomPointX = currentScrollX;
+        zoomPointY = currentScrollY;
+      } else {
+        // Default: Viewport-Mitte relativ zum Container
+        zoomPointX = currentScrollX + wrapper.clientWidth / 2;
+        zoomPointY = currentScrollY + wrapper.clientHeight / 2;
+      }
+    }
+    
+    // Position des Zoom-Punkts im Dokument (ungeskalter Raum)
+    const docZoomPointX = zoomPointX / oldFactor;
+    const docZoomPointY = zoomPointY / oldFactor;
     
     // Berechne neue Container-Größe basierend auf Skalierung
     const newContainerWidth = wrapper.clientWidth / newFactor;
@@ -142,12 +157,23 @@ try {
     // Wende Scale an
     container.style.transform = `scale(${newFactor})`;
     
-    // Berechne neue Scroll-Position, um die Viewport-Mitte beizubehalten
+    // Berechne neue Scroll-Position
     requestAnimationFrame(() => {
-      const newScrollX = Math.max(0, docCenterX * newFactor - wrapper.clientWidth / 2);
-      const newScrollY = Math.max(0, docCenterY * newFactor - wrapper.clientHeight / 2);
-      container.scrollLeft = newScrollX / newFactor;
-      container.scrollTop = newScrollY / newFactor;
+      if (options.preserveScroll) {
+        // Bewahre die ursprüngliche Scroll-Position im neuen Skalierungs-Raum
+        const newScrollX = Math.max(0, (docZoomPointX * newFactor) * (wrapper.clientWidth / (newContainerWidth * newFactor)));
+        const newScrollY = Math.max(0, (docZoomPointY * newFactor) * (wrapper.clientHeight / (newContainerHeight * newFactor)));
+        container.scrollLeft = newScrollX / newFactor;
+        container.scrollTop = newScrollY / newFactor;
+      } else {
+        // Der Zoom-Punkt soll an der gleichen Position im Viewport bleiben
+        const zoomPointViewportX = zoomPointX - currentScrollX;
+        const zoomPointViewportY = zoomPointY - currentScrollY;
+        const newScrollX = Math.max(0, (docZoomPointX * newFactor) - zoomPointViewportX);
+        const newScrollY = Math.max(0, (docZoomPointY * newFactor) - zoomPointViewportY);
+        container.scrollLeft = newScrollX / newFactor;
+        container.scrollTop = newScrollY / newFactor;
+      }
     });
     
     // Sende Notification
@@ -166,10 +192,10 @@ try {
     applyZoom(zoomLevel, { notify: false });
   }
 
-  // Listener für externe Zoom-Befehle
+  // Listener für externe Zoom-Befehle (von Keyboard - bewahre Scroll-Position)
   ipcRenderer.on('set-webview-zoom', (event, zoomLevel_) => {
     zoomLevel = zoomLevel_;
-    applyZoom(zoomLevel, { notify: false });
+    applyZoom(zoomLevel, { notify: false, preserveScroll: true });
   });
 
   // Fallback: postMessage von Embedder
@@ -184,7 +210,7 @@ try {
     } catch {}
   });
 
-  // Ctrl+Wheel Zoom (Touchpad)
+  // Ctrl+Wheel Zoom (Touchpad) - zoomt vom Cursor aus
   window.addEventListener('wheel', (e) => {
     try {
       if (e.ctrlKey) {
@@ -192,14 +218,27 @@ try {
         const delta = -e.deltaY;
         // Feinere Kontrolle für Touchpad: 1/3 der Geschwindigkeit
         const steps = (delta > 0 ? 1 : -1) / 3;
-        applyZoom(zoomLevel + steps, { notify: true });
+        
+        // Berechne Maus-Position relativ zum Container
+        const container = document.querySelector('#fr-zoom-container');
+        const wrapper = container.parentElement;
+        if (container && wrapper) {
+          const rect = wrapper.getBoundingClientRect();
+          const mouseX = (container.scrollLeft || 0) + (e.clientX - rect.left);
+          const mouseY = (container.scrollTop || 0) + (e.clientY - rect.top);
+          applyZoom(zoomLevel + steps, { notify: true, zoomPointX: mouseX, zoomPointY: mouseY, preserveScroll: false });
+        } else {
+          applyZoom(zoomLevel + steps, { notify: true, preserveScroll: false });
+        }
       }
     } catch {}
   }, { passive: false });
 
-  // Touch Pinch-Zoom
+  // Touch Pinch-Zoom - zoomt vom Mittelpunkt der beiden Finger
   let lastDistance = 0;
   let touchStartZoomLevel = zoomLevel;
+  let lastTouchMidpointX = 0;
+  let lastTouchMidpointY = 0;
 
   window.addEventListener('touchstart', (e) => {
     try {
@@ -211,6 +250,10 @@ try {
           touch2.clientY - touch1.clientY
         );
         touchStartZoomLevel = zoomLevel;
+        
+        // Berechne Mittelpunkt der beiden Finger
+        lastTouchMidpointX = (touch1.clientX + touch2.clientX) / 2;
+        lastTouchMidpointY = (touch1.clientY + touch2.clientY) / 2;
       }
     } catch {}
   }, { passive: false });
@@ -229,7 +272,22 @@ try {
         // Halbe Geschwindigkeit für Touch-Screen (weniger empfindlich)
         const scaleFactor = 1 + (scale - 1) / 2;
         const newFactor = zoomLevelToFactor(touchStartZoomLevel) * scaleFactor;
-        applyZoom(factorToZoomLevel(newFactor), { notify: true });
+        
+        // Berechne aktuellen Mittelpunkt der Finger
+        const currentMidX = (touch1.clientX + touch2.clientX) / 2;
+        const currentMidY = (touch1.clientY + touch2.clientY) / 2;
+        
+        // Berechne Touch-Position relativ zum Container
+        const container = document.querySelector('#fr-zoom-container');
+        const wrapper = container.parentElement;
+        if (container && wrapper) {
+          const rect = wrapper.getBoundingClientRect();
+          const touchX = (container.scrollLeft || 0) + (currentMidX - rect.left);
+          const touchY = (container.scrollTop || 0) + (currentMidY - rect.top);
+          applyZoom(factorToZoomLevel(newFactor), { notify: true, zoomPointX: touchX, zoomPointY: touchY, preserveScroll: false });
+        } else {
+          applyZoom(factorToZoomLevel(newFactor), { notify: true, preserveScroll: false });
+        }
       }
     } catch {}
   }, { passive: false });

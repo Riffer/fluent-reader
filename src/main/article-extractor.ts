@@ -24,6 +24,7 @@ export function setupArticleExtractorHandlers() {
     // Extract article from URL
     ipcMain.handle("extract-article", async (event, url: string) => {
         try {
+            // Extract with minimal options - the library handles most cases well
             const article = await extract(url)
             return {
                 success: true,

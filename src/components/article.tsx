@@ -573,8 +573,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Use article-extractor via IPC to extract clean article content
             const article = await window.articleExtractor.extractFromHtml(html, link)
             if (link === this.props.item.link) {
-                // If extraction successful, use extracted content; otherwise use fetched HTML
-                const contentToUse = (article && article.content) ? article.content : html
+                // If extraction successful, use extracted content; otherwise use fallback
+                let contentToUse = (article && article.content) ? article.content : null
+                
+                // Fallback: if extractor produces no content, extract manually
+                if (!contentToUse || contentToUse.length === 0) {
+                    contentToUse = this.fallbackExtractContent(html)
+                } else {
+                    // Clean up the extracted content to remove duplicates
+                    contentToUse = this.cleanDuplicateContent(contentToUse)
+                }
+                
                 this.setState({ 
                     fullContent: contentToUse, 
                     loaded: true,
@@ -598,28 +607,91 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
+    // Fallback content extraction if extractor fails
+    private fallbackExtractContent = (html: string): string => {
+        try {
+            const parser = new DOMParser()
+            const doc = parser.parseFromString(html, 'text/html')
+            
+            // Remove common non-content elements
+            doc.querySelectorAll('script, style, noscript, nav, header, footer, [data-ad-container], .advertisement, .ads, .sidebar').forEach(el => el.remove())
+            
+            // Find main content container
+            const selectors = [
+                'article',
+                '[role="main"]',
+                'main',
+                '.article-content',
+                '.post-content',
+                '.entry-content',
+                '[class*="main-content"]',
+                '[id*="main"]'
+            ]
+            
+            for (const selector of selectors) {
+                const el = doc.querySelector(selector)
+                if (el && el.textContent && el.textContent.trim().length > 300) {
+                    return el.innerHTML
+                }
+            }
+            
+            // Last resort: return body
+            return doc.body.innerHTML
+        } catch (err) {
+            console.error("Fallback extraction failed:", err)
+            return html
+        }
+    }
+
+    // Clean up duplicate content in extracted HTML
+    private cleanDuplicateContent = (html: string): string => {
+        try {
+            const parser = new DOMParser()
+            const doc = parser.parseFromString(html, 'text/html')
+            
+            // Remove script/style tags
+            doc.querySelectorAll('script, style, noscript').forEach(el => el.remove())
+            
+            // Remove empty/junk elements
+            doc.querySelectorAll('div, section').forEach((div) => {
+                const text = (div as HTMLElement).textContent || ''
+                const innerHTML = (div as HTMLElement).innerHTML || ''
+                
+                // Remove if mostly empty or contains tracking params with no text
+                if (text.trim().length === 0) {
+                    div.remove()
+                } else if ((innerHTML.includes('?a=') || innerHTML.includes('?utm_') || innerHTML.includes('?ref=')) && text.trim().length < 50) {
+                    div.remove()
+                }
+            })
+            
+            return doc.body.innerHTML
+        } catch (err) {
+            console.error("Content cleaning failed:", err)
+            return html
+        }
+    }
+
     articleView = () => {
-        const a = encodeURIComponent(
-            this.state.loadFull
-                ? this.state.fullContent
-                : this.props.item.content
+        const articleContent = this.state.loadFull
+            ? this.state.fullContent
+            : this.props.item.content
+
+        const headerContent = renderToString(
+            <>
+                <p className="title">{this.props.item.title}</p>
+                <p className="date">
+                    {this.props.item.date.toLocaleString(
+                        this.props.locale,
+                        { hour12: !this.props.locale.startsWith("zh") }
+                    )}
+                </p>
+            </>
         )
-        const h = encodeURIComponent(
-            renderToString(
-                <>
-                    <p className="title">{this.props.item.title}</p>
-                    <p className="date">
-                        {this.props.item.date.toLocaleString(
-                            this.props.locale,
-                            { hour12: !this.props.locale.startsWith("zh") }
-                        )}
-                    </p>
-                    <article></article>
-                </>
-            )
-        )
-        // Use data: URL instead of file:// to avoid WebView issues with external files
-        // The HTML is embedded as base64 data URL with inline JavaScript
+
+        const rtlClass = this.props.source.textDir === SourceTextDirection.RTL ? "rtl" : this.props.source.textDir === SourceTextDirection.Vertical ? "vertical" : ""
+
+        // Baue HTML direkt mit eingebetteten Daten über JSON, nicht über Query-Parameter
         const htmlContent = `<!DOCTYPE html>
 <html>
 <head>
@@ -630,7 +702,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     <link rel="stylesheet" href="file://${this.state.appPath ? this.state.appPath.replace(/\\\\/g, '/') : '/'}/article/article.css" />
     <style>
 html, body { margin: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
-body { padding: 12px 96px 32px; overflow: hidden scroll; }
+body { padding: 12px 96px 32px; overflow: hidden scroll; font-size: ${this.state.fontSize}px; }
+${this.state.fontFamily ? `body { font-family: "${this.state.fontFamily}"; }` : ''}
 body.rtl { direction: rtl; }
 body.vertical { writing-mode: vertical-rl; }
 #main { display: none; max-width: 700px; margin: auto; }
@@ -640,67 +713,52 @@ body.vertical { writing-mode: vertical-rl; }
 #main > p.date { color: #666; font-size: 0.875rem; margin-block-start: 0.5rem; }
     </style>
 </head>
-<body>
+<body class="${rtlClass}">
     <div id="main"></div>
     <script>
+window.__articleData = ${JSON.stringify({ 
+    header: headerContent, 
+    article: articleContent, 
+    baseUrl: this.props.item.link 
+})};
 
-function get(name) {
-    if (name = (new RegExp('[?&]' + encodeURIComponent(name) + '=([^&]*)')).exec(location.search))
-        return decodeURIComponent(name[1]);
-}
-let dir = get("d")
-if (dir === "1") {
-    document.body.classList.add("rtl")
-} else if (dir === "2") {
-    document.body.classList.add("vertical")
-    document.body.addEventListener("wheel", (evt) => {
-        document.scrollingElement.scrollLeft -= evt.deltaY;
-    });
-}
-async function getArticle(url) {
-    return get("a") || ""
-}
-document.documentElement.style.fontSize = get("s") + "px"
-let font = get("f")
-if (font) document.body.style.fontFamily = \`"\${font}"\`
-let url = get("u")
-getArticle(url).then(article => {
-    let domParser = new DOMParser()
-    let dom = domParser.parseFromString(get("h"), "text/html")
-    let articleEl = dom.getElementsByTagName("article")[0]
-    if (!articleEl) {
-        articleEl = dom.createElement("article")
-        if (dom.body) dom.body.appendChild(articleEl)
+(function() {
+    const { header, article, baseUrl } = window.__articleData;
+    
+    // Parse header and article HTML
+    let domParser = new DOMParser();
+    let headerDom = domParser.parseFromString(header, 'text/html');
+    
+    // Create main content
+    let main = document.getElementById("main");
+    main.innerHTML = headerDom.body.innerHTML + '<article>' + article + '</article>';
+    
+    // Set base URL for relative links
+    let baseEl = document.createElement('base');
+    baseEl.setAttribute('href', baseUrl.split("/").slice(0, 3).join("/"));
+    document.head.append(baseEl);
+    
+    // Remove scripts
+    for (let s of main.querySelectorAll("script")) {
+        s.parentNode.removeChild(s);
     }
-    articleEl.innerHTML = article
-    let baseEl = dom.createElement('base')
-    baseEl.setAttribute('href', url.split("/").slice(0, 3).join("/"))
-    dom.head.append(baseEl)
-    for (let s of dom.getElementsByTagName("script")) {
-        s.parentNode.removeChild(s)
+    
+    // Fixiere absolute URLs
+    for (let e of main.querySelectorAll("*[src]")) {
+        e.src = e.src;
     }
-    for (let e of dom.querySelectorAll("*[src]")) {
-        e.src = e.src
+    for (let e of main.querySelectorAll("*[href]")) {
+        e.href = e.href;
     }
-    for (let e of dom.querySelectorAll("*[href]")) {
-        e.href = e.href
-    }
-    let main = document.getElementById("main")
-    main.innerHTML = dom.body.innerHTML
-    main.classList.add("show")
-}).catch(err => {
-    console.error("[article.js] Error loading article:", err)
-})
+    
+    main.classList.add("show");
+})();
     </script>
 </body>
 </html>`
-        
-        const url = `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}?a=${a}&h=${h}&f=${encodeURIComponent(
-            this.state.fontFamily
-        )}&s=${this.state.fontSize}&d=${this.props.source.textDir}&u=${
-            this.props.item.link
-        }`
-        return url
+
+        // Konvertiere zu base64 data URL um Längenbegrenzungen zu vermeiden
+        return `data:text/html;base64,${btoa(unescape(encodeURIComponent(htmlContent)))}`
     }
 
     render = () => {
