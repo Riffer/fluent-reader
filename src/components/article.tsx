@@ -238,11 +238,24 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             disabled: !this.state.loadWebpage,
                             onClick: () => {
                                 if (this.state.loadWebpage && this.webview) {
-                                    // For webpage, get computed/current DOM after all JS execution
+                                    // Get computed HTML after all JS and zoom transforms
                                     this.webview.executeJavaScript(`
                                         (function() {
-                                            // Create a clone to avoid modifying the actual DOM
-                                            const clone = document.documentElement.cloneNode(true);
+                                            // Find the actual content (handles zoom wrapper if present)
+                                            let contentEl = document.getElementById('fr-zoom-container') || document.documentElement;
+                                            
+                                            // Clone to avoid modifying actual DOM
+                                            let clone = contentEl.cloneNode(true);
+                                            
+                                            // Remove zoom styling from clone
+                                            if (clone.id === 'fr-zoom-container') {
+                                                clone.style.transform = 'none';
+                                                clone.style.position = 'relative';
+                                                clone.style.top = 'auto';
+                                                clone.style.left = 'auto';
+                                            }
+                                            
+                                            // Serialize
                                             const html = new XMLSerializer().serializeToString(clone);
                                             return html;
                                         })()
@@ -938,16 +951,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     <title>Article</title>
     <link rel="stylesheet" href="file://${this.state.appPath ? this.state.appPath.replace(/\\\\/g, '/') : '/'}/article/article.css" />
     <style>
-html, body { margin: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
-body { padding: 12px 96px 32px; overflow: hidden scroll; font-size: ${this.state.fontSize}px; }
+html, body { margin: 0; padding: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
+body { padding: 12px 16px 32px; overflow-x: hidden; overflow-y: auto; font-size: ${this.state.fontSize}px; box-sizing: border-box; width: 100%; }
 ${this.state.fontFamily ? `body { font-family: "${this.state.fontFamily}"; }` : ''}
 body.rtl { direction: rtl; }
 body.vertical { writing-mode: vertical-rl; }
-#main { display: none; max-width: 700px; margin: auto; }
+* { box-sizing: border-box; }
+#main { display: none; width: 100%; margin: 0; }
 #main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 #main > p.title { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; margin-block-end: 0; }
 #main > p.date { color: #666; font-size: 0.875rem; margin-block-start: 0.5rem; }
+#main > article { max-width: 800px; margin: 20px auto 0; padding: 0 16px; }
+#main img { max-width: 100%; height: auto; }
+#main table { max-width: 100%; overflow-x: auto; }
+#main pre { max-width: 100%; overflow-x: auto; }
+#main code { word-break: break-word; }
     </style>
 </head>
 <body class="${rtlClass}">
@@ -978,6 +997,25 @@ window.__articleData = ${JSON.stringify({
     // Remove scripts
     for (let s of main.querySelectorAll("script")) {
         s.parentNode.removeChild(s);
+    }
+    
+    // DEBUG: Find elements that might cause horizontal overflow
+    const viewportWidth = document.documentElement.clientWidth;
+    let overflowElements = [];
+    main.querySelectorAll('*').forEach(el => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > viewportWidth) {
+            overflowElements.push({
+                tag: el.tagName,
+                class: el.className,
+                width: rect.width,
+                offsetWidth: el.offsetWidth,
+                scrollWidth: el.scrollWidth
+            });
+        }
+    });
+    if (overflowElements.length > 0) {
+        console.log('Elements causing horizontal overflow:', overflowElements);
     }
     
     // Fixiere absolute URLs
