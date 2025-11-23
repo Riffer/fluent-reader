@@ -561,7 +561,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
     loadFull = async () => {
-        this.setState({ loaded: false, error: false })
+        this.setState({ loaded: false, error: false, isLoadingFull: true })
 
         const link = this.props.item.link
         try {
@@ -582,6 +582,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 } else {
                     // Clean up the extracted content to remove duplicates
                     contentToUse = this.cleanDuplicateContent(contentToUse)
+                    
+                    // Only prepend feed summary if extractor didn't already include images
+                    const extractorHasImages = contentToUse.includes('<img') || contentToUse.includes('<picture')
+                    if (!extractorHasImages) {
+                        // Try feed summary first
+                        let enrichedContent = this.prependFeedSummary(contentToUse)
+                        
+                        // If feed summary didn't have images, try extracting best image from original HTML
+                        if (enrichedContent === contentToUse) {
+                            const teaserImage = this.extractTeaserImageFromHtml(html)
+                            if (teaserImage) {
+                                enrichedContent = `<div style="margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid #ddd;">${teaserImage}</div>` + contentToUse
+                            }
+                        }
+                        
+                        contentToUse = enrichedContent
+                    }
                 }
                 
                 this.setState({ 
@@ -643,6 +660,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
+
+
     // Clean up duplicate content in extracted HTML
     private cleanDuplicateContent = (html: string): string => {
         try {
@@ -672,10 +691,145 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
+    // Prepend feed summary/teaser to extracted article for context
+    private prependFeedSummary = (extractedContent: string): string => {
+        try {
+            const feedContent = this.props.item.content
+            if (!feedContent || feedContent.length === 0) {
+                return extractedContent
+            }
+
+            // Parse feed content to extract images and text
+            const parser = new DOMParser()
+            const feedDoc = parser.parseFromString(feedContent, 'text/html')
+
+            // Extract the first image from feed summary
+            let summaryHtml = ""
+            const firstImg = feedDoc.querySelector('img')
+            if (firstImg) {
+                summaryHtml += firstImg.outerHTML
+            }
+
+            // Extract first paragraph or meaningful text from feed
+            const firstP = feedDoc.querySelector('p')
+            if (firstP && firstP.textContent && firstP.textContent.trim().length > 20) {
+                summaryHtml += `<p><em>${firstP.textContent.trim()}</em></p>`
+            }
+
+            // If we found summary content, prepend it to the article
+            if (summaryHtml) {
+                // Wrap in a summary div for styling
+                const summary = `<div style="margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid #ddd;">${summaryHtml}</div>`
+                return summary + extractedContent
+            }
+
+            return extractedContent
+        } catch (err) {
+            console.error("Feed summary extraction failed:", err)
+            return extractedContent
+        }
+    }
+
+    // Extract best image from original HTML as teaser/hero image
+    private extractTeaserImageFromHtml = (html: string): string => {
+        try {
+            const parser = new DOMParser()
+            const doc = parser.parseFromString(html, 'text/html')
+
+            // Collect all images with scoring
+            const images: Array<{ html: string; score: number; src: string }> = []
+
+            doc.querySelectorAll('img, picture').forEach((element) => {
+                let score = 0
+                let imgHtml = ""
+                let src = ""
+
+                if (element.tagName === "IMG") {
+                    const img = element as HTMLImageElement
+                    src = img.src
+                    imgHtml = img.outerHTML
+
+                    // Score based on attributes
+                    const width = img.width || parseInt(img.getAttribute('width') || '0')
+                    const height = img.height || parseInt(img.getAttribute('height') || '0')
+                    const alt = img.alt || ""
+                    const dataSize = img.getAttribute('data-src') ? 1 : 0
+
+                    // Larger images score higher
+                    if (width > 300) score += 10
+                    if (width > 600) score += 15
+                    if (height > 300) score += 10
+                    if (height > 600) score += 15
+
+                    // Alt text indicates intentional image
+                    if (alt.length > 10) score += 8
+                    if (alt.includes("article") || alt.includes("teaser")) score += 5
+
+                    // Aspect ratio close to 16:9 or 4:3 is better for hero images
+                    if (width > 0 && height > 0) {
+                        const ratio = width / height
+                        if ((ratio > 1.3 && ratio < 2.0) || (ratio > 0.66 && ratio < 0.77)) {
+                            score += 5
+                        }
+                    }
+
+                    // Avoid tiny images
+                    if (width < 100 || height < 100) score = 0
+
+                    // Avoid images with tracking-like names
+                    if (src.includes("pixel") || src.includes("tracker") || src.includes("analytics")) score = 0
+                } else if (element.tagName === "PICTURE") {
+                    const picture = element as HTMLElement
+                    const img = picture.querySelector('img')
+                    if (img) {
+                        src = img.src
+                        imgHtml = picture.outerHTML
+                        // Pictures are usually intentional hero images
+                        score = 20
+                    }
+                }
+
+                if (score > 0 && src) {
+                    images.push({ html: imgHtml, score, src })
+                }
+            })
+
+            // Sort by score and get best image
+            if (images.length > 0) {
+                images.sort((a, b) => b.score - a.score)
+                const bestImage = images[0]
+                console.log("Best teaser image found:", {
+                    src: bestImage.src,
+                    score: bestImage.score,
+                    totalCandidates: images.length
+                })
+                return bestImage.html
+            }
+
+            return ""
+        } catch (err) {
+            console.error("Teaser image extraction failed:", err)
+            return ""
+        }
+    }
+
     articleView = () => {
         const articleContent = this.state.loadFull
             ? this.state.fullContent
             : this.props.item.content
+
+        // Debug: Check if images are in the content
+        const hasImages = articleContent.includes('<img') || articleContent.includes('<picture')
+        const imgCount = (articleContent.match(/<img/g) || []).length
+        const pictureCount = (articleContent.match(/<picture/g) || []).length
+        console.log("Article content analysis:", {
+            url: this.props.item.link,
+            hasImages,
+            imgCount,
+            pictureCount,
+            totalImages: imgCount + pictureCount,
+            contentLength: articleContent.length
+        })
 
         const headerContent = renderToString(
             <>
@@ -828,9 +982,21 @@ window.__articleData = ${JSON.stringify({
                         }
                     />
                     <CommandBarButton
-                        title={intl.get("article.loadFull")}
+                        title={
+                            this.state.isLoadingFull 
+                                ? intl.get("article.loadFull") + " (wird geladen...)"
+                                : this.state.loadFull 
+                                    ? intl.get("article.loadFull") + " ✓ (geladen)"
+                                    : intl.get("article.loadFull")
+                        }
                         className={this.state.loadFull ? "active" : ""}
-                        iconProps={{ iconName: "RawSource" }}
+                        iconProps={{ 
+                            iconName: this.state.isLoadingFull 
+                                ? "Sync" 
+                                : this.state.loadFull 
+                                    ? "CheckMark" 
+                                    : "RawSource" 
+                        }}
                         onClick={this.toggleFull}
                     />
                     <CommandBarButton

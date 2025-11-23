@@ -42,6 +42,9 @@ export function setupArticleExtractorHandlers() {
     // Extract article from HTML content
     ipcMain.handle("extract-article-html", async (event, html: string, url: string) => {
         try {
+            // Extract article - returns content with text and basic formatting
+            // Note: article-extractor doesn't preserve images by design for security/performance
+            // Images can be re-injected if needed from the original HTML
             const article = await extractFromHtml(html, url)
             return {
                 success: true,
