@@ -1,25 +1,27 @@
 // Preload für Webviews: Echter Zoom via CSS-Transform (Chrome-ähnlich)
+// Die gesamte Seite wird skaliert, nicht nur optisch verkleinert
 try {
   const { ipcRenderer } = require('electron');
 
   let zoomLevel = 0; // zoomLevel: 0 = 100%, 1 = 110%, -1 = 90%, etc.
-  const MIN_ZOOM_LEVEL = 0;  // 1.0x (100%) - Zoom startet bei 1
-  const MAX_ZOOM_LEVEL = 17; // ~5x (500%)
+  const MIN_ZOOM_LEVEL = -8;  // ~0.4x (40%) - minimum zoom
+  const MAX_ZOOM_LEVEL = 17;  // ~5x (500%) - maximum zoom
 
   // Konvertierung: zoomLevel -> Faktor
   function zoomLevelToFactor(level) {
     return Math.pow(1.1, level);
   }
 
-  // Konvertierung: Faktor -> zoomLevel
+  // Konvertierung: Faktor -> zoomLevel (OHNE Runden für smoothen Touch-Zoom)
   function factorToZoomLevel(factor) {
     return Math.log(factor) / Math.log(1.1);
   }
 
-  // Hilfsfunktion: Erstelle Wrapper für den Zoom (separater Scroll-Container)
+  // Erstelle Zoom-Container der gesamte Seite enthält
   function ensureZoomContainer() {
     let wrapper = document.getElementById('fr-zoom-wrapper');
     if (!wrapper) {
+      // Erstelle Wrapper als scrollbarer Container
       wrapper = document.createElement('div');
       wrapper.id = 'fr-zoom-wrapper';
       wrapper.style.cssText = `
@@ -30,59 +32,77 @@ try {
         height: 100%;
         overflow: auto;
         z-index: 0;
+        margin: 0;
+        padding: 0;
       `;
       
+      // Erstelle inneren Container für Transform
       let container = document.createElement('div');
       container.id = 'fr-zoom-container';
       container.style.cssText = `
         transform-origin: top left;
         transition: none;
         will-change: transform;
+        margin: 0;
+        padding: 0;
+        display: inline-block;
+        width: auto;
+        white-space: pre-wrap;
+        word-wrap: break-word;
       `;
       
-      // Bewege den Body-Inhalt in den Container
+      // Kopiere alle HTML-Attribute zu Wrapper
+      wrapper.style.margin = '0';
+      wrapper.style.padding = '0';
+      
+      // Bewege alle Children vom Body in den Container
       while (document.body.firstChild) {
         container.appendChild(document.body.firstChild);
       }
+      
       wrapper.appendChild(container);
       document.body.appendChild(wrapper);
       
-      // Stylesheet für HTML, Body und Container
+      // Passe HTML und Body an
+      document.documentElement.style.margin = '0';
+      document.documentElement.style.padding = '0';
+      document.documentElement.style.overflow = 'hidden';
+      document.documentElement.style.width = '100%';
+      document.documentElement.style.height = '100%';
+      
+      document.body.style.margin = '0';
+      document.body.style.padding = '0';
+      document.body.style.overflow = 'hidden';
+      document.body.style.width = '100%';
+      document.body.style.height = '100%';
+      document.body.style.display = 'block';
+      
+      // Verstecke horizontale Scrollbar
       const style = document.createElement('style');
       style.id = 'fr-zoom-style';
       style.textContent = `
         html, body {
           margin: 0;
           padding: 0;
-          width: 100%;
-          height: 100%;
-        }
-        body {
           overflow: hidden;
         }
         #fr-zoom-wrapper {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          overflow: auto;
-          overflow-x: hidden;
+          scrollbar-width: thin;
+          scrollbar-color: rgba(0, 0, 0, 0.3) transparent;
         }
-        /* Verstecke nur die horizontale Scrollbar, vertikale bleibt sichtbar */
         #fr-zoom-wrapper::-webkit-scrollbar {
-          width: auto;
-          height: 0;
+          width: 8px;
+          height: 0px;
         }
-        /* Firefox: Verstecke horizontale Scrollbar */
-        #fr-zoom-wrapper {
-          scrollbar-width: auto;
+        #fr-zoom-wrapper::-webkit-scrollbar-track {
+          background: transparent;
         }
-        #fr-zoom-container {
-          transform-origin: top left;
-          will-change: transform;
-          margin: 0;
-          padding: 0;
+        #fr-zoom-wrapper::-webkit-scrollbar-thumb {
+          background: rgba(0, 0, 0, 0.3);
+          border-radius: 4px;
+        }
+        #fr-zoom-wrapper::-webkit-scrollbar-thumb:hover {
+          background: rgba(0, 0, 0, 0.5);
         }
       `;
       document.head.appendChild(style);
@@ -100,43 +120,6 @@ try {
     
     // Wende Transform an
     container.style.transform = `scale(${factor})`;
-    
-    // Sende Notification
-    if (options.notify) {
-      try { ipcRenderer.send('webview-zoom-changed', zoomLevel); } catch {}
-      try { ipcRenderer.sendToHost('webview-zoom-changed', zoomLevel); } catch {}
-    }
-  }
-
-  // Wende Zoom zentriert zur Mausposition an (Chrome-ähnlich)
-  function applyZoomAt(newZoomLevel, mouseX, mouseY, options = { notify: true }) {
-    const oldFactor = zoomLevelToFactor(zoomLevel);
-    zoomLevel = Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, newZoomLevel));
-    const newFactor = zoomLevelToFactor(zoomLevel);
-    
-    const container = ensureZoomContainer();
-    const wrapper = container.parentElement;
-    
-    // Aktuelle Scrollposition vom Wrapper
-    const scrollX = wrapper.scrollLeft || 0;
-    const scrollY = wrapper.scrollTop || 0;
-    
-    // Punkt unter der Maus im ungeskalten Raum
-    const docPointX = (mouseX + scrollX) / oldFactor;
-    const docPointY = (mouseY + scrollY) / oldFactor;
-    
-    // Setze Scale
-    container.style.transform = `scale(${newFactor})`;
-    
-    // Berechne neue Scrollposition
-    const newScrollX = Math.max(0, docPointX * newFactor - mouseX);
-    const newScrollY = Math.max(0, docPointY * newFactor - mouseY);
-    
-    // Scrollen mit requestAnimationFrame
-    requestAnimationFrame(() => {
-      wrapper.scrollLeft = newScrollX;
-      wrapper.scrollTop = newScrollY;
-    });
     
     // Sende Notification
     if (options.notify) {
@@ -172,17 +155,15 @@ try {
     } catch {}
   });
 
-  // Ctrl+Wheel Zoom
+  // Ctrl+Wheel Zoom (Touchpad)
   window.addEventListener('wheel', (e) => {
     try {
       if (e.ctrlKey) {
         e.preventDefault();
         const delta = -e.deltaY;
-        // Noch schneller! (1.012 statt 1.006)
-        const factor = Math.pow(1.012, delta);
-        const currentFactor = zoomLevelToFactor(zoomLevel);
-        const newFactor = currentFactor * factor;
-        applyZoomAt(factorToZoomLevel(newFactor), e.clientX, e.clientY, { notify: true });
+        // Feinere Kontrolle für Touchpad: 1/3 der Geschwindigkeit
+        const steps = (delta > 0 ? 1 : -1) / 3;
+        applyZoom(zoomLevel + steps, { notify: true });
       }
     } catch {}
   }, { passive: false });
@@ -216,8 +197,9 @@ try {
           touch2.clientY - touch1.clientY
         );
         const scale = currentDistance / lastDistance;
-        const startFactor = zoomLevelToFactor(touchStartZoomLevel);
-        const newFactor = startFactor * scale;
+        // Halbe Geschwindigkeit für Touch-Screen (weniger empfindlich)
+        const scaleFactor = 1 + (scale - 1) / 2;
+        const newFactor = zoomLevelToFactor(touchStartZoomLevel) * scaleFactor;
         applyZoom(factorToZoomLevel(newFactor), { notify: true });
       }
     } catch {}
@@ -232,12 +214,11 @@ try {
     try {
       e.preventDefault();
       const scale = typeof e.scale === 'number' ? e.scale : 1;
-      const currentFactor = zoomLevelToFactor(zoomLevel);
-      const newFactor = currentFactor * scale;
+      const newFactor = zoomLevelToFactor(zoomLevel) * scale;
       applyZoom(factorToZoomLevel(newFactor), { notify: true });
     } catch {}
   }, { passive: false });
 
 } catch {
-  // Fehlerbehandlung
+  // Fehlerbehandlung: Stille Fehlerignorierung
 }
