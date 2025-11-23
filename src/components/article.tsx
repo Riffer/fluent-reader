@@ -240,35 +240,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     keyUpHandler = (input: Electron.Input) => {
-        if (input.type === "keyUp")
-        {
-            if(input.control)
-            {
-                console.log("ctrl UP");
-            }
-        }
+        // Handler for key up events
     }
 
     keyDownHandler = (input: Electron.Input) => {
-        if (input.type === "keyDown")
-        {
-            if(input.control && !input.isAutoRepeat)
-            {
-                console.log("ctrl DOWN");
-            }
-        }
-        if (input.type === "keyUp")
-        {
-            if(input.control && !input.isAutoRepeat)
-            {
-                console.log("ctrl UP");
-            }
-        }
-
-        if (input.type === "")
-        {
-            
-        }
         if (input.type === "keyDown") {
             switch (input.key) {
                 case "Escape":
