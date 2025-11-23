@@ -185,9 +185,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         ],
     })
 
-    moreMenuProps = (): IContextualMenuProps => ({
-        items: [
-                        {
+    moreMenuProps = (): IContextualMenuProps => {
+        const items: any[] = [
+            {
                 key: "copyURL",
                 text: intl.get("context.copyURL"),
                 iconProps: { iconName: "Link" },
@@ -195,7 +195,83 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     window.utils.writeClipboard(this.props.item.link)
                 },
             },
-            {
+        ]
+        
+        // Add source code copy option if full content or webpage is loaded
+        if ((this.state.loadFull && this.state.fullContent) || this.state.loadWebpage) {
+            items.push({
+                key: "sourceSection",
+                itemType: ContextualMenuItemType.Section,
+                sectionProps: {
+                    topDivider: true,
+                    items: [
+                        {
+                            key: "copySourceCode",
+                            text: "Quelltext kopieren",
+                            iconProps: { iconName: "Code" },
+                            onClick: () => {
+                                if (this.state.loadFull && this.state.fullContent) {
+                                    // For full content, copy extracted HTML
+                                    window.utils.writeClipboard(this.state.fullContent)
+                                } else if (this.state.loadWebpage && this.webview) {
+                                    // For webpage, get original source
+                                    this.webview.executeJavaScript(`
+                                        (function() {
+                                            // Try to get original source from document.documentElement
+                                            const html = document.documentElement.outerHTML;
+                                            return html;
+                                        })()
+                                    `, false).then((result: string) => {
+                                        if (result) {
+                                            window.utils.writeClipboard(result)
+                                        }
+                                    }).catch((err: any) => {
+                                        console.error('Fehler beim Kopieren des Quelltexts:', err)
+                                    })
+                                }
+                            },
+                        },
+                        {
+                            key: "copyComputedSource",
+                            text: "Berechneter Quelltext kopieren",
+                            iconProps: { iconName: "CodeEdit" },
+                            disabled: !this.state.loadWebpage,
+                            onClick: () => {
+                                if (this.state.loadWebpage && this.webview) {
+                                    // For webpage, get computed/current DOM after all JS execution
+                                    this.webview.executeJavaScript(`
+                                        (function() {
+                                            // Create a clone to avoid modifying the actual DOM
+                                            const clone = document.documentElement.cloneNode(true);
+                                            const html = new XMLSerializer().serializeToString(clone);
+                                            return html;
+                                        })()
+                                    `, false).then((result: string) => {
+                                        if (result) {
+                                            window.utils.writeClipboard(result)
+                                        }
+                                    }).catch((err: any) => {
+                                        console.error('Fehler beim Kopieren des berechneten Quelltexts:', err)
+                                    })
+                                }
+                            },
+                        },
+                        {
+                            key: "openDevTools",
+                            text: "Developer Tools öffnen",
+                            iconProps: { iconName: "CodeEdit" },
+                            onClick: () => {
+                                if (this.webview) {
+                                    this.webview.openDevTools()
+                                }
+                            },
+                        },
+                    ],
+                },
+            })
+        }
+        
+        items.push({
                 key: "toggleHidden",
                 text: this.props.item.hidden
                     ? intl.get("article.unhide")
@@ -233,13 +309,20 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 itemType: ContextualMenuItemType.Divider,
             },
             ...shareSubmenu(this.props.item),
-        ],
-    })
+        )
+        
+        return {
+            items: items,
+        }
+    }
 
     contextMenuHandler = (pos: [number, number], text: string, url: string) => {
         if (pos) {
-            if (text || url) this.props.textMenu(pos, text, url)
-            else this.props.imageMenu(pos)
+            if (text || url) {
+                this.props.textMenu(pos, text, url)
+            } else {
+                this.props.imageMenu(pos)
+            }
         } else {
             this.props.dismissContextMenu()
         }

@@ -312,6 +312,7 @@ export class ContextMenu extends React.Component<ContextMenuProps> {
                         },
                     })
                 }
+                
                 return items
             }
             case ContextMenuType.Image:
