@@ -62,6 +62,10 @@ type ArticleState = {
 
 class Article extends React.Component<ArticleProps, ArticleState> {
     webview: Electron.WebviewTag
+    globalKeydownListener: (e: KeyboardEvent) => void
+    globalKeyupListener: (e: KeyboardEvent) => void
+    pressedZoomKeys: Set<string>
+    currentZoom: number = 0  // Track zoom locally to avoid state lag
 
     constructor(props: ArticleProps) {
         super(props)
@@ -87,6 +91,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // IPC-Listener für Zoom-Änderungen vom Preload-Script
         if ((window as any).ipcRenderer) {
             (window as any).ipcRenderer.on('webview-zoom-changed', (event: any, zoomLevel: number) => {
+                this.currentZoom = zoomLevel
+                this.setState({ zoom: zoomLevel })
                 this.props.updateDefaultZoom(this.props.source, zoomLevel);
             });
         }
@@ -393,6 +399,59 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             })
         }
         
+        // Keyboard state tracking für Zoom
+        this.pressedZoomKeys = new Set<string>()
+        this.currentZoom = this.state.zoom || 0
+        
+        // Entferne alte Listener falls vorhanden
+        if (this.globalKeydownListener) {
+            document.removeEventListener('keydown', this.globalKeydownListener)
+        }
+        if (this.globalKeyupListener) {
+            document.removeEventListener('keyup', this.globalKeyupListener)
+        }
+        
+        // Global keyboard listener für Zoom (auch außerhalb WebView)
+        this.globalKeydownListener = (e: KeyboardEvent) => {
+            const MIN_ZOOM_LEVEL = -8
+            const MAX_ZOOM_LEVEL = 17
+            const isZoomKey = (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_' || e.key === '#')
+            
+            if (!isZoomKey || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+            
+            // Ignoriere repeat Events (Taste wird gehalten)
+            if (e.repeat) return
+            
+            e.preventDefault()
+            this.pressedZoomKeys.add(e.key)
+            
+            if (e.key === '+' || e.key === '=') {
+                const newZoom = Math.min(MAX_ZOOM_LEVEL, this.currentZoom + 1)
+                this.currentZoom = newZoom
+                this.setState({ zoom: newZoom })
+                this.sendZoomToPreload(newZoom)
+                this.updateDefaultZoom(newZoom)
+            } else if (e.key === '-' || e.key === '_') {
+                const newZoom = Math.max(MIN_ZOOM_LEVEL, this.currentZoom - 1)
+                this.currentZoom = newZoom
+                this.setState({ zoom: newZoom })
+                this.sendZoomToPreload(newZoom)
+                this.updateDefaultZoom(newZoom)
+            } else if (e.key === '#') {
+                this.currentZoom = 0
+                this.setState({ zoom: 0 })
+                this.sendZoomToPreload(0)
+                this.updateDefaultZoom(0)
+            }
+        }
+        
+        this.globalKeyupListener = (e: KeyboardEvent) => {
+            this.pressedZoomKeys.delete(e.key)
+        }
+        
+        document.addEventListener('keydown', this.globalKeydownListener)
+        document.addEventListener('keyup', this.globalKeyupListener)
+        
         let webview = document.getElementById("article") as Electron.WebviewTag
         if (webview != this.webview) {
             this.webview = webview
@@ -404,6 +463,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 webview.addEventListener("did-stop-loading", this.webviewLoaded)
                 webview.addEventListener("did-start-loading", this.webviewStartLoadingEarly)
                 webview.addEventListener("dom-ready", this.webviewStartLoading)
+                // Keyboard shortcuts for zoom control
+                webview.addEventListener('keydown', (e: any) => {
+                    try {
+                        if (e.key === '+' || e.key === '=') {
+                            this.sendZoomToPreload(this.state.zoom + 1)
+                        } else if (e.key === '-' || e.key === '_') {
+                            this.sendZoomToPreload(this.state.zoom - 1)
+                        } else if (e.key === '#') {
+                            this.sendZoomToPreload(0)
+                        }
+                    } catch {}
+                })
                 // Events aus sendToHost (Preload -> Renderer) entgegennehmen
                 webview.addEventListener('ipc-message', (e: any) => {
                     try {
@@ -452,6 +523,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             `#refocus div[data-iid="${this.props.item._id}"]`
         ) as HTMLElement
         if (refocus) refocus.focus()
+        
+        // Remove global keyboard listeners
+        if (this.globalKeydownListener) {
+            document.removeEventListener('keydown', this.globalKeydownListener)
+        }
+        if (this.globalKeyupListener) {
+            document.removeEventListener('keyup', this.globalKeyupListener)
+        }
         
         // IPC-Listener cleanup
         if ((window as any).ipcRenderer) {
