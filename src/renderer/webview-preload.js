@@ -216,8 +216,9 @@ try {
       if (e.ctrlKey) {
         e.preventDefault();
         const delta = -e.deltaY;
-        // Feinere Kontrolle für Touchpad: 1/3 der Geschwindigkeit
-        const steps = (delta > 0 ? 1 : -1) / 3;
+        // Touchpad-Kontrolle: Mit größeren Schritten (höhere Empfindlichkeit)
+        // Je größer dieser Wert, desto weniger empfindlich
+        const steps = (delta > 0 ? 1 : -1) * 0.5;
         
         // Berechne Maus-Position relativ zum Container
         const container = document.querySelector('#fr-zoom-container');

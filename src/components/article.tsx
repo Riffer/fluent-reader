@@ -38,6 +38,10 @@ type ArticleProps = {
         source: RSSSource,
         defaultZoom: Number
     ) => void
+    updateSourceOpenTarget: (
+        source: RSSSource,
+        openTarget: SourceOpenTarget
+    ) => void
     dismissContextMenu: () => void
     updateSourceTextDirection: (
         source: RSSSource,
@@ -659,12 +663,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     toggleWebpage = () => {
         if (this.state.loadWebpage) {
-            this.setState({ loadWebpage: false })
+            this.setState({ loadWebpage: false }, () => {
+                // Switch back to Local (RSS) mode and persist
+                this.props.updateSourceOpenTarget(
+                    this.props.source,
+                    SourceOpenTarget.Local
+                )
+            })
         } else if (
             this.props.item.link.startsWith("https://") ||
             this.props.item.link.startsWith("http://")
         ) {
             this.setState({ loadWebpage: true, loadFull: false }, () => {
+                // Update source to persist openTarget
+                this.props.updateSourceOpenTarget(
+                    this.props.source,
+                    SourceOpenTarget.Webpage
+                )
                 // Focus webview after switching to webpage mode
                 if (this.webview) {
                     const focusOnReady = () => {
@@ -679,12 +694,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     toggleFull = () => {
         if (this.state.loadFull) {
-            this.setState({ loadFull: false })
+            this.setState({ loadFull: false }, () => {
+                // Switch back to Local (RSS) mode and persist
+                this.props.updateSourceOpenTarget(
+                    this.props.source,
+                    SourceOpenTarget.Local
+                )
+            })
         } else if (
             this.props.item.link.startsWith("https://") ||
             this.props.item.link.startsWith("http://")
         ) {
             this.setState({ loadFull: true, loadWebpage: false, webviewVisible: true }, () => {
+                // Update source to persist openTarget
+                this.props.updateSourceOpenTarget(
+                    this.props.source,
+                    SourceOpenTarget.FullContent
+                )
                 // Focus webview after switching to full content mode
                 this.loadFull()
             })

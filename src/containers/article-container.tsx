@@ -20,6 +20,7 @@ import {
 import {
     RSSSource,
     SourceTextDirection,
+    SourceOpenTarget,
     updateSource,
 } from "../scripts/models/source"
 
@@ -69,6 +70,14 @@ const mapDispatchToProps = (dispatch: AppDispatch) => {
         ) => {
             dispatch(
                 updateSource({ ...source, textDir: direction } as RSSSource)
+            )
+        },
+        updateSourceOpenTarget: (
+            source: RSSSource,
+            openTarget: SourceOpenTarget
+        ) => {
+            dispatch(
+                updateSource({ ...source, openTarget: openTarget } as RSSSource)
             )
         },
         updateDefaultZoom: (
