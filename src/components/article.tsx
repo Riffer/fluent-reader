@@ -62,6 +62,8 @@ type ArticleState = {
     zoom: number
     isLoadingFull: boolean
     appPath: string
+    extractorTitle?: string
+    extractorDate?: Date
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -215,13 +217,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             iconProps: { iconName: "Code" },
                             onClick: () => {
                                 if (this.state.loadFull && this.state.fullContent) {
-                                    // For full content, copy extracted HTML
+                                    // For full content, copy the raw extracted content (fullContent)
                                     window.utils.writeClipboard(this.state.fullContent)
                                 } else if (this.state.loadWebpage && this.webview) {
-                                    // For webpage, get original source
+                                    // For webpage, get original source from webview
                                     this.webview.executeJavaScript(`
                                         (function() {
-                                            // Try to get original source from document.documentElement
                                             const html = document.documentElement.outerHTML;
                                             return html;
                                         })()
@@ -239,9 +240,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             key: "copyComputedSource",
                             text: "Berechneter Quelltext kopieren",
                             iconProps: { iconName: "CodeEdit" },
-                            disabled: !this.state.loadWebpage,
+                            disabled: !this.state.loadFull && !this.state.loadWebpage,
                             onClick: () => {
-                                if (this.state.loadWebpage && this.webview) {
+                                if (this.state.loadFull && this.webview) {
+                                    // For full content, get the rendered HTML with CSS from webview
+                                    this.webview.executeJavaScript(`
+                                        (function() {
+                                            const html = document.documentElement.outerHTML;
+                                            return html;
+                                        })()
+                                    `, false).then((result: string) => {
+                                        if (result) {
+                                            window.utils.writeClipboard(result)
+                                        }
+                                    }).catch((err: any) => {
+                                        console.error('Fehler beim Kopieren des berechneten Quelltexts:', err)
+                                    })
+                                } else if (this.state.loadWebpage && this.webview) {
                                     // Get computed HTML after all JS and zoom transforms
                                     this.webview.executeJavaScript(`
                                         (function() {
@@ -732,6 +747,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 // If extraction successful, use extracted content; otherwise use fallback
                 let contentToUse = (article && article.content) ? article.content : null
                 
+                // Store extractor metadata (title and date) for better alignment
+                let extractorTitle = article?.title || undefined
+                let extractorDate = article?.published ? new Date(article.published) : undefined
+                
                 // Fallback: if extractor produces no content, extract manually
                 if (!contentToUse || contentToUse.length === 0) {
                     contentToUse = this.fallbackExtractContent(html)
@@ -739,29 +758,61 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     // Clean up the extracted content to remove duplicates
                     contentToUse = this.cleanDuplicateContent(contentToUse)
                     
-                    // Only prepend feed summary if extractor didn't already include images
-                    const extractorHasImages = contentToUse.includes('<img') || contentToUse.includes('<picture')
-                    if (!extractorHasImages) {
-                        // Try feed summary first
-                        let enrichedContent = this.prependFeedSummary(contentToUse)
-                        
-                        // If feed summary didn't have images, try extracting best image from original HTML
-                        if (enrichedContent === contentToUse) {
-                            const teaserImage = this.extractTeaserImageFromHtml(html)
-                            if (teaserImage) {
-                                enrichedContent = `<div style="margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid #ddd;">${teaserImage}</div>` + contentToUse
-                            }
-                        }
-                        
-                        contentToUse = enrichedContent
-                    }
+                    // DEBUG: Check the structure of extracted content
+                    console.log("[DEBUG] Extracted content starts with:", contentToUse.substring(0, 100))
+                    console.log("[DEBUG] Has <article>:", contentToUse.includes("<article"))
+                    console.log("[DEBUG] Has <div>:", contentToUse.substring(0, 200).includes("<div"))
+                    console.log("[DEBUG] Content length:", contentToUse.length)
                 }
+                
+                // Wrap extracted content in semantic <article> structure
+                const escapeHtml = (text: string) => {
+                    const div = document.createElement('div')
+                    div.textContent = text
+                    return div.innerHTML
+                }
+                
+                const dateStr = extractorDate ? extractorDate.toLocaleDateString("de-DE", { 
+                    year: "numeric", 
+                    month: "long", 
+                    day: "numeric" 
+                }) : ""
+                
+                const headerHtml = extractorTitle ? `
+                    <header>
+                        <h1>${escapeHtml(extractorTitle)}</h1>
+                        ${dateStr ? `<p><time datetime="${extractorDate?.toISOString()}">${dateStr}</time></p>` : ""}
+                    </header>
+                ` : ""
+                
+                const footerHtml = `
+                    <footer>
+                        <p>Quelle: <a href="${escapeHtml(this.props.item.link)}" target="_blank">${escapeHtml(new URL(this.props.item.link).hostname)}</a></p>
+                    </footer>
+                `
+                
+                contentToUse = `
+                    <article>
+                        ${headerHtml}
+                        <section>${contentToUse}</section>
+                        ${footerHtml}
+                    </article>
+                `
+                
+                // Debug: Log the content before setting state
+                console.log("=== FULL CONTENT DEBUG ===")
+                console.log("Content length:", contentToUse.length)
+                console.log("Has <article>:", contentToUse.includes("<article"))
+                console.log("First 500 chars:", contentToUse.substring(0, 500))
+                console.log("========================")
                 
                 this.setState({ 
                     fullContent: contentToUse, 
                     loaded: true,
                     isLoadingFull: false,
-                    webviewVisible: true
+                    webviewVisible: true,
+                    extractorTitle: extractorTitle,
+                    extractorDate: extractorDate
                 }, () => {
                     // Focus webview after full content is rendered
                     this.focusWebviewAfterLoad()
@@ -777,7 +828,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     error: true,
                     errorDescription: "ARTICLE_EXTRACTION_FAILURE",
                     isLoadingFull: false,
-                    webviewVisible: true
+                    webviewVisible: true,
+                    extractorTitle: undefined,
+                    extractorDate: undefined
                 }, () => {
                     // Focus webview after fallback content is rendered
                     this.focusWebviewAfterLoad()
@@ -854,13 +907,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     // Prepend feed summary/teaser to extracted article for context
-    private prependFeedSummary = (extractedContent: string): string => {
+    private prependFeedSummary = (extractedContent: string, extractorTitle?: string): string => {
         try {
             const feedContent = this.props.item.content
             if (!feedContent || feedContent.length === 0) {
                 return extractedContent
             }
 
+            // Check if RSS title is already in extracted content
+            const rssTitle = this.props.item.title
+            const titleInExtractor = extractorTitle && extractedContent.toLowerCase().includes(extractorTitle.toLowerCase())
+            const rssInContent = extractedContent.toLowerCase().includes(rssTitle.toLowerCase())
+            
             // Parse feed content to extract images and text
             const parser = new DOMParser()
             const feedDoc = parser.parseFromString(feedContent, 'text/html')
@@ -878,14 +936,24 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 summaryHtml += `<p><em>${firstP.textContent.trim()}</em></p>`
             }
 
-            // If we found summary content, prepend it to the article
+            // Create separator - no inline styles, let CSS handle it
+            const separator = `<section><hr style="border: none; border-top: 4px solid #0078d4; margin: 0 0 12px 0; padding: 0; height: 0;"><p style="text-align: center; color: #0078d4; font-style: italic; font-size: 0.85em; margin: 0;">— RSS-Zusammenfassung endet hier —</p></section>`
+
+            // If title is already present in extracted content, skip RSS summary but show separator
+            if (titleInExtractor || rssInContent) {
+                console.log("Title already in extracted content, skipping RSS summary but showing separator")
+                return separator + extractedContent
+            }
+
+            // If we found summary content, prepend it with separator
             if (summaryHtml) {
-                // Wrap in a summary div for styling
-                const summary = `<div style="margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid #ddd;">${summaryHtml}</div>`
+                // Wrap RSS summary - no extra styling, let article CSS handle everything
+                const summary = `<div>${summaryHtml}</div>${separator}`
                 return summary + extractedContent
             }
 
-            return extractedContent
+            // No summary content found, just show separator
+            return separator + extractedContent
         } catch (err) {
             console.error("Feed summary extraction failed:", err)
             return extractedContent
@@ -993,15 +1061,25 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             contentLength: articleContent.length
         })
 
+        // Use extractor metadata if available (better alignment with extracted content)
+        const displayTitle = this.state.loadFull && this.state.extractorTitle ? this.state.extractorTitle : this.props.item.title
+        const displayDate = this.state.loadFull && this.state.extractorDate ? this.state.extractorDate : this.props.item.date
+
+        // When showing full content with extractor metadata, don't show duplicate header in main
+        // (it's already in the <article> structure)
         const headerContent = renderToString(
             <>
-                <p className="title">{this.props.item.title}</p>
-                <p className="date">
-                    {this.props.item.date.toLocaleString(
-                        this.props.locale,
-                        { hour12: !this.props.locale.startsWith("zh") }
-                    )}
-                </p>
+                {!(this.state.loadFull && this.state.extractorTitle) && (
+                    <>
+                        <p className="title">{displayTitle}</p>
+                        <p className="date">
+                            {displayDate.toLocaleString(
+                                this.props.locale,
+                                { hour12: !this.props.locale.startsWith("zh") }
+                            )}
+                        </p>
+                    </>
+                )}
             </>
         )
 
@@ -1051,9 +1129,9 @@ window.__articleData = ${JSON.stringify({
     let domParser = new DOMParser();
     let headerDom = domParser.parseFromString(header, 'text/html');
     
-    // Create main content
+    // Create main content - just use the article content as-is (no complex splitting)
     let main = document.getElementById("main");
-    main.innerHTML = headerDom.body.innerHTML + '<article>' + article + '</article>';
+    main.innerHTML = headerDom.body.innerHTML + article;
     
     // Set base URL for relative links
     let baseEl = document.createElement('base');
