@@ -160,19 +160,31 @@ try {
     // Berechne neue Scroll-Position
     requestAnimationFrame(() => {
       if (options.preserveScroll) {
-        // Bewahre die ursprüngliche Scroll-Position im neuen Skalierungs-Raum
-        const newScrollX = Math.max(0, (docZoomPointX * newFactor) * (wrapper.clientWidth / (newContainerWidth * newFactor)));
-        const newScrollY = Math.max(0, (docZoomPointY * newFactor) * (wrapper.clientHeight / (newContainerHeight * newFactor)));
-        container.scrollLeft = newScrollX / newFactor;
-        container.scrollTop = newScrollY / newFactor;
+        // Für Tastatur-Zoom: Behalte einfach die aktuelle Scroll-Position
+        // (in ungeskaltem Raum) - ändere nichts an der Scroll-Position
+        // container.scrollLeft und container.scrollTop bleiben gleich
       } else {
-        // Der Zoom-Punkt soll an der gleichen Position im Viewport bleiben
-        const zoomPointViewportX = zoomPointX - currentScrollX;
-        const zoomPointViewportY = zoomPointY - currentScrollY;
-        const newScrollX = Math.max(0, (docZoomPointX * newFactor) - zoomPointViewportX);
-        const newScrollY = Math.max(0, (docZoomPointY * newFactor) - zoomPointViewportY);
-        container.scrollLeft = newScrollX / newFactor;
-        container.scrollTop = newScrollY / newFactor;
+        // Der Zoom-Punkt (zoomPointX, zoomPointY) soll an der gleichen Stelle im Viewport bleiben
+        // zoomPointX/Y sind in skaliertem Raum (mit oldFactor)
+        
+        // Wo war dieser Punkt im uneskalierten Dokument?
+        const docPointX = zoomPointX / oldFactor;
+        const docPointY = zoomPointY / oldFactor;
+        
+        // Wo sollte dieser Punkt nach dem neuen Zoom sein (in skaliertem Raum)?
+        const newScaledPointX = docPointX * newFactor;
+        const newScaledPointY = docPointY * newFactor;
+        
+        // Wie weit war der Punkt vom oberen-linken Scroll-Eck entfernt?
+        const offsetFromScrollX = zoomPointX - currentScrollX;
+        const offsetFromScrollY = zoomPointY - currentScrollY;
+        
+        // Der neue Scroll sollte so sein, dass der Punkt gleich weit vom Eck entfernt ist
+        const newScrollX = Math.max(0, newScaledPointX - offsetFromScrollX);
+        const newScrollY = Math.max(0, newScaledPointY - offsetFromScrollY);
+        
+        container.scrollLeft = newScrollX;
+        container.scrollTop = newScrollY;
       }
     });
     
@@ -195,7 +207,7 @@ try {
   // Listener für externe Zoom-Befehle (von Keyboard - bewahre Scroll-Position)
   ipcRenderer.on('set-webview-zoom', (event, zoomLevel_) => {
     zoomLevel = zoomLevel_;
-    applyZoom(zoomLevel, { notify: false, preserveScroll: true });
+    applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
   });
 
   // Fallback: postMessage von Embedder
@@ -218,7 +230,7 @@ try {
         const delta = -e.deltaY;
         // Touchpad-Kontrolle: Mit größeren Schritten (höhere Empfindlichkeit)
         // Je größer dieser Wert, desto weniger empfindlich
-        const steps = (delta > 0 ? 1 : -1) * 0.5;
+        const steps = (delta > 0 ? 1 : -1) * 0.125;
         
         // Berechne Maus-Position relativ zum Container
         const container = document.querySelector('#fr-zoom-container');
