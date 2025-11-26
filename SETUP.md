@@ -5,15 +5,17 @@
 Before building Fluent Reader, ensure you have the following installed:
 
 ### Required Software
-- **Node.js**: v16.x or v18.x (LTS recommended)
+- **Node.js**: v24.11.1 LTS (or higher)
   - Download from: https://nodejs.org/
   - Verify installation: `node --version` and `npm --version`
+  - A `.nvmrc` file specifies v24.11.1 for nvm users
 - **Git**: For version control
-- **Python 3**: Required for some native modules
+- **Python 3**: Required for some native modules (better-sqlite3)
 
 ### Recommended Versions
-- **Node.js**: v18.x LTS
-- **npm**: v9.x or higher (comes with Node.js)
+- **Node.js**: v24.11.1 LTS (April 2027 support)
+- **npm**: v11.x (comes with Node 24)
+- **Chocolatey**: (Windows) for easy package management
 
 ## Installation Steps
 
@@ -28,11 +30,7 @@ cd fluent-reader
 npm install
 ```
 
-If you encounter OpenSSL-related errors, you may need to use the legacy OpenSSL provider:
-```bash
-SET NODE_OPTIONS=--openssl-legacy-provider
-npm install
-```
+Note: Node 24 has built-in OpenSSL 3.x support, so legacy provider flags are typically not needed anymore.
 
 ### 3. Verify Installation
 ```bash
@@ -78,11 +76,12 @@ Creates APPX packages for x64, ia32, and arm64 architectures.
 npm run package-win-ci-x64
 ```
 
-### Legacy Build (OpenSSL)
-If you encounter OpenSSL errors during packaging:
+### Legacy Build (for older Node versions)
+For Node 18.x environments:
 ```bash
 npm run package-win-ci-legacy
 ```
+Note: Node 24.11.1 should not require this flag.
 
 ### macOS
 ```bash
@@ -103,18 +102,18 @@ npm run package-linux
 
 ## Troubleshooting
 
-### OpenSSL Legacy Provider Error
-**Error**: `digital envelope routines::unsupported`
+### Node Version Compatibility
+**Error**: `better-sqlite3 requires Node 20+`
 
-**Solution**: Use the legacy OpenSSL provider
+**Solution**: Ensure you're using Node 24.11.1 LTS
 ```bash
-SET NODE_OPTIONS=--openssl-legacy-provider
-npm run build
+node --version  # Should be v24.11.1 or higher
 ```
 
-Or create a `.npmrc` file:
-```
-openssl-legacy-provider=true
+If using nvm (Windows nvm-windows):
+```bash
+nvm install 24.11.1
+nvm use 24.11.1
 ```
 
 ### Node Modules Issues
@@ -126,10 +125,14 @@ npm install
 
 ### Electron Build Issues
 - Clear the build cache: `rm -rf dist/`
-- Rebuild: `npm run build`
+- Clear node_modules: `rm -rf node_modules package-lock.json`
+- Rebuild: `npm install` then `npm run build`
+
+### Deprecated Configuration Warning
+If you see warnings about `linux.desktop.StartupWMClass`, these are automatically handled in electron-builder 26.0.12+
 
 ### TypeScript Compilation Errors
-Verify TypeScript version matches package.json (v4.3.5):
+Verify TypeScript version matches package.json (v5.9.3):
 ```bash
 npx tsc --version
 ```
@@ -137,12 +140,14 @@ npx tsc --version
 ## Important Dependencies
 
 ### Key Versions (from package.json)
-- **Electron**: ^39.2.1 (Chromium 132.x)
-- **TypeScript**: 4.3.5
+- **Electron**: ^39.2.3 (Chromium 132.x)
+- **TypeScript**: ^5.9.3 (upgraded from 4.3.5)
 - **React**: ^16.13.1
-- **Webpack**: ^5.89.0
-- **Electron-Builder**: ^23.0.3
+- **Webpack**: ^5.103.0
+- **Electron-Builder**: ^26.0.12 (upgraded from 23.0.3 with RCE security fixes)
+- **Electron-Store**: ^8.1.0 (compatible with React 16)
 - **Article Extractor**: ^8.0.20 (for full content extraction)
+- **better-sqlite3**: ^12.4.6 (for future SQLite3 migration)
 
 ### Build Tools
 - **webpack**: Module bundler
@@ -161,12 +166,13 @@ npx tsc --version
 
 ## Environment Variables
 
-### Windows Build
+### Windows Build (Node 24)
+No special environment variables needed with Node 24.11.1 LTS.
+
+For legacy Node 18 environments:
 ```bash
 SET NODE_OPTIONS=--openssl-legacy-provider
 ```
-
-Use this before building if you encounter OpenSSL errors.
 
 ## Additional Resources
 
