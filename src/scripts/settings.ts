@@ -95,10 +95,19 @@ export async function exportAll() {
     )
     if (write) {
         let output = window.settings.getAll()
-        output["lovefield"] = {
-            sources: await db.sourcesDB.select().from(db.sources).exec(),
-            items: await db.itemsDB.select().from(db.items).exec(),
+        
+        // Export data based on current database system
+        if (db.usingSqlite) {
+            const sqlite = await import("./db-sqlite")
+            output["sqlite"] = sqlite.exportDatabaseAsJSON()
+        } else {
+            // Lovefield backup format (legacy)
+            output["lovefield"] = {
+                sources: await db.sourcesDB.select().from(db.sources).exec(),
+                items: await db.itemsDB.select().from(db.items).exec(),
+            }
         }
+        
         write(JSON.stringify(output), intl.get("settings.writeError"))
     }
 }
@@ -117,14 +126,47 @@ export async function importAll() {
     )
     if (!confirmed) return true
     let configs = JSON.parse(data)
-    await db.sourcesDB.delete().from(db.sources).exec()
-    await db.itemsDB.delete().from(db.items).exec()
-    if (configs.nedb) {
+    
+    // Clear existing data
+    if (db.usingSqlite) {
+        const sqlite = await import("./db-sqlite")
+        const dbData = sqlite.exportDatabaseAsJSON()
+        if (dbData.sources?.length) sqlite.deleteAllSources()
+        if (dbData.items?.length) sqlite.deleteAllItems()
+    } else {
+        await db.sourcesDB.delete().from(db.sources).exec()
+        await db.itemsDB.delete().from(db.items).exec()
+    }
+    
+    // Import from appropriate format
+    if (configs.sqlite) {
+        // New SQLite format
+        const sqlite = await import("./db-sqlite")
+        await sqlite.importDatabaseFromJSON(configs.sqlite)
+        delete configs.sqlite
+    } else if (configs.lovefield) {
+        // Legacy Lovefield format
+        const sRows = configs.lovefield.sources.map(s => {
+            s.lastFetched = new Date(s.lastFetched)
+            if (!s.textDir) s.textDir = SourceTextDirection.LTR
+            if (!s.hidden) s.hidden = false
+            return db.sources.createRow(s)
+        })
+        const iRows = configs.lovefield.items.map(i => {
+            i.date = new Date(i.date)
+            i.fetchedDate = new Date(i.fetchedDate)
+            return db.items.createRow(i)
+        })
+        await db.sourcesDB.insert().into(db.sources).values(sRows).exec()
+        await db.itemsDB.insert().into(db.items).values(iRows).exec()
+        delete configs.lovefield
+    } else if (configs.nedb) {
+        // Older NeDB format
         let openRequest = window.indexedDB.open("NeDB")
         configs.useNeDB = true
         openRequest.onsuccess = () => {
-            let db = openRequest.result
-            let objectStore = db
+            let indexedDB = openRequest.result
+            let objectStore = indexedDB
                 .transaction("nedbdata", "readwrite")
                 .objectStore("nedbdata")
             let requests = Object.entries(configs.nedb).map(([key, value]) => {
@@ -142,22 +184,9 @@ export async function importAll() {
                 window.settings.setAll(configs)
             })
         }
-    } else {
-        const sRows = configs.lovefield.sources.map(s => {
-            s.lastFetched = new Date(s.lastFetched)
-            if (!s.textDir) s.textDir = SourceTextDirection.LTR
-            if (!s.hidden) s.hidden = false
-            return db.sources.createRow(s)
-        })
-        const iRows = configs.lovefield.items.map(i => {
-            i.date = new Date(i.date)
-            i.fetchedDate = new Date(i.fetchedDate)
-            return db.items.createRow(i)
-        })
-        await db.sourcesDB.insert().into(db.sources).values(sRows).exec()
-        await db.itemsDB.insert().into(db.items).values(iRows).exec()
-        delete configs.lovefield
-        window.settings.setAll(configs)
+        return false
     }
+    
+    window.settings.setAll(configs)
     return false
 }
