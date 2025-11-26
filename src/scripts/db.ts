@@ -96,16 +96,18 @@ async function migrateNeDB() {
                 if (err) window.console.log(err)
             },
         })
-        const sourceDocs = await new Promise<RSSSource[]>(resolve => {
-            sdb.find({}, (_, docs) => {
-                resolve(docs)
-            })
-        })
-        const itemDocs = await new Promise<RSSItem[]>(resolve => {
-            idb.find({}, (_, docs) => {
-                resolve(docs)
-            })
-        })
+        const [sourceDocs, itemDocs] = await Promise.all([
+            new Promise<RSSSource[]>(resolve => {
+                sdb.find({}, (_, docs) => {
+                    resolve(docs)
+                })
+            }),
+            new Promise<RSSItem[]>(resolve => {
+                idb.find({}, (_, docs) => {
+                    resolve(docs)
+                })
+            }),
+        ])
         const sRows = sourceDocs.map(doc => {
             if (doc.serviceRef !== undefined)
                 doc.serviceRef = String(doc.serviceRef)

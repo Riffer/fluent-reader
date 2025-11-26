@@ -248,48 +248,44 @@ export function fetchItems(
             }
             dispatch(fetchItemsRequest(promises.length))
             const results = await Promise.allSettled(promises)
-            return await new Promise<void>((resolve, reject) => {
-                let items = new Array<RSSItem>()
-                results.map((r, i) => {
-                    if (r.status === "fulfilled") items.push(...r.value)
-                    else {
-                        console.log(r.reason)
-                        dispatch(fetchItemsFailure(sources[i], r.reason))
-                    }
-                })
-                insertItems(items)
-                    .then(inserted => {
-                        dispatch(
-                            fetchItemsSuccess(
-                                inserted.reverse(),
-                                getState().items
-                            )
-                        )
-                        resolve()
-                        if (background) {
-                            for (let item of inserted) {
-                                if (item.notify) {
-                                    dispatch(pushNotification(item))
-                                }
-                            }
-                            if (inserted.length > 0) {
-                                window.utils.requestAttention()
-                            }
-                        } else {
-                            dispatch(dismissItems())
-                        }
-                        dispatch(setupAutoFetch())
-                    })
-                    .catch(err => {
-                        dispatch(fetchItemsSuccess([], getState().items))
-                        window.utils.showErrorBox(
-                            "A database error has occurred.",
-                            String(err)
-                        )
-                        console.log(err)
-                        reject(err)
-                    })
+            let items = new Array<RSSItem>()
+            results.map((r, i) => {
+                if (r.status === "fulfilled") items.push(...r.value)
+                else {
+                    console.log(r.reason)
+                    dispatch(fetchItemsFailure(sources[i], r.reason))
+                }
             })
+            try {
+                const inserted = await insertItems(items)
+                dispatch(
+                    fetchItemsSuccess(
+                        inserted.reverse(),
+                        getState().items
+                    )
+                )
+                if (background) {
+                    for (let item of inserted) {
+                        if (item.notify) {
+                            dispatch(pushNotification(item))
+                        }
+                    }
+                    if (inserted.length > 0) {
+                        window.utils.requestAttention()
+                    }
+                } else {
+                    dispatch(dismissItems())
+                }
+                dispatch(setupAutoFetch())
+            } catch (err) {
+                dispatch(fetchItemsSuccess([], getState().items))
+                window.utils.showErrorBox(
+                    "A database error has occurred.",
+                    String(err)
+                )
+                console.log(err)
+                throw err
+            }
         }
     }
 }
