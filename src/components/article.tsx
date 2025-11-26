@@ -814,7 +814,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     extractorTitle: extractorTitle,
                     extractorDate: extractorDate
                 }, () => {
-                    // Focus webview after full content is rendered
+                    // Apply saved zoom level and focus webview after full content is rendered
+                    const savedZoom = this.props.source.defaultZoom || 0
+                    this.currentZoom = savedZoom
+                    this.sendZoomToPreload(savedZoom)
                     this.focusWebviewAfterLoad()
                 })
             }
@@ -832,7 +835,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     extractorTitle: undefined,
                     extractorDate: undefined
                 }, () => {
-                    // Focus webview after fallback content is rendered
+                    // Apply saved zoom level and focus webview after fallback content is rendered
+                    const savedZoom = this.props.source.defaultZoom || 0
+                    this.currentZoom = savedZoom
+                    this.sendZoomToPreload(savedZoom)
                     this.focusWebviewAfterLoad()
                 })
             }
