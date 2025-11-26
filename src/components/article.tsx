@@ -633,7 +633,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         this.webview.addEventListener('dom-ready', focusOnReady)
                     }
                 } else {
-                    // For regular feed content: focus immediately
+                    // For regular feed content: apply saved zoom and focus
+                    const savedZoom = this.props.source.defaultZoom || 0
+                    this.currentZoom = savedZoom
+                    this.sendZoomToPreload(savedZoom)
                     this.focusWebviewAfterLoad()
                 }
             })
