@@ -5,9 +5,10 @@
   "main": "./dist/electron.js",
   "scripts": {
     "build_legacy": "SET NODE_OPTIONS=--openssl-legacy-provider && webpack --config ./webpack.config.js",
-    "build": "webpack --config ./webpack.config.js",
+    "build": "webpack --config ./webpack.config.js --mode production",
+    "build-dev": "webpack --config ./webpack.config.js --mode development",
     "electron": "SET NODE_OPTIONS= && electron ./dist/electron.js",
-    "start": "npm run build && npm run electron",
+    "start": "npm run build-dev && npm run electron",
     "format": "prettier --write .",
     "package-win": "SET NODE_OPTIONS=--openssl-legacy-provider && electron-builder -w appx:x64 && electron-builder -w appx:ia32 && electron-builder -w appx:arm64",
     "package-win-ci-legacy": "SET NODE_OPTIONS=--openssl-legacy-provider && electron-builder -w --x64 -p never && electron-builder -w --ia32 -p never",

@@ -4,7 +4,6 @@ const CopyPlugin = require("copy-webpack-plugin")
 
 module.exports = [
     {
-        mode: "development",
         entry: "./src/electron.ts",
         target: "electron-main",
         module: {
