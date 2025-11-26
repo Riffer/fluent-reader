@@ -1277,7 +1277,7 @@ window.__articleData = ${JSON.stringify({
                                     ? intl.get("article.loadFull") + " ✓ (geladen)"
                                     : intl.get("article.loadFull")
                         }
-                        className={this.state.loadFull ? "active" : ""}
+                        className={!this.state.loadWebpage ? "active" : ""}
                         iconProps={{ 
                             iconName: this.state.isLoadingFull 
                                 ? "Sync" 
