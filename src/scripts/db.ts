@@ -1,9 +1,11 @@
 import intl from "react-intl-universal"
 import Datastore from "@seald-io/nedb"
 import lf from "lovefield"
-import * as sqlite from "./db-sqlite"
 import { RSSSource } from "./models/source"
 import { RSSItem } from "./models/item"
+
+// Note: db-sqlite is loaded only in Main Process, not in Renderer
+// See: src/main/db-sqlite.ts
 
 const sdbSchema = lf.schema.create("sourcesDB", 4)
 sdbSchema
@@ -51,7 +53,6 @@ export let sourcesDB: lf.Database
 export let sources: lf.schema.Table
 export let itemsDB: lf.Database
 export let items: lf.schema.Table
-export let usingSqlite = false
 
 async function onUpgradeSourceDB(rawDb: lf.raw.BackStore) {
     const version = rawDb.getVersion()
@@ -67,22 +68,7 @@ async function onUpgradeSourceDB(rawDb: lf.raw.BackStore) {
 }
 
 export async function init() {
-    // Try to initialize SQLite first
-    try {
-        await sqlite.initSqlite()
-        const sources = sqlite.getAllSources()
-        const items = sqlite.getAllItems()
-        
-        // If SQLite has data, use it
-        if (sources.length > 0 || items.length > 0) {
-            usingSqlite = true
-            return
-        }
-    } catch (err) {
-        window.console.log("SQLite initialization failed, falling back to Lovefield:", err)
-    }
-
-    // Fallback to Lovefield for existing installations
+    // Initialize Lovefield (primary DB for Renderer process)
     sourcesDB = await sdbSchema.connect({ onUpgrade: onUpgradeSourceDB })
     sources = sourcesDB.getSchema().table("sources")
     itemsDB = await idbSchema.connect()
@@ -92,9 +78,6 @@ export async function init() {
     if (window.settings.getNeDBStatus()) {
         await migrateNeDB()
     }
-    
-    // Migrate from Lovefield to SQLite if it's the first time with new code
-    await migrateLovefieldToSqlite()
 }
 
 async function migrateNeDB() {
@@ -165,38 +148,4 @@ async function migrateNeDB() {
     }
 }
 
-/**
- * Migrate from Lovefield to SQLite
- * Only runs if Lovefield has data but SQLite doesn't
- */
-async function migrateLovefieldToSqlite() {
-    try {
-        if (usingSqlite) return
-        
-        const lovefieldsources = await sourcesDB.select().from(sources).exec()
-        const lovefieldItems = await itemsDB.select().from(items).exec()
-        
-        if (lovefieldsources.length === 0 && lovefieldItems.length === 0) {
-            return // No data to migrate
-        }
 
-        window.console.log(`Migrating ${lovefieldsources.length} sources and ${lovefieldItems.length} items to SQLite...`)
-        
-        // Initialize SQLite
-        await sqlite.initSqlite()
-        
-        // Insert data
-        if (lovefieldsources.length > 0) {
-            sqlite.insertSources(lovefieldsources)
-        }
-        if (lovefieldItems.length > 0) {
-            sqlite.insertItems(lovefieldItems)
-        }
-        
-        window.console.log("Migration to SQLite completed successfully")
-        usingSqlite = true
-    } catch (err) {
-        window.console.error("Error during Lovefield to SQLite migration:", err)
-        // Don't fail - let app continue with Lovefield
-    }
-}
