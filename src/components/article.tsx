@@ -715,6 +715,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.props.source,
                     SourceOpenTarget.Local
                 )
+                // Set focus to webview for RSS content
+                if (this.webview) {
+                    const focusOnReady = () => {
+                        this.webview.focus()
+                        this.webview.removeEventListener('dom-ready', focusOnReady)
+                    }
+                    this.webview.addEventListener('dom-ready', focusOnReady)
+                }
             })
         } else if (
             this.props.item.link.startsWith("https://") ||
@@ -1117,6 +1125,12 @@ body.vertical { writing-mode: vertical-rl; }
 #main table { max-width: 100%; overflow-x: auto; }
 #main pre { max-width: 100%; overflow-x: auto; }
 #main code { word-break: break-word; }
+@media (prefers-color-scheme: dark) {
+  body { background-color: #2d2d30; color: #f8f8f8; }
+  #main > p.date { color: #a19f9d; }
+  a { color: #4ba0e1; }
+  a:hover, a:active { color: #65aee6; }
+}
     </style>
 </head>
 <body class="${rtlClass}">

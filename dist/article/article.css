@@ -27,9 +27,14 @@ body.vertical {
 @media (prefers-color-scheme: dark) {
     :root {
         color: #f8f8f8;
+        background-color: #2d2d30;
         --gray: #a19f9d;
         --primary: #4ba0e1;
         --primary-alt: #65aee6;
+    }
+    body {
+        background-color: #2d2d30;
+        color: #f8f8f8;
     }
 }
 
