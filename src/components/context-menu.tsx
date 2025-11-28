@@ -61,14 +61,6 @@ const QRCodeMenuItem = (props: { url: string }) => (
 
 export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
     {
-        key: "copyLink",
-        text: intl.get("context.copy"),
-        iconProps: { iconName: "Copy" },
-        onClick: () => {
-            navigator.clipboard.writeText(item.link)
-        },
-    },
-    {
         key: "divider",
         itemType: ContextualMenuItemType.Divider,
     },
@@ -208,17 +200,18 @@ export class ContextMenu extends React.Component<ContextMenuProps> {
                         },
                     },
                     {
+                        key: "copyLink",
+                        text: intl.get("context.copyURL"),
+                        iconProps: { iconName: "Copy" },
+                        onClick: () => {
+                            navigator.clipboard.writeText(this.props.item.link)
+                        },
+                    },
+                    {
                         key: "copyTitle",
                         text: intl.get("context.copyTitle"),
                         onClick: () => {
                             window.utils.writeClipboard(this.props.item.title)
-                        },
-                    },
-                    {
-                        key: "copyURL",
-                        text: intl.get("context.copyURL"),
-                        onClick: () => {
-                            window.utils.writeClipboard(this.props.item.link)
                         },
                     },
                     ...(this.props.viewConfigs !== undefined

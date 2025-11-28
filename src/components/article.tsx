@@ -199,107 +199,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     window.utils.writeClipboard(this.props.item.link)
                 },
             },
+            ...shareSubmenu(this.props.item),
         ]
-        
-        // Add source code copy option if full content or webpage is loaded
-        if ((this.state.loadFull && this.state.fullContent) || this.state.loadWebpage) {
-            items.push({
-                key: "sourceSection",
-                itemType: ContextualMenuItemType.Section,
-                sectionProps: {
-                    topDivider: true,
-                    items: [
-                        {
-                            key: "copySourceCode",
-                            text: "Quelltext kopieren",
-                            iconProps: { iconName: "Code" },
-                            onClick: () => {
-                                if (this.state.loadFull && this.state.fullContent) {
-                                    // For full content, copy the raw extracted content (fullContent)
-                                    window.utils.writeClipboard(this.state.fullContent)
-                                } else if (this.state.loadWebpage && this.webview) {
-                                    // For webpage, get original source from webview
-                                    this.webview.executeJavaScript(`
-                                        (function() {
-                                            const html = document.documentElement.outerHTML;
-                                            return html;
-                                        })()
-                                    `, false).then((result: string) => {
-                                        if (result) {
-                                            window.utils.writeClipboard(result)
-                                        }
-                                    }).catch((err: any) => {
-                                        console.error('Fehler beim Kopieren des Quelltexts:', err)
-                                    })
-                                }
-                            },
-                        },
-                        {
-                            key: "copyComputedSource",
-                            text: "Berechneter Quelltext kopieren",
-                            iconProps: { iconName: "CodeEdit" },
-                            disabled: !this.state.loadFull && !this.state.loadWebpage,
-                            onClick: () => {
-                                if (this.state.loadFull && this.webview) {
-                                    // For full content, get the rendered HTML with CSS from webview
-                                    this.webview.executeJavaScript(`
-                                        (function() {
-                                            const html = document.documentElement.outerHTML;
-                                            return html;
-                                        })()
-                                    `, false).then((result: string) => {
-                                        if (result) {
-                                            window.utils.writeClipboard(result)
-                                        }
-                                    }).catch((err: any) => {
-                                        console.error('Fehler beim Kopieren des berechneten Quelltexts:', err)
-                                    })
-                                } else if (this.state.loadWebpage && this.webview) {
-                                    // Get computed HTML after all JS and zoom transforms
-                                    this.webview.executeJavaScript(`
-                                        (function() {
-                                            // Find the actual content (handles zoom wrapper if present)
-                                            let contentEl = document.getElementById('fr-zoom-container') || document.documentElement;
-                                            
-                                            // Clone to avoid modifying actual DOM
-                                            let clone = contentEl.cloneNode(true);
-                                            
-                                            // Remove zoom styling from clone
-                                            if (clone.id === 'fr-zoom-container') {
-                                                clone.style.transform = 'none';
-                                                clone.style.position = 'relative';
-                                                clone.style.top = 'auto';
-                                                clone.style.left = 'auto';
-                                            }
-                                            
-                                            // Serialize
-                                            const html = new XMLSerializer().serializeToString(clone);
-                                            return html;
-                                        })()
-                                    `, false).then((result: string) => {
-                                        if (result) {
-                                            window.utils.writeClipboard(result)
-                                        }
-                                    }).catch((err: any) => {
-                                        console.error('Fehler beim Kopieren des berechneten Quelltexts:', err)
-                                    })
-                                }
-                            },
-                        },
-                        {
-                            key: "openDevTools",
-                            text: "Developer Tools öffnen",
-                            iconProps: { iconName: "CodeEdit" },
-                            onClick: () => {
-                                if (this.webview) {
-                                    this.webview.openDevTools()
-                                }
-                            },
-                        },
-                    ],
-                },
-            })
-        }
         
         items.push({
                 key: "toggleHidden",
@@ -335,10 +236,91 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 subMenuProps: this.directionMenuProps(),
             },
             {
-                key: "divider_1",
-                itemType: ContextualMenuItemType.Divider,
+                key: "toolsMenu",
+                text: "Tools",
+                iconProps: { iconName: "DeveloperTools" },
+                subMenuProps: {
+                    items: [
+                        {
+                            key: "copySourceCode",
+                            text: "Quelltext kopieren",
+                            iconProps: { iconName: "Code" },
+                            disabled: !this.state.loadFull && !this.state.loadWebpage,
+                            onClick: () => {
+                                if (this.state.loadFull && this.state.fullContent) {
+                                    window.utils.writeClipboard(this.state.fullContent)
+                                } else if (this.state.loadWebpage && this.webview) {
+                                    this.webview.executeJavaScript(`
+                                        (function() {
+                                            const html = document.documentElement.outerHTML;
+                                            return html;
+                                        })()
+                                    `, false).then((result: string) => {
+                                        if (result) {
+                                            window.utils.writeClipboard(result)
+                                        }
+                                    }).catch((err: any) => {
+                                        console.error('Fehler beim Kopieren des Quelltexts:', err)
+                                    })
+                                }
+                            },
+                        },
+                        {
+                            key: "copyComputedSource",
+                            text: "Berechneter Quelltext kopieren",
+                            iconProps: { iconName: "CodeEdit" },
+                            disabled: !this.state.loadFull && !this.state.loadWebpage,
+                            onClick: () => {
+                                if (this.state.loadFull && this.webview) {
+                                    this.webview.executeJavaScript(`
+                                        (function() {
+                                            const html = document.documentElement.outerHTML;
+                                            return html;
+                                        })()
+                                    `, false).then((result: string) => {
+                                        if (result) {
+                                            window.utils.writeClipboard(result)
+                                        }
+                                    }).catch((err: any) => {
+                                        console.error('Fehler beim Kopieren des berechneten Quelltexts:', err)
+                                    })
+                                } else if (this.state.loadWebpage && this.webview) {
+                                    this.webview.executeJavaScript(`
+                                        (function() {
+                                            let contentEl = document.getElementById('fr-zoom-container') || document.documentElement;
+                                            let clone = contentEl.cloneNode(true);
+                                            if (clone.id === 'fr-zoom-container') {
+                                                clone.style.transform = 'none';
+                                                clone.style.position = 'relative';
+                                                clone.style.top = 'auto';
+                                                clone.style.left = 'auto';
+                                            }
+                                            const html = new XMLSerializer().serializeToString(clone);
+                                            return html;
+                                        })()
+                                    `, false).then((result: string) => {
+                                        if (result) {
+                                            window.utils.writeClipboard(result)
+                                        }
+                                    }).catch((err: any) => {
+                                        console.error('Fehler beim Kopieren des berechneten Quelltexts:', err)
+                                    })
+                                }
+                            },
+                        },
+                        {
+                            key: "openDevTools",
+                            text: "Developer Tools öffnen",
+                            iconProps: { iconName: "DeveloperTools" },
+                            onClick: () => {
+                                if (this.webview) {
+                                    this.webview.openDevTools()
+                                }
+                            },
+                        },
+                    ],
+                },
             },
-            ...shareSubmenu(this.props.item),
         )
         
         return {
@@ -606,6 +588,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         }
                     } catch {}
                 })
+                // Close DevTools before navigation to prevent crash
+                webview.addEventListener('will-navigate', () => {
+                    try {
+                        if (webview.isDevToolsOpened()) {
+                            webview.closeDevTools()
+                        }
+                    } catch {}
+                })
                 let card = document.querySelector(
                     `#refocus div[data-iid="${this.props.item._id}"]`
                 ) as HTMLElement
@@ -616,6 +606,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     componentDidUpdate = (prevProps: ArticleProps) => {
         if (prevProps.item._id != this.props.item._id) {
+            // Close DevTools before article change to prevent crash
+            try {
+                if (this.webview && this.webview.isDevToolsOpened()) {
+                    this.webview.closeDevTools()
+                }
+            } catch {}
+            
             const loadFull = this.props.source.openTarget === SourceOpenTarget.FullContent
             this.setState({
                 loadWebpage:
@@ -664,6 +661,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     componentWillUnmount = () => {
         this._isMounted = false
+        
+        // Close DevTools before unmount to prevent crash
+        try {
+            if (this.webview && this.webview.isDevToolsOpened()) {
+                this.webview.closeDevTools()
+            }
+        } catch {}
+        
         let refocus = document.querySelector(
             `#refocus div[data-iid="${this.props.item._id}"]`
         ) as HTMLElement
@@ -1355,6 +1360,15 @@ window.__articleData = ${JSON.stringify({
                             try {
                                 webview.addEventListener('did-start-loading', this.webviewStartLoadingEarly)
                                 webview.addEventListener('did-stop-loading', this.webviewLoaded)
+                                // Close DevTools before navigation to prevent crash
+                                webview.addEventListener('will-navigate', () => {
+                                    try {
+                                        const wv = webview as Electron.WebviewTag
+                                        if (wv.isDevToolsOpened()) {
+                                            wv.closeDevTools()
+                                        }
+                                    } catch {}
+                                })
                             } catch {}
                         }
                     }}
