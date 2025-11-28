@@ -46,15 +46,15 @@ export type ContextMenuProps = ContextReduxProps & {
     close: () => void
 }
 
-export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
-    { key: "qr", url: item.link, onRender: renderShareQR },
-]
-
 export const renderShareQR = (item: IContextualMenuItem) => (
     <div className="qr-container">
         <QRCode value={item.url} size={150} renderAs="svg" />
     </div>
 )
+
+export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
+    { key: "qr", url: item.link, onRender: renderShareQR },
+]
 
 function getSearchItem(text: string): IContextualMenuItem {
     const engine = window.settings.getSearchEngine()

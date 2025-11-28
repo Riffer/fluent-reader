@@ -649,7 +649,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 loadFull: loadFull,
             })
         }
-        this.componentDidMount()
     }
     
     // Focus webview after full content is loaded
@@ -1333,11 +1332,11 @@ window.__articleData = ${JSON.stringify({
                             : this.articleView()
                     }
                     preload={(window as any).webviewPreloadPath || 'webview-preload.js'}
-                    allowpopups={"true" as unknown as boolean}
-                    disableguestresize={"false" as unknown as boolean}
+                    allowpopups={true}
+                    disableguestresize={false}
                     webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
                     partition={this.state.loadWebpage ? "sandbox" : undefined}
-                    allowFullScreen={"true" as unknown as boolean}
+                    allowFullScreen={true}
                     ref={(webview) => {
                         if (webview) {
                             this.webview = webview as any
