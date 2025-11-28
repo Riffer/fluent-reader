@@ -46,6 +46,12 @@ export type ContextMenuProps = ContextReduxProps & {
     close: () => void
 }
 
+const QRCodeItem = (props: { url: string }) => (
+    <div style={{ padding: "8px" }}>
+        <QRCode value={props.url} size={150} renderAs="svg" />
+    </div>
+)
+
 export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
     {
         key: "copyLink",
@@ -54,6 +60,15 @@ export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
         onClick: () => {
             navigator.clipboard.writeText(item.link)
         },
+    },
+    {
+        key: "divider_qr",
+        itemType: ContextualMenuItemType.Divider,
+    },
+    {
+        key: "qr",
+        text: "QR Code",
+        onRender: () => <QRCodeItem url={item.link} />,
     },
 ]
 
