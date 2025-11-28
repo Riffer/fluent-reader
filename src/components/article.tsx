@@ -72,6 +72,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     globalKeyupListener: (e: KeyboardEvent) => void
     pressedZoomKeys: Set<string>
     currentZoom: number = 0  // Track zoom locally to avoid state lag
+    private _isMounted = false
 
     constructor(props: ArticleProps) {
         super(props)
@@ -101,9 +102,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 this.setState({ zoom: zoomLevel })
                 this.props.updateDefaultZoom(this.props.source, zoomLevel);
             });
-        }
-        if (props.source.openTarget === SourceOpenTarget.FullContent) {
-            this.loadFull()
         }
     }
 
@@ -503,6 +501,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     componentDidMount = () => {
+        this._isMounted = true
         // Load app path for WebView article.html loading
         if (!this.state.appPath && (window as any).ipcRenderer) {
             (window as any).ipcRenderer.invoke('get-app-path').then((path: string) => {
@@ -512,6 +511,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             }).catch((err: any) => {
                 console.error("[componentDidMount] Failed to get app path:", err)
             })
+        }
+        
+        // Load full content if needed
+        if (this.state.loadFull && !this.state.fullContent) {
+            this.loadFull()
         }
         
         // Keyboard state tracking für Zoom
@@ -659,6 +663,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     componentWillUnmount = () => {
+        this._isMounted = false
         let refocus = document.querySelector(
             `#refocus div[data-iid="${this.props.item._id}"]`
         ) as HTMLElement
@@ -742,7 +747,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
     loadFull = async () => {
-        this.setState({ loaded: false, error: false, isLoadingFull: true })
+        if (!this._isMounted) return
+        
+        if (this._isMounted) {
+            this.setState({ loaded: false, error: false, isLoadingFull: true })
+        }
 
         const link = this.props.item.link
         try {
@@ -816,24 +825,26 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 console.log("First 500 chars:", contentToUse.substring(0, 500))
                 console.log("========================")
                 
-                this.setState({ 
-                    fullContent: contentToUse, 
-                    loaded: true,
-                    isLoadingFull: false,
-                    webviewVisible: true,
-                    extractorTitle: extractorTitle,
-                    extractorDate: extractorDate
-                }, () => {
-                    // Apply saved zoom level and focus webview after full content is rendered
-                    const savedZoom = this.props.source.defaultZoom || 0
-                    this.currentZoom = savedZoom
-                    this.sendZoomToPreload(savedZoom)
-                    this.focusWebviewAfterLoad()
-                })
+                if (this._isMounted) {
+                    this.setState({ 
+                        fullContent: contentToUse, 
+                        loaded: true,
+                        isLoadingFull: false,
+                        webviewVisible: true,
+                        extractorTitle: extractorTitle,
+                        extractorDate: extractorDate
+                    }, () => {
+                        // Apply saved zoom level and focus webview after full content is rendered
+                        const savedZoom = this.props.source.defaultZoom || 0
+                        this.currentZoom = savedZoom
+                        this.sendZoomToPreload(savedZoom)
+                        this.focusWebviewAfterLoad()
+                    })
+                }
             }
         } catch (err) {
             console.error("Article loading failed:", err)
-            if (link === this.props.item.link) {
+            if (link === this.props.item.link && this._isMounted) {
                 // Fallback to item content on error
                 this.setState({ 
                     fullContent: this.props.item.content,
@@ -1332,11 +1343,11 @@ window.__articleData = ${JSON.stringify({
                             : this.articleView()
                     }
                     preload={(window as any).webviewPreloadPath || 'webview-preload.js'}
-                    allowpopups={true}
-                    disableguestresize={false}
+                    allowpopups={"true" as any}
+                    disableguestresize={"false" as any}
                     webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
                     partition={this.state.loadWebpage ? "sandbox" : undefined}
-                    allowFullScreen={true}
+                    allowFullScreen={"true" as any}
                     ref={(webview) => {
                         if (webview) {
                             this.webview = webview as any
