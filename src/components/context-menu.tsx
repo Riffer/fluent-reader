@@ -46,17 +46,15 @@ export type ContextMenuProps = ContextReduxProps & {
     close: () => void
 }
 
-export const renderShareQR = (item?: IContextualMenuItem) => {
-    if (!item || !item.url) return null
-    return (
-        <div className="qr-container">
-            <QRCode value={item.url} size={150} renderAs="svg" />
-        </div>
-    )
-}
-
 export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
-    { key: "qr", text: "QR", url: item.link, onRender: renderShareQR },
+    {
+        key: "copyLink",
+        text: intl.get("context.copy"),
+        iconProps: { iconName: "Copy" },
+        onClick: () => {
+            navigator.clipboard.writeText(item.link)
+        },
+    },
 ]
 
 function getSearchItem(text: string): IContextualMenuItem {
