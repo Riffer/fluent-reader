@@ -46,7 +46,7 @@
     "js-md5": "^0.8.3",
     "lovefield": "^2.1.12",
     "prettier": "^3.6.2",
-    "qrcode.react": "^4.2.0",
+    "qrcode.react": "^1.0.1",
     "react": "^16.13.1",
     "react-dom": "^16.13.1",
     "react-intl-universal": "^2.2.5",

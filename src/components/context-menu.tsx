@@ -46,6 +46,19 @@ export type ContextMenuProps = ContextReduxProps & {
     close: () => void
 }
 
+// QR Code Menu Item - renders QR code directly
+const QRCodeMenuItem = (props: { url: string }) => (
+    <div style={{ padding: "12px", textAlign: "center" }}>
+        <QRCode
+            value={props.url}
+            size={150}
+            renderAs="svg"
+            level="H"
+            includeMargin={true}
+        />
+    </div>
+)
+
 export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
     {
         key: "copyLink",
@@ -56,12 +69,12 @@ export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
         },
     },
     {
-        key: "openExternal",
-        text: intl.get("openExternal"),
-        iconProps: { iconName: "NavigateExternalInline" },
-        onClick: () => {
-            window.utils.openExternal(item.link)
-        },
+        key: "divider",
+        itemType: ContextualMenuItemType.Divider,
+    },
+    {
+        key: "qr",
+        onRender: () => <QRCodeMenuItem url={item.link} />,
     },
 ]
 
