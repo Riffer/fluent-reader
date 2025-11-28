@@ -57,18 +57,6 @@ PERFORMANCE OF THIS SOFTWARE.
 /*! safe-buffer. MIT License. Feross Aboukhadijeh <https://feross.org/opensource> */
 
 /**
- * @license QR Code generator library (TypeScript)
- * Copyright (c) Project Nayuki.
- * SPDX-License-Identifier: MIT
- */
-
-/**
- * @license qrcode.react
- * Copyright (c) Paul O'Shannessy
- * SPDX-License-Identifier: ISC
- */
-
-/**
  * [js-md5]{@link https://github.com/emn178/js-md5}
  *
  * @namespace md5
