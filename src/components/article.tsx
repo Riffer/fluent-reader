@@ -1464,7 +1464,7 @@ window.__articleData = ${JSON.stringify({
                     disableguestresize={"false" as any}
                     webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
                     partition={this.state.loadWebpage ? "sandbox" : undefined}
-                    allowFullScreen={"true" as any}
+                    allowFullScreen={true}
                     ref={(webview) => {
                         if (webview) {
                             this.webview = webview as any
