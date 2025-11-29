@@ -3,18 +3,72 @@
 try {
   const { ipcRenderer } = require('electron');
 
-  let zoomLevel = 0; // zoomLevel: 0 = 100%, 1 = 110%, -1 = 90%, etc.
-  const MIN_ZOOM_LEVEL = -8;  // ~0.4x (40%) - minimum zoom
-  const MAX_ZOOM_LEVEL = 17;  // ~5x (500%) - maximum zoom
+  let zoomLevel = 0; // zoomLevel: 0 = 100%, 1 = 110%, -1 = 90%, etc. (lineare 10%-Schritte)
+  const MIN_ZOOM_LEVEL = -6;  // 40% minimum zoom (100% - 6*10%)
+  const MAX_ZOOM_LEVEL = 40;  // 500% maximum zoom (100% + 40*10%)
 
-  // Konvertierung: zoomLevel -> Faktor
-  function zoomLevelToFactor(level) {
-    return Math.pow(1.1, level);
+  // Zoom-Overlay Einstellung (default: aus)
+  let showZoomOverlayEnabled = false;
+
+  // Zoom-Overlay für Debug-Anzeige
+  let zoomOverlay = null;
+  let zoomOverlayTimeout = null;
+
+  function showZoomOverlay(level) {
+    // Nur anzeigen wenn aktiviert
+    if (!showZoomOverlayEnabled) return;
+    
+    const factor = zoomLevelToFactor(level);
+    const percentage = Math.round(factor * 100);
+    
+    if (!zoomOverlay) {
+      zoomOverlay = document.createElement('div');
+      zoomOverlay.id = 'fr-zoom-overlay';
+      zoomOverlay.style.cssText = `
+        position: fixed;
+        top: 8px;
+        right: 8px;
+        background: rgba(0, 0, 0, 0.75);
+        color: white;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        font-size: 13px;
+        font-weight: 500;
+        z-index: 999999;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s ease-out;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      `;
+      document.body.appendChild(zoomOverlay);
+    }
+    
+    zoomOverlay.textContent = `Zoom: ${percentage}%`;
+    zoomOverlay.style.opacity = '1';
+    
+    // Clear existing timeout
+    if (zoomOverlayTimeout) {
+      clearTimeout(zoomOverlayTimeout);
+    }
+    
+    // Fade out after 1.5 seconds
+    zoomOverlayTimeout = setTimeout(() => {
+      if (zoomOverlay) {
+        zoomOverlay.style.opacity = '0';
+      }
+    }, 1500);
   }
 
-  // Konvertierung: Faktor -> zoomLevel (OHNE Runden für smoothen Touch-Zoom)
+  // Konvertierung: zoomLevel -> Faktor (linear: 10% pro Stufe)
+  // Level 0 = 100%, Level 1 = 110%, Level -1 = 90%, etc.
+  function zoomLevelToFactor(level) {
+    return 1 + (level * 0.1);
+  }
+
+  // Konvertierung: Faktor -> zoomLevel (linear)
   function factorToZoomLevel(factor) {
-    return Math.log(factor) / Math.log(1.1);
+    return (factor - 1) / 0.1;
   }
 
   // Erstelle Zoom-Container der gesamte Seite enthält
@@ -188,6 +242,9 @@ try {
       }
     });
     
+    // Zeige Zoom-Overlay (immer wenn sich Zoom ändert)
+    showZoomOverlay(zoomLevel);
+    
     // Sende Notification
     if (options.notify) {
       try { ipcRenderer.send('webview-zoom-changed', zoomLevel); } catch {}
@@ -208,6 +265,19 @@ try {
   ipcRenderer.on('set-webview-zoom', (event, zoomLevel_) => {
     zoomLevel = zoomLevel_;
     applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
+    // Zeige Zoom-Overlay beim Artikelwechsel, wenn aktiviert
+    if (showZoomOverlayEnabled) {
+      showZoomOverlay(zoomLevel);
+    }
+  });
+
+  // Listener für Zoom-Overlay-Einstellung
+  ipcRenderer.on('set-zoom-overlay-setting', (event, enabled) => {
+    showZoomOverlayEnabled = !!enabled;
+    // Wenn aktiviert, zeige sofort das aktuelle Zoom-Level an
+    if (showZoomOverlayEnabled) {
+      showZoomOverlay(zoomLevel);
+    }
   });
 
   // Fallback: postMessage von Embedder

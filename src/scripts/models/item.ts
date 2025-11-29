@@ -237,14 +237,20 @@ export function fetchItems(
                           .map(sid => sourcesState[sid])
                           .filter(s => !s.serviceRef)
             for (let source of sources) {
-                let promise = RSSSource.fetchItems(source)
-                promise.then(() =>
-                    dispatch(
-                        updateSource({ ...source, lastFetched: new Date() })
-                    )
+                // Erstelle das Haupt-Promise für fetchItems
+                let fetchPromise = RSSSource.fetchItems(source)
+                
+                // Bei Erfolg: lastFetched aktualisieren
+                // Bei Fehler: nichts tun (wird später über Promise.allSettled behandelt)
+                fetchPromise.then(
+                    () => dispatch(updateSource({ ...source, lastFetched: new Date() })),
+                    () => { /* Fehler wird über Promise.allSettled behandelt */ }
                 )
-                promise.finally(() => dispatch(fetchItemsIntermediate()))
-                promises.push(promise)
+                
+                // Immer: Intermediate dispatch
+                fetchPromise.finally(() => dispatch(fetchItemsIntermediate()))
+                
+                promises.push(fetchPromise)
             }
             dispatch(fetchItemsRequest(promises.length))
             const results = await Promise.allSettled(promises)

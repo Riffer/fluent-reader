@@ -10,13 +10,13 @@ contextBridge.exposeInMainWorld("utils", utilsBridge)
 const limitedIpcRenderer = {
     // Vom Renderer an den Main-Prozess
     send: (channel: string, ...args: any[]) => {
-        if (["webview-zoom-changed", "set-webview-zoom"].includes(channel)) {
+        if (["webview-zoom-changed", "set-webview-zoom", "set-zoom-overlay-setting"].includes(channel)) {
             ipcRenderer.send(channel, ...args)
         }
     },
     // Vom Main-Prozess an den Renderer
     on: (channel: string, listener: Function) => {
-        if (["set-webview-zoom", "webview-zoom-changed"].includes(channel)) {
+        if (["set-webview-zoom", "webview-zoom-changed", "set-zoom-overlay-setting"].includes(channel)) {
             ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
         }
     },

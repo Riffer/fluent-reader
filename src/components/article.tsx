@@ -64,6 +64,7 @@ type ArticleState = {
     appPath: string
     extractorTitle?: string
     extractorDate?: Date
+    showZoomOverlay: boolean
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -76,6 +77,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     constructor(props: ArticleProps) {
         super(props)
+        // Initialisiere mit dem gespeicherten Feed-Zoom
+        const initialZoom = props.source.defaultZoom || 0
+        this.currentZoom = initialZoom
         this.state = {
             fontFamily: window.settings.getFont(),
             fontSize: window.settings.getFontSize(),
@@ -86,9 +90,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             error: false,
             errorDescription: "",
             webviewVisible: false,
-            zoom: 0,
+            zoom: initialZoom,
             isLoadingFull: false,
             appPath: "",
+            showZoomOverlay: window.settings.getZoomOverlay(),
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -117,6 +122,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             };
             try { this.webview.addEventListener('dom-ready', once as any); } catch {}
         }
+    }
+
+    private sendZoomOverlaySettingToPreload = (show: boolean) => {
+        if (!this.webview) return;
+        try {
+            this.webview.send('set-zoom-overlay-setting', show);
+        } catch (e) {
+            // Falls das Webview noch nicht bereit ist, nach dom-ready einmalig senden
+            const once = () => {
+                try { this.webview.send('set-zoom-overlay-setting', show); } catch {}
+                this.webview.removeEventListener('dom-ready', once as any);
+            };
+            try { this.webview.addEventListener('dom-ready', once as any); } catch {}
+        }
+    }
+
+    private toggleZoomOverlay = () => {
+        const newValue = !this.state.showZoomOverlay;
+        window.settings.setZoomOverlay(newValue);
+        this.setState({ showZoomOverlay: newValue });
+        this.sendZoomOverlaySettingToPreload(newValue);
     }
 
     setFontSize = (size: number) => {
@@ -309,6 +335,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             },
                         },
                         {
+                            key: "dividerTools",
+                            itemType: ContextualMenuItemType.Divider,
+                        },
+                        {
+                            key: "toggleZoomOverlay",
+                            text: "Zoom-Anzeige",
+                            iconProps: { iconName: this.state.showZoomOverlay ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.state.showZoomOverlay,
+                            onClick: this.toggleZoomOverlay,
+                        },
+                        {
                             key: "openDevTools",
                             text: "Developer Tools öffnen",
                             iconProps: { iconName: "DeveloperTools" },
@@ -448,6 +486,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     webviewStartLoadingEarly = () => {
         if (!this.webview) return;
         const targetZoom = this.props.source.defaultZoom || 0;
+        // Synchronisiere currentZoom mit dem Feed-Zoom
+        this.currentZoom = targetZoom;
         try {
             // Verwende echten Zoom-Level statt Skalierung
             this.webview.send('set-webview-zoom', targetZoom);
@@ -457,17 +497,25 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     webviewStartLoading = () => { 
         const targetZoom = this.props.source.defaultZoom || 0;
+        // Synchronisiere currentZoom mit dem Feed-Zoom
+        this.currentZoom = targetZoom;
         try {
             // Verwende echten Zoom-Level statt Skalierung
             this.webview.send('set-webview-zoom', targetZoom);
+            // Sende Zoom-Overlay-Einstellung
+            this.webview.send('set-zoom-overlay-setting', this.state.showZoomOverlay);
         } catch {}
         if (!this.state.webviewVisible) this.setState({ webviewVisible: true });
     }
     webviewLoaded = () => {
         this.setState({ loaded: true })
         const targetZoom = this.props.source.defaultZoom || 0;
+        // Synchronisiere currentZoom mit dem Feed-Zoom
+        this.currentZoom = targetZoom;
         try {
             this.sendZoomToPreload(targetZoom);
+            // Sende Zoom-Overlay-Einstellung nochmals
+            this.sendZoomOverlaySettingToPreload(this.state.showZoomOverlay);
         } catch {}
     }
     webviewError = (reason: string) => {
@@ -502,7 +550,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Keyboard state tracking für Zoom
         this.pressedZoomKeys = new Set<string>()
-        this.currentZoom = this.state.zoom || 0
+        // Verwende den Feed-Zoom als Ausgangswert
+        this.currentZoom = this.props.source.defaultZoom || 0
         
         // Entferne alte Listener falls vorhanden
         if (this.globalKeydownListener) {
@@ -514,8 +563,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Global keyboard listener für Zoom (auch außerhalb WebView)
         this.globalKeydownListener = (e: KeyboardEvent) => {
-            const MIN_ZOOM_LEVEL = -8
-            const MAX_ZOOM_LEVEL = 17
+            // Lineare 10%-Schritte: -6 = 40%, 0 = 100%, 40 = 500%
+            const MIN_ZOOM_LEVEL = -6
+            const MAX_ZOOM_LEVEL = 40
             const isZoomKey = (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_' || e.key === '#')
             
             if (!isZoomKey || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
@@ -606,6 +656,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     componentDidUpdate = (prevProps: ArticleProps) => {
         if (prevProps.item._id != this.props.item._id) {
+            // Synchronisiere currentZoom sofort bei Artikelwechsel
+            const savedZoom = this.props.source.defaultZoom || 0
+            this.currentZoom = savedZoom
+            this.setState({ zoom: savedZoom })
+            
             // Close DevTools before article change to prevent crash
             try {
                 if (this.webview && this.webview.isDevToolsOpened()) {
@@ -634,10 +689,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         this.webview.addEventListener('dom-ready', focusOnReady)
                     }
                 } else {
-                    // For regular feed content: apply saved zoom and focus
-                    const savedZoom = this.props.source.defaultZoom || 0
-                    this.currentZoom = savedZoom
-                    this.sendZoomToPreload(savedZoom)
+                    // For regular feed content: focus webview
+                    this.sendZoomToPreload(this.currentZoom)
                     this.focusWebviewAfterLoad()
                 }
             })
