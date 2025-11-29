@@ -1080,17 +1080,26 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             ? this.state.fullContent
             : this.props.item.content
 
-        // Debug: Check if images are in the content
-        const hasImages = articleContent.includes('<img') || articleContent.includes('<picture')
-        const imgCount = (articleContent.match(/<img/g) || []).length
-        const pictureCount = (articleContent.match(/<picture/g) || []).length
+        // Content-Analyse für Comic/Bild-Modus
+        const imgCount = (articleContent.match(/<img/gi) || []).length
+        const pictureCount = (articleContent.match(/<picture/gi) || []).length
+        const totalImages = imgCount + pictureCount
+        
+        // Text ohne HTML-Tags extrahieren um reine Textlänge zu ermitteln
+        const textOnly = articleContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+        const textLength = textOnly.length
+        
+        // Comic-Modus: Wenig Text (< 200 Zeichen) und mindestens ein Bild
+        // Oder: Nur Bilder ohne nennenswerten Text
+        const isComicMode = totalImages > 0 && textLength < 200
+        const isSingleImage = totalImages === 1 && textLength < 100
+        
         console.log("Article content analysis:", {
             url: this.props.item.link,
-            hasImages,
-            imgCount,
-            pictureCount,
-            totalImages: imgCount + pictureCount,
-            contentLength: articleContent.length
+            totalImages,
+            textLength,
+            isComicMode,
+            isSingleImage
         })
 
         // Use extractor metadata if available (better alignment with extracted content)
@@ -1116,6 +1125,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         )
 
         const rtlClass = this.props.source.textDir === SourceTextDirection.RTL ? "rtl" : this.props.source.textDir === SourceTextDirection.Vertical ? "vertical" : ""
+        const comicClass = isComicMode ? "comic-mode" : ""
+        const singleImageClass = isSingleImage ? "single-image" : ""
 
         // Baue HTML direkt mit eingebetteten Daten über JSON, nicht über Query-Parameter
         const htmlContent = `<!DOCTYPE html>
@@ -1149,9 +1160,47 @@ body.vertical { writing-mode: vertical-rl; }
   a { color: #4ba0e1; }
   a:hover, a:active { color: #65aee6; }
 }
+
+/* Comic Mode Styles - für Bilder-dominierte Inhalte */
+.comic-mode #main {
+    max-width: 100%;
+    padding: 0;
+}
+.comic-mode article img,
+.comic-mode #main > img {
+    max-width: 100%;
+    width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+.comic-mode .title,
+.comic-mode .date {
+    text-align: center;
+    padding: 0 16px;
+}
+.comic-mode p {
+    text-align: center;
+}
+
+/* Single Image Mode - einzelnes großes Bild */
+.single-image #main {
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0;
+}
+.single-image article img,
+.single-image #main > img {
+    max-height: 90vh;
+    width: auto;
+    max-width: 100%;
+    object-fit: contain;
+}
     </style>
 </head>
-<body class="${rtlClass}">
+<body class="${rtlClass} ${comicClass} ${singleImageClass}">
     <div id="main"></div>
     <script>
 window.__articleData = ${JSON.stringify({ 
