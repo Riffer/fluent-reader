@@ -34,13 +34,17 @@
 .article {
     height: 100%;
     user-select: none;
+    display: flex;
+    flex-direction: column;
 }
 .article webview,
-.article .error-prompt {
+.article .error-prompt,
+.article .loading-prompt {
     width: 100%;
     height: calc(100% - 36px);
     border: none;
     color: var(--black);
+    flex-shrink: 0;
 }
 .article webview.error {
     display: none;

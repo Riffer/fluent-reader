@@ -4,6 +4,9 @@ import lf from "lovefield"
 import { RSSSource } from "./models/source"
 import { RSSItem } from "./models/item"
 
+// Note: db-sqlite is loaded only in Main Process, not in Renderer
+// See: src/main/db-sqlite.ts
+
 const sdbSchema = lf.schema.create("sourcesDB", 4)
 sdbSchema
     .createTable("sources")
@@ -65,10 +68,13 @@ async function onUpgradeSourceDB(rawDb: lf.raw.BackStore) {
 }
 
 export async function init() {
+    // Initialize Lovefield (primary DB for Renderer process)
     sourcesDB = await sdbSchema.connect({ onUpgrade: onUpgradeSourceDB })
     sources = sourcesDB.getSchema().table("sources")
     itemsDB = await idbSchema.connect()
     items = itemsDB.getSchema().table("items")
+    
+    // Check if we need to migrate from NeDB
     if (window.settings.getNeDBStatus()) {
         await migrateNeDB()
     }
@@ -90,16 +96,18 @@ async function migrateNeDB() {
                 if (err) window.console.log(err)
             },
         })
-        const sourceDocs = await new Promise<RSSSource[]>(resolve => {
-            sdb.find({}, (_, docs) => {
-                resolve(docs)
-            })
-        })
-        const itemDocs = await new Promise<RSSItem[]>(resolve => {
-            idb.find({}, (_, docs) => {
-                resolve(docs)
-            })
-        })
+        const [sourceDocs, itemDocs] = await Promise.all([
+            new Promise<RSSSource[]>(resolve => {
+                sdb.find({}, (_, docs) => {
+                    resolve(docs)
+                })
+            }),
+            new Promise<RSSItem[]>(resolve => {
+                idb.find({}, (_, docs) => {
+                    resolve(docs)
+                })
+            }),
+        ])
         const sRows = sourceDocs.map(doc => {
             if (doc.serviceRef !== undefined)
                 doc.serviceRef = String(doc.serviceRef)
@@ -141,3 +149,5 @@ async function migrateNeDB() {
         window.utils.closeWindow()
     }
 }
+
+

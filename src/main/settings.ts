@@ -1,4 +1,4 @@
-import Store = require("electron-store")
+import Store from "electron-store"
 import {
     SchemaTypes,
     SourceGroup,
@@ -178,7 +178,7 @@ ipcMain.on("get-view-configs", (event, view: ViewType) => {
         case ViewType.List:
             event.returnValue = store.get(
                 LIST_CONFIGS_STORE_KEY,
-                ViewConfigs.ShowCover
+                ViewConfigs.ShowCover | ViewConfigs.FadeRead
             )
             break
         default:

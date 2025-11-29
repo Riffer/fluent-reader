@@ -4,7 +4,6 @@ const CopyPlugin = require("copy-webpack-plugin")
 
 module.exports = [
     {
-        mode: "production",
         entry: "./src/electron.ts",
         target: "electron-main",
         module: {
@@ -66,7 +65,7 @@ module.exports = [
         },
     },
     {
-        mode: "production",
+        mode: "development",
         entry: "./src/index.tsx",
         target: "web",
         devtool: "source-map",

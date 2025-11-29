@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Article Extractor Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-container {
+            background: #f5f5f5;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        h2 {
+            margin-top: 0;
+        }
+        textarea {
+            width: 100%;
+            height: 300px;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+            background: #0078d4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #005a9e;
+        }
+        .url-input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <h1>Article Extractor Test Tool</h1>
+    
+    <div class="test-container">
+        <h2>1. Extract from URL</h2>
+        <input type="text" class="url-input" id="testUrl" placeholder="Enter URL to extract from..." value="https://cheezburger.com/43313669/my-cat-survived-being-locked-in-a-shipping-container-for-4-weeks-derpy-orange-cat-goes-missing">
+        <br>
+        <button onclick="extractFromUrl()">Extract from URL</button>
+        <button onclick="copyToClipboard('htmlOutput')">Copy HTML</button>
+    </div>
+
+    <div class="test-container">
+        <h2>2. Paste HTML to test extraction</h2>
+        <textarea id="htmlInput" placeholder="Paste HTML content here..."></textarea>
+        <br>
+        <button onclick="extractFromHtml()">Extract from HTML</button>
+        <button onclick="loadExample()">Load Example</button>
+    </div>
+
+    <div class="test-container">
+        <h2>3. Extracted Content</h2>
+        <textarea id="htmlOutput" readonly placeholder="Extracted content will appear here..."></textarea>
+        <br>
+        <button onclick="copyToClipboard('htmlOutput')">Copy</button>
+        <button onclick="downloadAsFile()">Download as HTML</button>
+        <button onclick="openInArticleViewer()">View in Article Viewer</button>
+    </div>
+
+    <script>
+        async function extractFromUrl() {
+            const url = document.getElementById('testUrl').value;
+            if (!url) {
+                alert('Please enter a URL');
+                return;
+            }
+            
+            document.getElementById('htmlOutput').value = 'Loading...';
+            
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const html = await response.text();
+                
+                // Speichere den Raw HTML für Downloads
+                localStorage.setItem('rawHtml', html);
+                
+                // Try to use the article-extractor if available
+                const result = await fetch('http://localhost:3000/api/extract', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, html })
+                }).catch(() => null);
+                
+                if (result && result.ok) {
+                    const data = await result.json();
+                    document.getElementById('htmlOutput').value = data.content || 'No content extracted';
+                } else {
+                    // Fallback: Zeige den kompletten HTML an
+                    document.getElementById('htmlInput').value = html;
+                    document.getElementById('htmlOutput').value = html;
+                }
+            } catch (error) {
+                document.getElementById('htmlOutput').value = `Error: ${error.message}`;
+            }
+        }
+
+        async function extractFromHtml() {
+            const html = document.getElementById('htmlInput').value;
+            if (!html) {
+                alert('Please paste HTML content');
+                return;
+            }
+            
+            document.getElementById('htmlOutput').value = 'Processing...';
+            
+            try {
+                // Simulate @extractus/article-extractor behavior
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                // Remove scripts, styles, and common junk
+                doc.querySelectorAll('script, style, noscript, [data-ad-container], .advertisement, .ads, .sidebar, nav, .navigation, .header, .footer').forEach(el => el.remove());
+                
+                // Try to find article content
+                let articleContent = null;
+                
+                // Try common selectors in order
+                const selectors = [
+                    'article',
+                    '[role="main"]',
+                    'main',
+                    '.article-content',
+                    '.post-content',
+                    '.entry-content',
+                    '.content',
+                    '[class*="content"]',
+                    'body'
+                ];
+                
+                for (const selector of selectors) {
+                    const el = doc.querySelector(selector);
+                    if (el && el.textContent && el.textContent.trim().length > 200) {
+                        articleContent = el.innerHTML;
+                        console.log('Found content with selector:', selector);
+                        break;
+                    }
+                }
+                
+                if (!articleContent) {
+                    articleContent = doc.body.innerHTML;
+                }
+                
+                // Clean up the extracted content
+                const cleanedDoc = parser.parseFromString(articleContent, 'text/html');
+                
+                // Remove empty elements
+                cleanedDoc.querySelectorAll('*').forEach(el => {
+                    if (!el.textContent.trim() && el.children.length === 0) {
+                        el.remove();
+                    }
+                });
+                
+                document.getElementById('htmlOutput').value = cleanedDoc.body.innerHTML;
+                
+                // Also show stats
+                const originalLength = html.length;
+                const extractedLength = cleanedDoc.body.innerHTML.length;
+                console.log(`Original: ${originalLength} chars, Extracted: ${extractedLength} chars`);
+            } catch (error) {
+                document.getElementById('htmlOutput').value = `Error: ${error.message}`;
+                console.error(error);
+            }
+        }
+
+        function loadExample() {
+            const example = `
+                <html>
+                <head><title>Test Article</title></head>
+                <body>
+                    <h1>Test Article Title</h1>
+                    <p>This is the article content.</p>
+                    <p>This is the article content.</p>
+                    <div class="tracking">?a=tracking-id-here</div>
+                    <p>This is the article content.</p>
+                    <p>This is the article content.</p>
+                </body>
+                </html>
+            `;
+            document.getElementById('htmlInput').value = example;
+        }
+
+        function copyToClipboard(elementId) {
+            const text = document.getElementById(elementId).value;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Copied to clipboard!');
+            }).catch(err => {
+                alert('Failed to copy: ' + err);
+            });
+        }
+
+        function downloadAsFile() {
+            const htmlContent = document.getElementById('htmlOutput').value;
+            if (!htmlContent) {
+                alert('No content to download');
+                return;
+            }
+            
+            // Wrap content in a complete HTML document
+            const fullHtml = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extracted Article</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        img { max-width: 100%; height: auto; }
+        a { color: #0078d4; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+${htmlContent}
+</body>
+</html>`;
+            
+            // Create blob and download
+            const blob = new Blob([fullHtml], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `article_${new Date().toISOString().slice(0, 10)}.html`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function openInArticleViewer() {
+            const htmlContent = document.getElementById('htmlOutput').value;
+            if (!htmlContent) {
+                alert('No content to view');
+                return;
+            }
+            
+            // Store content in localStorage to avoid URL length limits
+            localStorage.setItem('articleContent', htmlContent);
+            
+            // Open the article viewer
+            const win = window.open('about:blank', '_blank');
+            if (win) {
+                win.document.write(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta http-equiv="Content-Security-Policy"
+                            content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
+                        <title>Article Viewer</title>
+                        <style>
+html, body { margin: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
+body { padding: 12px 96px 32px; overflow: hidden scroll; }
+body.rtl { direction: rtl; }
+body.vertical { writing-mode: vertical-rl; }
+#main { display: none; max-width: 700px; margin: auto; }
+#main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+#main > p.title { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; margin-block-end: 0; }
+#main > p.date { color: #666; font-size: 0.875rem; margin-block-start: 0.5rem; }
+img { max-width: 100%; height: auto; }
+                        </style>
+                    </head>
+                    <body>
+                        <div id="main"></div>
+                        <script>
+// Get content from parent window's localStorage
+const articleContent = window.opener.localStorage.getItem('articleContent') || '';
+const mainEl = document.getElementById('main');
+if (articleContent) {
+    mainEl.innerHTML = articleContent;
+    mainEl.classList.add('show');
+} else {
+    mainEl.textContent = 'No content available';
+    mainEl.classList.add('show');
+}
+                        <\/script>
+                    </body>
+                    </html>
+                `);
+                win.document.close();
+            }
+        }
+
+        // Load example on page load
+        window.addEventListener('load', () => {
+            console.log('Test tool loaded');
+        });
+    </script>
+</body>
+</html>

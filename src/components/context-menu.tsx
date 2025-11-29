@@ -46,15 +46,29 @@ export type ContextMenuProps = ContextReduxProps & {
     close: () => void
 }
 
-export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
-    { key: "qr", url: item.link, onRender: renderShareQR },
-]
-
-export const renderShareQR = (item: IContextualMenuItem) => (
-    <div className="qr-container">
-        <QRCode value={item.url} size={150} renderAs="svg" />
+// QR Code Menu Item - renders QR code directly
+const QRCodeMenuItem = (props: { url: string }) => (
+    <div style={{ padding: "12px", textAlign: "center" }}>
+        <QRCode
+            value={props.url}
+            size={150}
+            renderAs="svg"
+            level="H"
+            includeMargin={true}
+        />
     </div>
 )
+
+export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
+    {
+        key: "divider",
+        itemType: ContextualMenuItemType.Divider,
+    },
+    {
+        key: "qr",
+        onRender: () => <QRCodeMenuItem url={item.link} />,
+    },
+]
 
 function getSearchItem(text: string): IContextualMenuItem {
     const engine = window.settings.getSearchEngine()
@@ -186,17 +200,18 @@ export class ContextMenu extends React.Component<ContextMenuProps> {
                         },
                     },
                     {
+                        key: "copyLink",
+                        text: intl.get("context.copyURL"),
+                        iconProps: { iconName: "Copy" },
+                        onClick: () => {
+                            navigator.clipboard.writeText(this.props.item.link)
+                        },
+                    },
+                    {
                         key: "copyTitle",
                         text: intl.get("context.copyTitle"),
                         onClick: () => {
                             window.utils.writeClipboard(this.props.item.title)
-                        },
-                    },
-                    {
-                        key: "copyURL",
-                        text: intl.get("context.copyURL"),
-                        onClick: () => {
-                            window.utils.writeClipboard(this.props.item.link)
                         },
                     },
                     ...(this.props.viewConfigs !== undefined
@@ -312,6 +327,7 @@ export class ContextMenu extends React.Component<ContextMenuProps> {
                         },
                     })
                 }
+                
                 return items
             }
             case ContextMenuType.Image:
