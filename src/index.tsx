@@ -31,6 +31,16 @@ window.utils.initFontList().then(fonts => {
     window.fontList.push(...fonts)
 })
 
+// Globaler F12-Handler für App Developer Tools
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'F12') {
+        e.preventDefault()
+        if ((window as any).ipcRenderer) {
+            (window as any).ipcRenderer.invoke('toggle-app-devtools')
+        }
+    }
+})
+
 ReactDOM.render(
     <Provider store={store}>
         <Root />

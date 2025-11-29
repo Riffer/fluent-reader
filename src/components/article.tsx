@@ -347,9 +347,19 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             onClick: this.toggleZoomOverlay,
                         },
                         {
-                            key: "openDevTools",
-                            text: "Developer Tools öffnen",
-                            iconProps: { iconName: "DeveloperTools" },
+                            key: "openAppDevTools",
+                            text: "App Developer Tools",
+                            iconProps: { iconName: "Code" },
+                            onClick: () => {
+                                if ((window as any).ipcRenderer) {
+                                    (window as any).ipcRenderer.invoke('toggle-app-devtools')
+                                }
+                            },
+                        },
+                        {
+                            key: "openWebviewDevTools",
+                            text: "Artikel Developer Tools",
+                            iconProps: { iconName: "FileHTML" },
                             onClick: () => {
                                 if (this.webview) {
                                     this.webview.openDevTools()
