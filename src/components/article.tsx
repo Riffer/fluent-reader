@@ -1016,13 +1016,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 return extractedContent
             }
 
-            // Check if RSS title is already in extracted content
+            // Parse extracted content to get plain text for title comparison
+            const parser = new DOMParser()
+            const extractedDoc = parser.parseFromString(extractedContent, 'text/html')
+            const extractedTextContent = extractedDoc.body.textContent?.toLowerCase() || ''
+            
+            // Check if RSS title is already in extracted content (using plain text comparison)
             const rssTitle = this.props.item.title
-            const titleInExtractor = extractorTitle && extractedContent.toLowerCase().includes(extractorTitle.toLowerCase())
-            const rssInContent = extractedContent.toLowerCase().includes(rssTitle.toLowerCase())
+            const rssTitleNormalized = rssTitle.toLowerCase().replace(/\s+/g, ' ').trim()
+            const extractorTitleNormalized = extractorTitle?.toLowerCase().replace(/\s+/g, ' ').trim()
+            
+            // Normalize extracted text for comparison (collapse whitespace)
+            const extractedTextNormalized = extractedTextContent.replace(/\s+/g, ' ')
+            
+            const titleInExtractor = extractorTitleNormalized && extractedTextNormalized.includes(extractorTitleNormalized)
+            const rssInContent = extractedTextNormalized.includes(rssTitleNormalized)
             
             // Parse feed content to extract images and text
-            const parser = new DOMParser()
             const feedDoc = parser.parseFromString(feedContent, 'text/html')
 
             // Extract the first image from feed summary
