@@ -527,6 +527,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Sende Zoom-Overlay-Einstellung nochmals
             this.sendZoomOverlaySettingToPreload(this.state.showZoomOverlay);
         } catch {}
+        // Focus auf Webview setzen nachdem alles geladen ist
+        this.focusWebviewAfterLoad()
     }
     webviewError = (reason: string) => {
         this.setState({ error: true, errorDescription: reason })
@@ -718,7 +720,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     // Focus webview after full content is loaded
     private focusWebviewAfterLoad = () => {
         if (this.webview) {
-            this.webview.focus()
+            // Kleiner Delay um sicherzustellen, dass das Webview bereit ist
+            setTimeout(() => {
+                if (this.webview && this._isMounted) {
+                    this.webview.focus()
+                }
+            }, 100)
         }
     }
 
