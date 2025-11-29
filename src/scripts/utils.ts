@@ -44,7 +44,10 @@ export async function decodeFetchResponse(response: Response, isHTML = false) {
         response.headers.get("content-type")
     let charset =
         ctype && CHARSET_RE.test(ctype) ? CHARSET_RE.exec(ctype)[1] : undefined
-    let content = new TextDecoder(charset).decode(buffer)
+    
+    // Start with UTF-8 (default)
+    let content = new TextDecoder("utf-8").decode(buffer)
+    
     if (charset === undefined) {
         if (isHTML) {
             const dom = domParser.parseFromString(content, "text/html")
@@ -66,8 +69,26 @@ export async function decodeFetchResponse(response: Response, isHTML = false) {
                 XML_ENCODING_RE.test(content) &&
                 XML_ENCODING_RE.exec(content)[1].toLowerCase()
         }
-        if (charset && charset !== "utf-8" && charset !== "utf8") {
-            content = new TextDecoder(charset).decode(buffer)
+        // Only decode again if we found a valid charset that differs from UTF-8
+        if (charset && charset.replace(/-/g, "") !== "utf8") {
+            try {
+                content = new TextDecoder(charset).decode(buffer)
+            } catch (e) {
+                // If charset is invalid, keep the UTF-8 decoded content
+                console.warn(`Invalid charset "${charset}", using UTF-8 instead`)
+            }
+        }
+    } else {
+        // Validate charset from content-type header
+        charset = charset.trim().toLowerCase()
+        if (charset && charset.replace(/-/g, "") !== "utf8") {
+            try {
+                content = new TextDecoder(charset).decode(buffer)
+            } catch (e) {
+                // If charset is invalid, use UTF-8
+                console.warn(`Invalid charset "${charset}", using UTF-8 instead`)
+                content = new TextDecoder("utf-8").decode(buffer)
+            }
         }
     }
     return content

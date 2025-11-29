@@ -408,21 +408,15 @@ export function initIntl(): AppThunk<Promise<void>> {
 }
 
 export function initApp(): AppThunk {
-    return dispatch => {
+    return async dispatch => {
         document.body.classList.add(window.utils.platform)
-        dispatch(initIntl())
-            .then(async () => {
-                if (window.utils.platform === "darwin") initTouchBarWithTexts()
-                await dispatch(initSources())
-            })
-            .then(() => dispatch(initFeeds()))
-            .then(async () => {
-                dispatch(selectAllArticles())
-                await dispatch(fetchItems())
-            })
-            .then(() => {
-                dispatch(updateFavicon())
-            })
+        await dispatch(initIntl())
+        if (window.utils.platform === "darwin") initTouchBarWithTexts()
+        await dispatch(initSources())
+        await dispatch(initFeeds())
+        dispatch(selectAllArticles())
+        await dispatch(fetchItems())
+        dispatch(updateFavicon())
     }
 }
 

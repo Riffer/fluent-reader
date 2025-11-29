@@ -49,7 +49,7 @@ export class RSSSource {
     textDir: SourceTextDirection
     hidden: boolean
 
-    constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null, defaultZoom = 1) {
+    constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null, defaultZoom = 0) {
         this.url = url
         this.name = name
         this.openTarget = openTarget ?? SourceOpenTarget.Local
@@ -200,7 +200,6 @@ export function initSourcesFailure(err): SourceActionTypes {
 }
 
 async function unreadCount(sources: SourceState): Promise<SourceState> {
-    console.log("update unreadCount")
     const rows = await db.itemsDB
         .select(db.items.source, lf.fn.count(db.items._id))
         .from(db.items)
@@ -214,8 +213,6 @@ async function unreadCount(sources: SourceState): Promise<SourceState> {
 }
 
 export function updateUnreadCounts(): AppThunk<Promise<void>> {
-    console.log("update unreadCounts")
-
     return async (dispatch, getState) => {
         const sources: SourceState = {}
         for (let source of Object.values(getState().sources)) {
@@ -308,7 +305,7 @@ export function addSource(
     name: string = null,
     batch = false,
     openTarget = null,
-    defaultZoom = 1
+    defaultZoom = 0
 ): AppThunk<Promise<number>> {
     return async (dispatch, getState) => {
         const app = getState().app

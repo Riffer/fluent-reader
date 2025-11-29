@@ -123,8 +123,8 @@ export async function importAll() {
         let openRequest = window.indexedDB.open("NeDB")
         configs.useNeDB = true
         openRequest.onsuccess = () => {
-            let db = openRequest.result
-            let objectStore = db
+            let indexedDB = openRequest.result
+            let objectStore = indexedDB
                 .transaction("nedbdata", "readwrite")
                 .objectStore("nedbdata")
             let requests = Object.entries(configs.nedb).map(([key, value]) => {

@@ -3,14 +3,78 @@
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src-elem 'sha256-sLDWrq1tUAO8IyyqmUckFqxbXYfZ2/3TEUmtxH8Unf0=' 'sha256-iOdZeo0zvgcSuiH/7/dXCOHo7s0cn2XtsidqVOcHBjo='; img-src http: https: data:; style-src 'self' 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
+        content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
     <title>Article</title>
-    <link rel="stylesheet" href="article.css" />
-    <script integrity="sha256-sLDWrq1tUAO8IyyqmUckFqxbXYfZ2/3TEUmtxH8Unf0=" src="mercury.web.js"></script>
+    <style>
+html, body { margin: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
+body { padding: 12px 96px 32px; overflow: hidden scroll; }
+body.rtl { direction: rtl; }
+body.vertical { writing-mode: vertical-rl; }
+#main { display: none; max-width: 700px; margin: auto; }
+#main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+#main > p.title { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; margin-block-end: 0; }
+#main > p.date { color: #666; font-size: 0.875rem; margin-block-start: 0.5rem; }
+    </style>
 </head>
 <body>
     <div id="main"></div>
-    <script integrity="sha256-iOdZeo0zvgcSuiH/7/dXCOHo7s0cn2XtsidqVOcHBjo=" src="article.js"></script>
-    <!-- Run "cat article.js | openssl dgst -sha256 -binary | openssl enc -base64 -A" for hash -->
+    <script>
+console.log("[article.js] Script loaded, location.search:", location.search.substring(0, 100))
+
+function get(name) {
+    if (name = (new RegExp('[?&]' + encodeURIComponent(name) + '=([^&]*)')).exec(location.search))
+        return decodeURIComponent(name[1]);
+}
+let dir = get("d")
+if (dir === "1") {
+    document.body.classList.add("rtl")
+} else if (dir === "2") {
+    document.body.classList.add("vertical")
+    document.body.addEventListener("wheel", (evt) => {
+        document.scrollingElement.scrollLeft -= evt.deltaY;
+    });
+}
+async function getArticle(url) {
+    return get("a") || ""
+}
+document.documentElement.style.fontSize = get("s") + "px"
+let font = get("f")
+if (font) document.body.style.fontFamily = `"${font}"`
+let url = get("u")
+getArticle(url).then(article => {
+    console.log("[article.js] getArticle resolved, article length:", article.length)
+    let domParser = new DOMParser()
+    let dom = domParser.parseFromString(get("h"), "text/html")
+    let articleEl = dom.getElementsByTagName("article")[0]
+    if (!articleEl) {
+        console.error("[article.js] No article element found in header, creating one")
+        articleEl = dom.createElement("article")
+        if (dom.body) dom.body.appendChild(articleEl)
+    }
+    articleEl.innerHTML = article
+    if (url) {
+        let baseEl = dom.createElement('base')
+        baseEl.setAttribute('href', url.split("/").slice(0, 3).join("/"))
+        dom.head.append(baseEl)
+    }
+    for (let s of dom.getElementsByTagName("script")) {
+        s.parentNode.removeChild(s)
+    }
+    for (let e of dom.querySelectorAll("*[src]")) {
+        e.src = e.src
+    }
+    for (let e of dom.querySelectorAll("*[href]")) {
+        e.href = e.href
+    }
+    let main = document.getElementById("main")
+    console.log("[article.js] main element found:", main !== null)
+    main.innerHTML = dom.body.innerHTML
+    main.classList.add("show")
+    console.log("[article.js] Content rendered and show class added")
+}).catch(err => {
+    console.error("[article.js] Error loading article:", err)
+})
+    </script>
 </body>
 </html>
