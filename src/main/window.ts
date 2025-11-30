@@ -1,9 +1,40 @@
 import windowStateKeeper = require("electron-window-state")
-import { BrowserWindow, nativeTheme, app, ipcMain } from "electron"
+import { BrowserWindow, nativeTheme, app, ipcMain, session } from "electron"
 import path from 'path';
 import { setThemeListener } from "./settings"
 import { setUtilsListeners } from "./utils"
 import { setupArticleExtractorHandlers } from "./article-extractor"
+
+/**
+ * Set up cookies to bypass consent dialogs and age gates
+ */
+async function setupBypassCookies() {
+    const defaultSession = session.defaultSession
+    
+    // Reddit: EU Cookie Consent + Over 18 verification
+    await defaultSession.cookies.set({
+        url: 'https://www.reddit.com',
+        name: 'eu_cookie',
+        value: '%7B%22opted%22%3Atrue%2C%22nonessential%22%3Atrue%7D', // {"opted":true,"nonessential":true}
+        domain: '.reddit.com',
+        path: '/',
+        secure: true,
+        httpOnly: false,
+        sameSite: 'lax'
+    }).catch(err => console.error('[cookies] Failed to set eu_cookie:', err))
+    
+    // Reddit: Confirm over 18 for NSFW content
+    await defaultSession.cookies.set({
+        url: 'https://www.reddit.com',
+        name: 'over18',
+        value: '1',
+        domain: '.reddit.com',
+        path: '/',
+        secure: true,
+        httpOnly: false,
+        sameSite: 'lax'
+    }).catch(err => console.error('[cookies] Failed to set over18:', err))
+}
 
 export class WindowManager {
     mainWindow: BrowserWindow = null
@@ -14,7 +45,10 @@ export class WindowManager {
     }
 
     private init = () => {
-        app.on("ready", () => {
+        app.on("ready", async () => {
+            // Set bypass cookies before anything else
+            await setupBypassCookies()
+            
             this.mainWindowState = windowStateKeeper({
                 defaultWidth: 1200,
                 defaultHeight: 700,

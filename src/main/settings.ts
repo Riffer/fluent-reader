@@ -212,3 +212,11 @@ ipcMain.on("get-zoom-overlay", event => {
 ipcMain.handle("set-zoom-overlay", (_, flag: boolean) => {
     store.set(ZOOM_OVERLAY_STORE_KEY, flag)
 })
+
+const NSFW_CLEANUP_STORE_KEY = "nsfwCleanupEnabled"
+ipcMain.on("get-nsfw-cleanup", event => {
+    event.returnValue = store.get(NSFW_CLEANUP_STORE_KEY, false)
+})
+ipcMain.handle("set-nsfw-cleanup", (_, flag: boolean) => {
+    store.set(NSFW_CLEANUP_STORE_KEY, flag)
+})
