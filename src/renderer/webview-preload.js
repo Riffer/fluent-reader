@@ -302,17 +302,19 @@ try {
         // Je größer dieser Wert, desto weniger empfindlich
         const steps = (delta > 0 ? 1 : -1) * 0.125;
         
+        // TEMP: Scroll-Kompensation deaktiviert für Tests
         // Berechne Maus-Position relativ zum Container
-        const container = document.querySelector('#fr-zoom-container');
-        const wrapper = container.parentElement;
-        if (container && wrapper) {
-          const rect = wrapper.getBoundingClientRect();
-          const mouseX = (container.scrollLeft || 0) + (e.clientX - rect.left);
-          const mouseY = (container.scrollTop || 0) + (e.clientY - rect.top);
-          applyZoom(zoomLevel + steps, { notify: true, zoomPointX: mouseX, zoomPointY: mouseY, preserveScroll: false });
-        } else {
-          applyZoom(zoomLevel + steps, { notify: true, preserveScroll: false });
-        }
+        // const container = document.querySelector('#fr-zoom-container');
+        // const wrapper = container.parentElement;
+        // if (container && wrapper) {
+        //   const rect = wrapper.getBoundingClientRect();
+        //   const mouseX = (container.scrollLeft || 0) + (e.clientX - rect.left);
+        //   const mouseY = (container.scrollTop || 0) + (e.clientY - rect.top);
+        //   applyZoom(zoomLevel + steps, { notify: true, zoomPointX: mouseX, zoomPointY: mouseY, preserveScroll: false });
+        // } else {
+        //   applyZoom(zoomLevel + steps, { notify: true, preserveScroll: false });
+        // }
+        applyZoom(zoomLevel + steps, { notify: true, preserveScroll: true });
       }
     } catch {}
   }, { passive: false });
@@ -360,17 +362,19 @@ try {
         const currentMidX = (touch1.clientX + touch2.clientX) / 2;
         const currentMidY = (touch1.clientY + touch2.clientY) / 2;
         
+        // TEMP: Scroll-Kompensation deaktiviert für Tests
         // Berechne Touch-Position relativ zum Container
-        const container = document.querySelector('#fr-zoom-container');
-        const wrapper = container.parentElement;
-        if (container && wrapper) {
-          const rect = wrapper.getBoundingClientRect();
-          const touchX = (container.scrollLeft || 0) + (currentMidX - rect.left);
-          const touchY = (container.scrollTop || 0) + (currentMidY - rect.top);
-          applyZoom(factorToZoomLevel(newFactor), { notify: true, zoomPointX: touchX, zoomPointY: touchY, preserveScroll: false });
-        } else {
-          applyZoom(factorToZoomLevel(newFactor), { notify: true, preserveScroll: false });
-        }
+        // const container = document.querySelector('#fr-zoom-container');
+        // const wrapper = container.parentElement;
+        // if (container && wrapper) {
+        //   const rect = wrapper.getBoundingClientRect();
+        //   const touchX = (container.scrollLeft || 0) + (currentMidX - rect.left);
+        //   const touchY = (container.scrollTop || 0) + (currentMidY - rect.top);
+        //   applyZoom(factorToZoomLevel(newFactor), { notify: true, zoomPointX: touchX, zoomPointY: touchY, preserveScroll: false });
+        // } else {
+        //   applyZoom(factorToZoomLevel(newFactor), { notify: true, preserveScroll: false });
+        // }
+        applyZoom(factorToZoomLevel(newFactor), { notify: true, preserveScroll: true });
       }
     } catch {}
   }, { passive: false });
