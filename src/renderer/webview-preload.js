@@ -534,16 +534,8 @@ try {
   } else {
     applySiteCleanup();
   }
-  
-  // Re-run cleanup more frequently (every 500ms) for dynamically loaded content
-  let cleanupInterval = setInterval(applySiteCleanup, 500);
-  
-  // Stop interval after 60 seconds to save resources
-  setTimeout(() => {
-    clearInterval(cleanupInterval);
-  }, 60000);
 
-  // MutationObserver for immediate reaction to new elements
+  // MutationObserver for immediate reaction to new elements (no interval needed)
   if (hasSiteTransformations()) {
     let debounceTimer = null;
     const observer = new MutationObserver((mutations) => {
