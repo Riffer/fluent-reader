@@ -131,6 +131,13 @@ const settingsBridge = {
         ipcRenderer.invoke("set-zoom-overlay", flag)
     },
 
+    getNsfwCleanup: (): boolean => {
+        return ipcRenderer.sendSync("get-nsfw-cleanup")
+    },
+    setNsfwCleanup: (flag: boolean) => {
+        ipcRenderer.invoke("set-nsfw-cleanup", flag)
+    },
+
     getAll: () => {
         return ipcRenderer.sendSync("get-all-settings") as Object
     },

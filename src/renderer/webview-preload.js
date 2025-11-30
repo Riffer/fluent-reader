@@ -10,21 +10,42 @@ try {
   // Zoom-Overlay Einstellung (default: aus)
   let showZoomOverlayEnabled = false;
 
-  // Zoom-Overlay für Debug-Anzeige
-  let zoomOverlay = null;
-  let zoomOverlayTimeout = null;
+  // Overlay für Debug-Anzeige (Zoom, NSFW-Cleanup, etc.)
+  let infoOverlay = null;
+  let infoOverlayTimeout = null;
+  
+  // Status-Nachrichten die zusammen mit dem Zoom angezeigt werden
+  let statusMessages = [];
 
-  function showZoomOverlay(level) {
-    // Nur anzeigen wenn aktiviert
+  /**
+   * Fügt eine Status-Nachricht hinzu die beim nächsten Overlay-Update angezeigt wird
+   * @param {string} message - Die Status-Nachricht
+   * @param {number} duration - Wie lange die Nachricht im Status bleibt (ms)
+   */
+  function addStatusMessage(message, duration = 3000) {
+    statusMessages.push(message);
+    // Nachricht nach duration wieder entfernen
+    setTimeout(() => {
+      const index = statusMessages.indexOf(message);
+      if (index > -1) {
+        statusMessages.splice(index, 1);
+      }
+    }, duration);
+    // Sofort anzeigen
+    updateOverlay();
+  }
+
+  /**
+   * Aktualisiert das Overlay mit allen aktuellen Nachrichten
+   */
+  function updateOverlay(zoomText = null) {
+    // Nur anzeigen wenn Overlay aktiviert ist
     if (!showZoomOverlayEnabled) return;
     
-    const factor = zoomLevelToFactor(level);
-    const percentage = Math.round(factor * 100);
-    
-    if (!zoomOverlay) {
-      zoomOverlay = document.createElement('div');
-      zoomOverlay.id = 'fr-zoom-overlay';
-      zoomOverlay.style.cssText = `
+    if (!infoOverlay) {
+      infoOverlay = document.createElement('div');
+      infoOverlay.id = 'fr-info-overlay';
+      infoOverlay.style.cssText = `
         position: fixed;
         top: 8px;
         right: 8px;
@@ -40,24 +61,48 @@ try {
         opacity: 0;
         transition: opacity 0.2s ease-out;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        white-space: pre-line;
       `;
-      document.body.appendChild(zoomOverlay);
+      document.body.appendChild(infoOverlay);
     }
     
-    zoomOverlay.textContent = `Zoom: ${percentage}%`;
-    zoomOverlay.style.opacity = '1';
+    // Kombiniere Zoom-Text und Status-Nachrichten
+    const lines = [];
+    if (zoomText) lines.push(zoomText);
+    lines.push(...statusMessages);
+    
+    if (lines.length === 0) {
+      infoOverlay.style.opacity = '0';
+      return;
+    }
+    
+    infoOverlay.textContent = lines.join('\n');
+    infoOverlay.style.opacity = '1';
     
     // Clear existing timeout
-    if (zoomOverlayTimeout) {
-      clearTimeout(zoomOverlayTimeout);
+    if (infoOverlayTimeout) {
+      clearTimeout(infoOverlayTimeout);
     }
     
-    // Fade out after 1.5 seconds
-    zoomOverlayTimeout = setTimeout(() => {
-      if (zoomOverlay) {
-        zoomOverlay.style.opacity = '0';
+    // Fade out after 1.5 seconds (nur wenn keine Status-Nachrichten mehr da sind)
+    infoOverlayTimeout = setTimeout(() => {
+      if (infoOverlay && statusMessages.length === 0) {
+        infoOverlay.style.opacity = '0';
       }
     }, 1500);
+  }
+
+  /**
+   * Zeigt eine kurze Nachricht im Overlay an (Legacy-Funktion)
+   */
+  function showOverlayMessage(message, duration = 1500) {
+    addStatusMessage(message, duration);
+  }
+
+  function showZoomOverlay(level) {
+    const factor = zoomLevelToFactor(level);
+    const percentage = Math.round(factor * 100);
+    updateOverlay(`Zoom: ${percentage}%`);
   }
 
   // Konvertierung: zoomLevel -> Faktor (linear: 10% pro Stufe)
@@ -280,6 +325,15 @@ try {
     }
   });
 
+  // NSFW-Cleanup Einstellung - synchron beim Start laden
+  let nsfwCleanupEnabled = false;
+  try {
+    nsfwCleanupEnabled = ipcRenderer.sendSync('get-nsfw-cleanup');
+    console.log('[webview-preload] NSFW-Cleanup loaded:', nsfwCleanupEnabled ? 'enabled' : 'disabled');
+  } catch (e) {
+    console.warn('[webview-preload] Could not load NSFW-Cleanup setting:', e);
+  }
+
   // Fallback: postMessage von Embedder
   window.addEventListener('message', (event) => {
     try {
@@ -448,20 +502,28 @@ try {
           
           // Shadow DOM: Overlay und Blur entfernen
           if (el.shadowRoot) {
-            // "18+ Inhalte anzeigen" Button verstecken
+            // "18+ Inhalte anzeigen" Button/Overlay verstecken
             const overlay = el.shadowRoot.querySelector('.overlay');
             if (overlay) overlay.style.display = 'none';
             
-            // Blur-Filter entfernen
-            const blurredInner = el.shadowRoot.querySelector('.inner.blurred');
-            if (blurredInner) {
-              blurredInner.style.filter = 'none';
-              blurredInner.classList.remove('blurred');
+            // Blur-Filter entfernen - alle möglichen Selektoren
+            el.shadowRoot.querySelectorAll('.inner.blurred, .blurred, [class*="blur"]').forEach(blurredEl => {
+              blurredEl.style.filter = 'none';
+              blurredEl.style.webkitFilter = 'none';
+              blurredEl.classList.remove('blurred');
+            });
+            
+            // Auch .inner direkt behandeln (falls ohne .blurred Klasse)
+            const inner = el.shadowRoot.querySelector('.inner');
+            if (inner) {
+              inner.style.filter = 'none';
+              inner.style.webkitFilter = 'none';
             }
             
             // Scrim (dunkles Overlay) entfernen
-            const scrim = el.shadowRoot.querySelector('.bg-scrim');
-            if (scrim) scrim.style.display = 'none';
+            el.shadowRoot.querySelectorAll('.bg-scrim, .scrim, [class*="scrim"]').forEach(scrim => {
+              scrim.style.display = 'none';
+            });
           }
           
           // Light DOM: Zeige revealed slot, verstecke blurred slot
@@ -474,6 +536,12 @@ try {
           if (blurred) {
             blurred.style.display = 'none';
           }
+          
+          // Auch direkte Kinder mit Blur behandeln
+          el.querySelectorAll('[style*="blur"], [style*="filter"]').forEach(child => {
+            child.style.filter = 'none';
+            child.style.webkitFilter = 'none';
+          });
         });
         
         // Modal-Wrapper mit Dialog-Rolle entfernen (App-Promo, Login-Prompts)
@@ -484,14 +552,23 @@ try {
         document.querySelectorAll('[data-testid="xpromo-app-selector"]').forEach(el => el.remove());
         document.querySelectorAll('.XPromoPopupRpl, .XPromoBlockingModal').forEach(el => el.remove());
         
-        // Cookie/Consent/Datenschutz Banner
-        document.querySelectorAll('#data-protection-consent-dialog').forEach(el => el.remove());
-        document.querySelectorAll('rpl-modal-card').forEach(el => el.remove());
-        document.querySelectorAll('.rpl-dialog').forEach(el => el.remove());
+        // Cookie/Consent/Datenschutz Banner - versuche "Ablehnen" zu klicken
+        const cookieDialog = document.querySelector('#data-protection-consent-dialog');
+        if (cookieDialog) {
+          // Suche nach "Ablehnen" Button (secondary-button Slot)
+          const rejectButton = cookieDialog.querySelector('[slot="secondary-button"]') ||
+                               cookieDialog.querySelector('button[data-testid="reject-nonessential-cookies-button"]');
+          if (rejectButton) {
+            rejectButton.click();
+            console.log('[webview-preload] Clicked cookie reject button');
+          } else {
+            // Fallback: Dialog entfernen wenn kein Button gefunden
+            cookieDialog.remove();
+          }
+        }
+        
+        // Weitere Cookie-Banner (die keinen "Ablehnen" Button haben)
         document.querySelectorAll('[data-testid="cookie-policy-banner"]').forEach(el => el.remove());
-        document.querySelectorAll('[class*="cookie-banner"]').forEach(el => el.remove());
-        document.querySelectorAll('[class*="cookie-consent"]').forEach(el => el.remove());
-        document.querySelectorAll('[id*="cookie"]').forEach(el => el.remove());
         document.querySelectorAll('shreddit-cookie-banner').forEach(el => el.remove());
         
         // Weitere störende Elemente
@@ -509,17 +586,49 @@ try {
     }
   ];
 
+  // Track if cleanup is complete (no more blocking elements found)
+  let cleanupComplete = false;
+
   function applySiteCleanup() {
     const url = window.location.href;
+    let foundBlockingElements = false;
+    
     siteTransformations.forEach(transform => {
       if (transform.patterns.some(pattern => pattern.test(url))) {
         try {
+          // Check if Reddit blocking elements exist before cleanup
+          if (/reddit\.com/.test(url)) {
+            // NSFW-Elemente
+            const nsfwContainer = document.querySelector('xpromo-nsfw-blocking-container');
+            const blurredContainer = document.querySelector('shreddit-blurred-container[blurred]');
+            const nsfwPrompt = nsfwContainer?.shadowRoot?.querySelector('.prompt');
+            const blurFilter = document.querySelector('shreddit-blurred-container')?.shadowRoot?.querySelector('.inner.blurred');
+            
+            // Cookie/Consent-Dialoge
+            const cookieDialog = document.querySelector('#data-protection-consent-dialog');
+            const cookieBanner = document.querySelector('shreddit-cookie-banner');
+            const rplModalCard = document.querySelector('rpl-modal-card');
+            const cookiePolicyBanner = document.querySelector('[data-testid="cookie-policy-banner"]');
+            
+            if (nsfwContainer || blurredContainer || nsfwPrompt || blurFilter ||
+                cookieDialog || cookieBanner || rplModalCard || cookiePolicyBanner) {
+              foundBlockingElements = true;
+            }
+          }
+          
           transform.cleanup();
+          
+          // Mark cleanup as complete if we found and processed blocking elements
+          if (foundBlockingElements) {
+            cleanupComplete = true;
+          }
         } catch (e) {
           console.error('[webview-preload] Site cleanup failed:', e);
         }
       }
     });
+    
+    return cleanupComplete;
   }
 
   // Check if any site transformation matches current URL
@@ -528,44 +637,64 @@ try {
     return siteTransformations.some(t => t.patterns.some(p => p.test(url)));
   }
 
-  // Run cleanup on DOMContentLoaded and after dynamic content loads
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', applySiteCleanup);
-  } else {
-    applySiteCleanup();
-  }
+  // Observer und Cleanup werden erst gestartet wenn NSFW-Cleanup aktiviert ist
+  let siteCleanupObserver = null;
+  let siteCleanupStarted = false;
 
-  // MutationObserver for immediate reaction to new elements (no interval needed)
-  if (hasSiteTransformations()) {
+  function startSiteCleanup() {
+    if (siteCleanupStarted || !hasSiteTransformations()) return;
+    siteCleanupStarted = true;
+    
+    console.log('[webview-preload] Starting site cleanup');
+    
+    // Initial cleanup
+    applySiteCleanup();
+    
+    // MutationObserver for immediate reaction to new elements
     let debounceTimer = null;
-    const observer = new MutationObserver((mutations) => {
+    
+    siteCleanupObserver = new MutationObserver((mutations) => {
       // Debounce to avoid too many calls
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        applySiteCleanup();
+        const cleanupDone = applySiteCleanup();
+        
+        // Stop observer once cleanup is complete
+        if (cleanupDone && siteCleanupObserver) {
+          siteCleanupObserver.disconnect();
+          siteCleanupObserver = null;
+          console.log('[webview-preload] Site cleanup complete, observer stopped');
+          showOverlayMessage('Site-Cleanup abgeschlossen', 2000);
+        }
       }, 50);
     });
 
-    // Start observing when DOM is ready
-    const startObserver = () => {
-      observer.observe(document.body, {
+    // Start observing
+    if (document.body) {
+      siteCleanupObserver.observe(document.body, {
         childList: true,
         subtree: true,
         attributes: true,
         attributeFilter: ['blurred', 'class', 'style']
       });
-    };
-
-    if (document.body) {
-      startObserver();
-    } else {
-      document.addEventListener('DOMContentLoaded', startObserver);
     }
 
-    // Stop observer after 60 seconds
+    // Fallback: Stop observer after 60 seconds if cleanup never completed
     setTimeout(() => {
-      observer.disconnect();
+      if (siteCleanupObserver) {
+        siteCleanupObserver.disconnect();
+        siteCleanupObserver = null;
+      }
     }, 60000);
+  }
+
+  // Cleanup automatisch starten wenn aktiviert (Einstellung wurde oben synchron geladen)
+  if (nsfwCleanupEnabled && hasSiteTransformations()) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startSiteCleanup);
+    } else {
+      startSiteCleanup();
+    }
   }
 
 } catch {

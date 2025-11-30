@@ -65,6 +65,7 @@ type ArticleState = {
     extractorTitle?: string
     extractorDate?: Date
     showZoomOverlay: boolean
+    nsfwCleanupEnabled: boolean
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -94,6 +95,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             isLoadingFull: false,
             appPath: "",
             showZoomOverlay: window.settings.getZoomOverlay(),
+            nsfwCleanupEnabled: window.settings.getNsfwCleanup(),
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -143,6 +145,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         window.settings.setZoomOverlay(newValue);
         this.setState({ showZoomOverlay: newValue });
         this.sendZoomOverlaySettingToPreload(newValue);
+    }
+
+    private toggleNsfwCleanup = () => {
+        const newValue = !this.state.nsfwCleanupEnabled;
+        window.settings.setNsfwCleanup(newValue);
+        this.setState({ nsfwCleanupEnabled: newValue });
+        // Webview neu laden damit die Einstellung greift
+        this.reloadWebview();
+    }
+
+    private reloadWebview = () => {
+        if (this.webview) {
+            try {
+                this.webview.reload();
+            } catch {}
+        }
     }
 
     setFontSize = (size: number) => {
@@ -347,6 +365,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             onClick: this.toggleZoomOverlay,
                         },
                         {
+                            key: "toggleNsfwCleanup",
+                            text: "NSFW-Cleanup (experimentell)",
+                            iconProps: { iconName: this.state.nsfwCleanupEnabled ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.state.nsfwCleanupEnabled,
+                            onClick: this.toggleNsfwCleanup,
+                        },
+                        {
                             key: "openAppDevTools",
                             text: "App Developer Tools",
                             iconProps: { iconName: "Code" },
@@ -526,6 +552,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.sendZoomToPreload(targetZoom);
             // Sende Zoom-Overlay-Einstellung nochmals
             this.sendZoomOverlaySettingToPreload(this.state.showZoomOverlay);
+            // NSFW-Cleanup wird jetzt synchron beim Preload-Start geladen, kein IPC nötig
         } catch {}
         // Focus auf Webview setzen nachdem alles geladen ist
         this.focusWebviewAfterLoad()
