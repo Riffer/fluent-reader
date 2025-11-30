@@ -416,6 +416,166 @@ try {
     }
   });
 
+  // ============================================
+  // Site-specific cleanup for normal web browsing
+  // ============================================
+  
+  const siteTransformations = [
+    {
+      // Reddit: Entferne NSFW-Dialoge, App-Promo, QR-Codes, Modals, Cookie-Banner
+      patterns: [/reddit\.com/],
+      cleanup: () => {
+        // NSFW/18+ Blocking Modals und Dialoge
+        document.querySelectorAll('faceplate-modal, faceplate-dialog').forEach(el => el.remove());
+        document.querySelectorAll('#nsfw-qr-dialog, #blocking-modal').forEach(el => el.remove());
+        
+        // NSFW Blocking Container - Shadow DOM manipulieren
+        document.querySelectorAll('xpromo-nsfw-blocking-container').forEach(container => {
+          // "In App anzeigen" Buttons im Light DOM entfernen
+          container.querySelectorAll('.viewInApp, a[slot="view-in-app-button"]').forEach(el => el.remove());
+          
+          // Shadow DOM: Prompt ("18+ Inhalt" Text) verstecken
+          if (container.shadowRoot) {
+            const prompt = container.shadowRoot.querySelector('.prompt');
+            if (prompt) prompt.style.display = 'none';
+          }
+        });
+        
+        // Blurred container für NSFW - Shadow DOM manipulieren
+        document.querySelectorAll('shreddit-blurred-container').forEach(el => {
+          el.removeAttribute('blurred');
+          el.setAttribute('mode', 'revealed');
+          
+          // Shadow DOM: Overlay und Blur entfernen
+          if (el.shadowRoot) {
+            // "18+ Inhalte anzeigen" Button verstecken
+            const overlay = el.shadowRoot.querySelector('.overlay');
+            if (overlay) overlay.style.display = 'none';
+            
+            // Blur-Filter entfernen
+            const blurredInner = el.shadowRoot.querySelector('.inner.blurred');
+            if (blurredInner) {
+              blurredInner.style.filter = 'none';
+              blurredInner.classList.remove('blurred');
+            }
+            
+            // Scrim (dunkles Overlay) entfernen
+            const scrim = el.shadowRoot.querySelector('.bg-scrim');
+            if (scrim) scrim.style.display = 'none';
+          }
+          
+          // Light DOM: Zeige revealed slot, verstecke blurred slot
+          const revealed = el.querySelector('[slot="revealed"]');
+          const blurred = el.querySelector('[slot="blurred"]');
+          if (revealed) {
+            revealed.style.display = 'block';
+            revealed.style.visibility = 'visible';
+          }
+          if (blurred) {
+            blurred.style.display = 'none';
+          }
+        });
+        
+        // Modal-Wrapper mit Dialog-Rolle entfernen (App-Promo, Login-Prompts)
+        document.querySelectorAll('#wrapper[role="dialog"][aria-modal="true"]').forEach(el => el.remove());
+        
+        // App-Download Banner und Prompts
+        document.querySelectorAll('[data-testid="xpromo-nsfw-blocking-modal"]').forEach(el => el.remove());
+        document.querySelectorAll('[data-testid="xpromo-app-selector"]').forEach(el => el.remove());
+        document.querySelectorAll('.XPromoPopupRpl, .XPromoBlockingModal').forEach(el => el.remove());
+        
+        // Cookie/Consent/Datenschutz Banner
+        document.querySelectorAll('#data-protection-consent-dialog').forEach(el => el.remove());
+        document.querySelectorAll('rpl-modal-card').forEach(el => el.remove());
+        document.querySelectorAll('.rpl-dialog').forEach(el => el.remove());
+        document.querySelectorAll('[data-testid="cookie-policy-banner"]').forEach(el => el.remove());
+        document.querySelectorAll('[class*="cookie-banner"]').forEach(el => el.remove());
+        document.querySelectorAll('[class*="cookie-consent"]').forEach(el => el.remove());
+        document.querySelectorAll('[id*="cookie"]').forEach(el => el.remove());
+        document.querySelectorAll('shreddit-cookie-banner').forEach(el => el.remove());
+        
+        // Weitere störende Elemente
+        document.querySelectorAll('[class*="bottom-sheet"]').forEach(el => el.remove());
+        document.querySelectorAll('[class*="overlay-container"]').forEach(el => el.remove());
+        
+        // Scrim/Backdrop entfernen (graue Overlay)
+        document.querySelectorAll('[class*="scrim"]').forEach(el => el.remove());
+        document.querySelectorAll('[class*="backdrop"]').forEach(el => el.remove());
+        
+        // Body scroll wieder aktivieren falls blockiert
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+      }
+    }
+  ];
+
+  function applySiteCleanup() {
+    const url = window.location.href;
+    siteTransformations.forEach(transform => {
+      if (transform.patterns.some(pattern => pattern.test(url))) {
+        try {
+          transform.cleanup();
+        } catch (e) {
+          console.error('[webview-preload] Site cleanup failed:', e);
+        }
+      }
+    });
+  }
+
+  // Check if any site transformation matches current URL
+  function hasSiteTransformations() {
+    const url = window.location.href;
+    return siteTransformations.some(t => t.patterns.some(p => p.test(url)));
+  }
+
+  // Run cleanup on DOMContentLoaded and after dynamic content loads
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applySiteCleanup);
+  } else {
+    applySiteCleanup();
+  }
+  
+  // Re-run cleanup more frequently (every 500ms) for dynamically loaded content
+  let cleanupInterval = setInterval(applySiteCleanup, 500);
+  
+  // Stop interval after 60 seconds to save resources
+  setTimeout(() => {
+    clearInterval(cleanupInterval);
+  }, 60000);
+
+  // MutationObserver for immediate reaction to new elements
+  if (hasSiteTransformations()) {
+    let debounceTimer = null;
+    const observer = new MutationObserver((mutations) => {
+      // Debounce to avoid too many calls
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        applySiteCleanup();
+      }, 50);
+    });
+
+    // Start observing when DOM is ready
+    const startObserver = () => {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['blurred', 'class', 'style']
+      });
+    };
+
+    if (document.body) {
+      startObserver();
+    } else {
+      document.addEventListener('DOMContentLoaded', startObserver);
+    }
+
+    // Stop observer after 60 seconds
+    setTimeout(() => {
+      observer.disconnect();
+    }, 60000);
+  }
+
 } catch {
   // Fehlerbehandlung: Stille Fehlerignorierung
 }
