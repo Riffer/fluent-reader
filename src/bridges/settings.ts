@@ -124,6 +124,13 @@ const settingsBridge = {
         ipcRenderer.invoke("set-nedb-status", flag)
     },
 
+    getZoomOverlay: (): boolean => {
+        return ipcRenderer.sendSync("get-zoom-overlay")
+    },
+    setZoomOverlay: (flag: boolean) => {
+        ipcRenderer.invoke("set-zoom-overlay", flag)
+    },
+
     getAll: () => {
         return ipcRenderer.sendSync("get-all-settings") as Object
     },

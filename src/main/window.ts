@@ -36,6 +36,17 @@ export class WindowManager {
             }
         })
 
+        // App DevTools öffnen/schließen (stabiler als Webview-DevTools)
+        ipcMain.handle("toggle-app-devtools", () => {
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                if (this.mainWindow.webContents.isDevToolsOpened()) {
+                    this.mainWindow.webContents.closeDevTools()
+                } else {
+                    this.mainWindow.webContents.openDevTools()
+                }
+            }
+        })
+
         app.on("second-instance", () => {
             if (this.mainWindow !== null) {
                 this.mainWindow.focus()

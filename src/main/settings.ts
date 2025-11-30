@@ -204,3 +204,11 @@ ipcMain.on("get-nedb-status", event => {
 ipcMain.handle("set-nedb-status", (_, flag: boolean) => {
     store.set(NEDB_STATUS_STORE_KEY, flag)
 })
+
+const ZOOM_OVERLAY_STORE_KEY = "showZoomOverlay"
+ipcMain.on("get-zoom-overlay", event => {
+    event.returnValue = store.get(ZOOM_OVERLAY_STORE_KEY, false)
+})
+ipcMain.handle("set-zoom-overlay", (_, flag: boolean) => {
+    store.set(ZOOM_OVERLAY_STORE_KEY, flag)
+})
