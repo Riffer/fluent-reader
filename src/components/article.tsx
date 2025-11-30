@@ -837,6 +837,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             // Use article-extractor via IPC to extract clean article content
             const article = await window.articleExtractor.extractFromHtml(html, link)
+            
             if (link === this.props.item.link) {
                 // If extraction successful, use extracted content; otherwise use fallback
                 let contentToUse = (article && article.content) ? article.content : null
@@ -988,15 +989,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Remove script/style tags
             doc.querySelectorAll('script, style, noscript').forEach(el => el.remove())
             
-            // Remove empty/junk elements
+            // Remove empty/junk elements (but preserve elements with images!)
             doc.querySelectorAll('div, section').forEach((div) => {
                 const text = (div as HTMLElement).textContent || ''
                 const innerHTML = (div as HTMLElement).innerHTML || ''
                 
-                // Remove if mostly empty or contains tracking params with no text
-                if (text.trim().length === 0) {
+                // Check if element contains images - don't remove containers with images
+                const hasImages = div.querySelector('img, picture, video, iframe') !== null
+                
+                // Remove if mostly empty AND has no images, or contains tracking params with no text
+                if (text.trim().length === 0 && !hasImages) {
                     div.remove()
-                } else if ((innerHTML.includes('?a=') || innerHTML.includes('?utm_') || innerHTML.includes('?ref=')) && text.trim().length < 50) {
+                } else if ((innerHTML.includes('?a=') || innerHTML.includes('?utm_') || innerHTML.includes('?ref=')) && text.trim().length < 50 && !hasImages) {
                     div.remove()
                 }
             })
