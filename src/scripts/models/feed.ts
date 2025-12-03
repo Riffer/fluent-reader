@@ -369,6 +369,8 @@ export function feedReducer(
                     let nextState = { ...state }
                     const existingIds = new Set<number>()
                     
+                    console.log(`[feedReducer FETCH_ITEMS] Processing ${action.items.length} new items`)
+                    
                     for (let feed of Object.values(state)) {
                         // Clear existing IDs for each feed
                         existingIds.clear()
@@ -384,6 +386,8 @@ export function feedReducer(
                                     !existingIds.has(i._id) // Don't add if already exists
                             )
                             if (newItems.length > 0) {
+                                console.log(`[feedReducer] Feed "${feed._id}": Adding ${newItems.length} new items (had ${feed.iids.length} items)`)
+                                
                                 // Merge new items with existing items and sort by date
                                 let allIds = [...feed.iids, ...newItems.map(i => i._id)]
                                 // Create a map for quick lookup of new items
@@ -395,10 +399,22 @@ export function feedReducer(
                                     .filter((item): item is RSSItem => item !== undefined)
                                     .sort((a, b) => b.date.getTime() - a.date.getTime())
                                 
+                                // Check for items that got lost
+                                const lostItems = allIds.length - allItems.length
+                                if (lostItems > 0) {
+                                    console.warn(`[feedReducer] Feed "${feed._id}": ${lostItems} items lost during merge (not in itemState or newItemMap)`)
+                                }
+                                
                                 nextState[feed._id] = {
                                     ...feed,
                                     iids: allItems.map(i => i._id),
                                 }
+                            }
+                        } else {
+                            // Feed not loaded - new items won't be added to this feed's iids
+                            const potentialNewItems = action.items.filter(i => feed.sids.includes(i.source))
+                            if (potentialNewItems.length > 0) {
+                                console.log(`[feedReducer] Feed "${feed._id}" NOT LOADED - ${potentialNewItems.length} new items NOT added to iids`)
                             }
                         }
                     }

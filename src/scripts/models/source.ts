@@ -74,7 +74,7 @@ export class RSSSource {
         item: MyParserItem
     ): Promise<RSSItem> {
         let i = new RSSItem(item, source)
-        const items = (await db.itemsDB
+        const existingItems = (await db.itemsDB
             .select()
             .from(db.items)
             .where(
@@ -86,7 +86,12 @@ export class RSSSource {
             )
             .limit(1)
             .exec()) as RSSItem[]
-        if (items.length === 0) {
+        
+        if (existingItems.length > 0) {
+            console.log(`[checkItem] DUPLICATE found for "${i.title?.substring(0, 50)}..." (source=${source.name}, date=${i.date?.toISOString()})`)
+        }
+        
+        if (existingItems.length === 0) {
             RSSItem.parseContent(i, item)
             if (source.rules) SourceRule.applyAll(source.rules, i)
             return i
