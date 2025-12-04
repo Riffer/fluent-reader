@@ -87,10 +87,6 @@ export class RSSSource {
             .limit(1)
             .exec()) as RSSItem[]
         
-        if (existingItems.length > 0) {
-            console.log(`[checkItem] DUPLICATE found for "${i.title?.substring(0, 50)}..." (source=${source.name}, date=${i.date?.toISOString()})`)
-        }
-        
         if (existingItems.length === 0) {
             RSSItem.parseContent(i, item)
             if (source.rules) SourceRule.applyAll(source.rules, i)
