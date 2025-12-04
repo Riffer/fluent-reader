@@ -97,7 +97,10 @@ export async function decodeFetchResponse(response: Response, isHTML = false) {
 export async function parseRSS(url: string) {
     let result: Response
     try {
-        result = await fetch(url, { credentials: "omit" })
+        result = await fetch(url, { 
+            credentials: "omit",
+            cache: "no-store"  // Bypass HTTP cache to always get fresh RSS
+        })
     } catch {
         throw new Error(intl.get("log.networkError"))
     }

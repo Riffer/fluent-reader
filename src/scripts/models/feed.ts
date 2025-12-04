@@ -434,6 +434,7 @@ export function feedReducer(
         case INIT_FEED:
             switch (action.status) {
                 case ActionStatus.Success:
+                    console.log(`[feedReducer INIT_FEED] Feed "${action.feed._id}": Loaded ${action.items.length} items from DB`)
                     return {
                         ...state,
                         [action.feed._id]: {
@@ -502,6 +503,7 @@ export function feedReducer(
         case SELECT_PAGE:
             switch (action.pageType) {
                 case PageType.Sources:
+                    console.log(`[feedReducer SELECT_PAGE] Creating SOURCE feed with ${action.sids.length} sources`)
                     return {
                         ...state,
                         [SOURCE]: new RSSFeed(
@@ -511,6 +513,7 @@ export function feedReducer(
                         ),
                     }
                 case PageType.AllArticles:
+                    console.log(`[feedReducer SELECT_PAGE] AllArticles - init=${action.init}`)
                     return action.init
                         ? {
                               ...state,
