@@ -74,7 +74,7 @@ export class RSSSource {
         item: MyParserItem
     ): Promise<RSSItem> {
         let i = new RSSItem(item, source)
-        const items = (await db.itemsDB
+        const existingItems = (await db.itemsDB
             .select()
             .from(db.items)
             .where(
@@ -86,7 +86,8 @@ export class RSSSource {
             )
             .limit(1)
             .exec()) as RSSItem[]
-        if (items.length === 0) {
+        
+        if (existingItems.length === 0) {
             RSSItem.parseContent(i, item)
             if (source.rules) SourceRule.applyAll(source.rules, i)
             return i
@@ -115,8 +116,16 @@ export class RSSSource {
     }
 
     static async fetchItems(source: RSSSource) {
-        let feed = await parseRSS(source.url)
-        return await this.checkItems(source, feed.items)
+        try {
+            let feed = await parseRSS(source.url)
+            console.log(`[fetchItems] "${source.name}": RSS returned ${feed.items?.length ?? 0} items`)
+            return await this.checkItems(source, feed.items)
+        } catch (e) {
+            // Erweitere Fehlermeldung um Source-Info
+            const errorMsg = e instanceof Error ? e.message : String(e)
+            console.error(`[fetchItems] Error fetching "${source.name}" (${source.url}): ${errorMsg}`)
+            throw e
+        }
     }
 }
 

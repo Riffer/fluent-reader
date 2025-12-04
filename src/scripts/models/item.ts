@@ -196,13 +196,19 @@ export function fetchItemsIntermediate(): ItemActionTypes {
 }
 
 export async function insertItems(items: RSSItem[]): Promise<RSSItem[]> {
+    console.log(`[insertItems] Attempting to insert ${items.length} items`)
+    if (items.length > 0) {
+        console.log(`[insertItems] First item: "${items[0].title?.substring(0, 50)}..." (date=${items[0].date?.toISOString()})`)
+    }
     items.sort((a, b) => a.date.getTime() - b.date.getTime())
     const rows = items.map(item => db.items.createRow(item))
-    return (await db.itemsDB
+    const inserted = (await db.itemsDB
         .insert()
         .into(db.items)
         .values(rows)
         .exec()) as RSSItem[]
+    console.log(`[insertItems] Successfully inserted ${inserted.length} items`)
+    return inserted
 }
 
 export function fetchItems(
@@ -222,6 +228,28 @@ export function fetchItems(
                 await dispatch(syncWithService(background))
             let timenow = new Date().getTime()
             const sourcesState = getState().sources
+            
+            // Debug: Log all sources and their fetch status
+            console.log('[fetchItems] Checking sources for fetch...')
+            const allSources = sids === null 
+                ? Object.values(sourcesState)
+                : sids.map(sid => sourcesState[sid])
+            
+            for (let s of allSources) {
+                const last = s.lastFetched ? s.lastFetched.getTime() : 0
+                const freqMs = (s.fetchFrequency || 0) * 60000
+                const nextFetch = last + freqMs
+                const shouldFetch = !s.serviceRef && (last > timenow || nextFetch <= timenow)
+                console.log(`[fetchItems] Source "${s.name}" (sid=${s.sid}):`, {
+                    serviceRef: s.serviceRef || 'none',
+                    lastFetched: s.lastFetched ? new Date(last).toISOString() : 'never',
+                    fetchFrequency: s.fetchFrequency || 0,
+                    nextFetchDue: new Date(nextFetch).toISOString(),
+                    now: new Date(timenow).toISOString(),
+                    shouldFetch
+                })
+            }
+            
             let sources =
                 sids === null
                     ? Object.values(sourcesState).filter(s => {
@@ -236,6 +264,9 @@ export function fetchItems(
                     : sids
                           .map(sid => sourcesState[sid])
                           .filter(s => !s.serviceRef)
+            
+            console.log(`[fetchItems] Will fetch ${sources.length} sources:`, sources.map(s => s.name))
+            
             for (let source of sources) {
                 // Erstelle das Haupt-Promise für fetchItems
                 let fetchPromise = RSSSource.fetchItems(source)
@@ -255,15 +286,28 @@ export function fetchItems(
             dispatch(fetchItemsRequest(promises.length))
             const results = await Promise.allSettled(promises)
             let items = new Array<RSSItem>()
+            let fetchedCount = 0
+            let duplicateCount = 0
             results.map((r, i) => {
-                if (r.status === "fulfilled") items.push(...r.value)
+                if (r.status === "fulfilled") {
+                    fetchedCount += r.value.length
+                    items.push(...r.value)
+                }
                 else {
-                    console.log(r.reason)
+                    // Log mit Source-Info für bessere Diagnose
+                    const source = sources[i]
+                    const errorMsg = r.reason instanceof Error ? r.reason.message : String(r.reason)
+                    console.error(`[fetchItems] Error fetching "${source.name}" (${source.url}): ${errorMsg}`)
                     dispatch(fetchItemsFailure(sources[i], r.reason))
                 }
             })
+            
+            console.log(`[fetchItems] Fetched ${fetchedCount} new items from ${sources.length} sources (after duplicate check)`)
+            
             try {
                 const inserted = await insertItems(items)
+                console.log(`[fetchItems] Final result: ${inserted.length} items inserted into DB`)
+                
                 dispatch(
                     fetchItemsSuccess(
                         inserted.reverse(),
