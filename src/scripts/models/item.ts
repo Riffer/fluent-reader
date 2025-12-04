@@ -294,7 +294,10 @@ export function fetchItems(
                     items.push(...r.value)
                 }
                 else {
-                    console.log(r.reason)
+                    // Log mit Source-Info für bessere Diagnose
+                    const source = sources[i]
+                    const errorMsg = r.reason instanceof Error ? r.reason.message : String(r.reason)
+                    console.error(`[fetchItems] Error fetching "${source.name}" (${source.url}): ${errorMsg}`)
                     dispatch(fetchItemsFailure(sources[i], r.reason))
                 }
             })
