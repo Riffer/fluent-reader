@@ -120,8 +120,15 @@ export class RSSSource {
     }
 
     static async fetchItems(source: RSSSource) {
-        let feed = await parseRSS(source.url)
-        return await this.checkItems(source, feed.items)
+        try {
+            let feed = await parseRSS(source.url)
+            return await this.checkItems(source, feed.items)
+        } catch (e) {
+            // Erweitere Fehlermeldung um Source-Info
+            const errorMsg = e instanceof Error ? e.message : String(e)
+            console.error(`[fetchItems] Error fetching "${source.name}" (${source.url}): ${errorMsg}`)
+            throw e
+        }
     }
 }
 
