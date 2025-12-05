@@ -47,6 +47,10 @@ type ArticleProps = {
         source: RSSSource,
         direction: SourceTextDirection
     ) => void
+    updateMobileMode: (
+        source: RSSSource,
+        mobileMode: boolean
+    ) => void
 }
 
 type ArticleState = {
@@ -145,6 +149,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         window.settings.setZoomOverlay(newValue);
         this.setState({ showZoomOverlay: newValue });
         this.sendZoomOverlaySettingToPreload(newValue);
+    }
+
+    private toggleMobileMode = () => {
+        const newMobileMode = !this.props.source.mobileMode;
+        this.props.updateMobileMode(this.props.source, newMobileMode);
+        // Webview neu laden damit die Einstellung greift
+        this.reloadWebview();
     }
 
     private toggleNsfwCleanup = () => {
@@ -363,6 +374,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             canCheck: true,
                             checked: this.state.showZoomOverlay,
                             onClick: this.toggleZoomOverlay,
+                        },
+                        {
+                            key: "toggleMobileMode",
+                            text: "Mobile Ansicht",
+                            iconProps: { iconName: this.props.source.mobileMode ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.props.source.mobileMode || false,
+                            disabled: !this.state.loadWebpage,
+                            onClick: this.toggleMobileMode,
                         },
                         {
                             key: "toggleNsfwCleanup",
