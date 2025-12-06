@@ -81,21 +81,41 @@ export class WindowManager {
             }
         })
 
+        // Speichert für welche webContentsIds die Emulation bereits aktiviert wurde
+        const emulatedWebContentsIds = new Set<number>()
+
         // Device Emulation für Webviews aktivieren (Mobile Mode)
         ipcMain.handle("enable-device-emulation", (_event, webContentsId: number, params: any) => {
+            // Deduplizierung: Nur einmal pro webContentsId aktivieren
+            if (emulatedWebContentsIds.has(webContentsId)) {
+                console.log('[DeviceEmulation] Skipping (already enabled for webContentsId:', webContentsId, ')')
+                return true
+            }
+            
+            console.log('[DeviceEmulation] Request received for webContentsId:', webContentsId)
             try {
                 const wc = webContents.fromId(webContentsId)
                 if (wc && !wc.isDestroyed()) {
-                    wc.enableDeviceEmulation({
+                    // User-Agent ändern wenn angegeben
+                    if (params.userAgent) {
+                        wc.setUserAgent(params.userAgent)
+                        console.log('[DeviceEmulation] User-Agent set')
+                    }
+                    
+                    const emulationParams = {
                         screenPosition: params.screenPosition || "mobile",
                         screenSize: params.screenSize || { width: 390, height: 844 },
                         deviceScaleFactor: params.deviceScaleFactor || 3,
                         viewSize: params.viewSize || { width: 390, height: 844 },
                         fitToView: params.fitToView !== undefined ? params.fitToView : true
-                    })
-                    console.log('[DeviceEmulation] Enabled for webContentsId:', webContentsId)
+                    }
+                    console.log('[DeviceEmulation] Applying emulation:', JSON.stringify(emulationParams))
+                    wc.enableDeviceEmulation(emulationParams)
+                    emulatedWebContentsIds.add(webContentsId)
+                    console.log('[DeviceEmulation] SUCCESS - Enabled for webContentsId:', webContentsId)
                     return true
                 }
+                console.log('[DeviceEmulation] FAILED - webContents not found or destroyed')
                 return false
             } catch (e) {
                 console.error('[DeviceEmulation] Error:', e)
@@ -106,9 +126,12 @@ export class WindowManager {
         // Device Emulation für Webviews deaktivieren
         ipcMain.handle("disable-device-emulation", (_event, webContentsId: number) => {
             try {
+                emulatedWebContentsIds.delete(webContentsId)  // Aus dem Set entfernen
                 const wc = webContents.fromId(webContentsId)
                 if (wc && !wc.isDestroyed()) {
                     wc.disableDeviceEmulation()
+                    // User-Agent zurücksetzen auf Standard
+                    wc.setUserAgent('')  // Leerer String = Standard-User-Agent
                     console.log('[DeviceEmulation] Disabled for webContentsId:', webContentsId)
                     return true
                 }

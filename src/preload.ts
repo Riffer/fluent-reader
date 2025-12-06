@@ -25,7 +25,7 @@ const limitedIpcRenderer = {
     },
     // Article extraction via IPC
     invoke: (channel: string, ...args: any[]) => {
-        if (["extract-article", "extract-article-html", "get-app-path", "toggle-app-devtools"].includes(channel)) {
+        if (["extract-article", "extract-article-html", "get-app-path", "toggle-app-devtools", "enable-device-emulation", "disable-device-emulation"].includes(channel)) {
             return ipcRenderer.invoke(channel, ...args)
         }
     },
