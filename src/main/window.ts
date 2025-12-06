@@ -4,6 +4,15 @@ import path from 'path';
 import { setThemeListener } from "./settings"
 import { setUtilsListeners } from "./utils"
 import { setupArticleExtractorHandlers } from "./article-extractor"
+import {
+    loadCookiesForHost,
+    saveCookiesForHost,
+    deleteCookiesForHost,
+    getCookiesFromSession,
+    setCookiesToSession,
+    extractHost,
+    listSavedHosts
+} from "./cookie-persist"
 
 /**
  * Set up cookies to bypass consent dialogs and age gates
@@ -140,6 +149,61 @@ export class WindowManager {
                 console.error('[DeviceEmulation] Error:', e)
                 return false
             }
+        })
+
+        // ===== Cookie Persistence IPC Handlers =====
+
+        // Cookies für einen Host laden und in Session setzen
+        ipcMain.handle("load-persisted-cookies", async (_event, url: string) => {
+            const host = extractHost(url)
+            if (!host) {
+                console.log("[CookiePersist] Invalid URL, cannot load cookies:", url)
+                return { success: false, count: 0 }
+            }
+
+            const cookies = await loadCookiesForHost(host)
+            if (cookies.length === 0) {
+                return { success: true, count: 0 }
+            }
+
+            const count = await setCookiesToSession(session.defaultSession, host, cookies)
+            return { success: true, count }
+        })
+
+        // Cookies für einen Host aus Session holen und speichern
+        ipcMain.handle("save-persisted-cookies", async (_event, url: string) => {
+            const host = extractHost(url)
+            if (!host) {
+                console.log("[CookiePersist] Invalid URL, cannot save cookies:", url)
+                return { success: false }
+            }
+
+            const cookies = await getCookiesFromSession(session.defaultSession, host)
+            if (cookies.length === 0) {
+                console.log("[CookiePersist] No cookies to save for host:", host)
+                return { success: true, count: 0 }
+            }
+
+            const success = await saveCookiesForHost(host, cookies)
+            return { success, count: cookies.length }
+        })
+
+        // Gespeicherte Cookies für einen Host löschen
+        ipcMain.handle("delete-persisted-cookies", async (_event, url: string) => {
+            const host = extractHost(url)
+            if (!host) {
+                console.log("[CookiePersist] Invalid URL, cannot delete cookies:", url)
+                return { success: false }
+            }
+
+            const success = await deleteCookiesForHost(host)
+            return { success }
+        })
+
+        // Liste aller Hosts mit gespeicherten Cookies
+        ipcMain.handle("list-persisted-cookie-hosts", async () => {
+            const hosts = listSavedHosts()
+            return { hosts }
         })
 
         app.on("second-instance", () => {

@@ -96,6 +96,14 @@ const mapDispatchToProps = (dispatch: AppDispatch) => {
                 updateSource({ ...source, mobileMode: mobileMode } as RSSSource)
             )
         },
+        updatePersistCookies: (
+            source: RSSSource,
+            persistCookies: boolean
+        ) => {
+            dispatch(
+                updateSource({ ...source, persistCookies: persistCookies } as RSSSource)
+            )
+        },
     }
 }
 

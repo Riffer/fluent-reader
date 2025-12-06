@@ -182,6 +182,47 @@ const utilsBridge = {
     initFontList: (): Promise<Array<string>> => {
         return ipcRenderer.invoke("init-font-list")
     },
+
+    // ===== Cookie Persistence =====
+    
+    /**
+     * Lädt gespeicherte Cookies für eine URL und setzt sie in die Session
+     */
+    loadPersistedCookies: async (url: string): Promise<{ success: boolean; count: number }> => {
+        console.log("[CookiePersist] Renderer: Loading cookies for URL:", url)
+        const result = await ipcRenderer.invoke("load-persisted-cookies", url)
+        console.log("[CookiePersist] Renderer: Load result:", result)
+        return result
+    },
+
+    /**
+     * Speichert aktuelle Session-Cookies für eine URL
+     */
+    savePersistedCookies: async (url: string): Promise<{ success: boolean; count?: number }> => {
+        console.log("[CookiePersist] Renderer: Saving cookies for URL:", url)
+        const result = await ipcRenderer.invoke("save-persisted-cookies", url)
+        console.log("[CookiePersist] Renderer: Save result:", result)
+        return result
+    },
+
+    /**
+     * Löscht gespeicherte Cookies für eine URL
+     */
+    deletePersistedCookies: async (url: string): Promise<{ success: boolean }> => {
+        console.log("[CookiePersist] Renderer: Deleting cookies for URL:", url)
+        const result = await ipcRenderer.invoke("delete-persisted-cookies", url)
+        console.log("[CookiePersist] Renderer: Delete result:", result)
+        return result
+    },
+
+    /**
+     * Listet alle Hosts mit gespeicherten Cookies auf
+     */
+    listPersistedCookieHosts: async (): Promise<{ hosts: string[] }> => {
+        const result = await ipcRenderer.invoke("list-persisted-cookie-hosts")
+        console.log("[CookiePersist] Renderer: Saved cookie hosts:", result.hosts)
+        return result
+    },
 }
 
 declare global {

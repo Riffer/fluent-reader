@@ -51,6 +51,10 @@ type ArticleProps = {
         source: RSSSource,
         mobileMode: boolean
     ) => void
+    updatePersistCookies: (
+        source: RSSSource,
+        persistCookies: boolean
+    ) => void
 }
 
 type ArticleState = {
@@ -163,6 +167,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.reloadWebview();
     }
 
+    private togglePersistCookies = () => {
+        const newValue = !this.props.source.persistCookies;
+        console.log("[CookiePersist] Article: Toggle persistCookies:", newValue)
+        this.props.updatePersistCookies(this.props.source, newValue);
+        
+        if (newValue) {
+            // Wenn aktiviert, sofort aktuelle Cookies speichern
+            this.savePersistedCookies();
+        }
+    }
+
     // Device Emulation für Mobile Mode aktivieren
     private enableMobileEmulation = async () => {
         if (!this.webview) return false;
@@ -238,6 +253,49 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             try {
                 this.webview.reload();
             } catch {}
+        }
+    }
+
+    // ===== Cookie Persistence =====
+    
+    /**
+     * Lädt gespeicherte Cookies für den aktuellen Artikel (falls persistCookies aktiviert)
+     */
+    private loadPersistedCookies = async () => {
+        if (!this.props.source.persistCookies) {
+            console.log("[CookiePersist] Article: persistCookies disabled for source:", this.props.source.name)
+            return
+        }
+        
+        const url = this.state.loadWebpage ? this.props.item.link : this.props.item.link
+        console.log("[CookiePersist] Article: Loading cookies for article:", this.props.item.title)
+        console.log("[CookiePersist] Article: URL:", url)
+        
+        try {
+            const result = await window.utils.loadPersistedCookies(url)
+            console.log("[CookiePersist] Article: Load result:", result)
+        } catch (e) {
+            console.error("[CookiePersist] Article: Error loading cookies:", e)
+        }
+    }
+    
+    /**
+     * Speichert aktuelle Cookies für den Artikel (falls persistCookies aktiviert)
+     */
+    private savePersistedCookies = async () => {
+        if (!this.props.source.persistCookies) {
+            return
+        }
+        
+        const url = this.state.loadWebpage ? this.props.item.link : this.props.item.link
+        console.log("[CookiePersist] Article: Saving cookies for article:", this.props.item.title)
+        console.log("[CookiePersist] Article: URL:", url)
+        
+        try {
+            const result = await window.utils.savePersistedCookies(url)
+            console.log("[CookiePersist] Article: Save result:", result)
+        } catch (e) {
+            console.error("[CookiePersist] Article: Error saving cookies:", e)
         }
     }
 
@@ -468,6 +526,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             onClick: this.toggleAutoCookieConsent,
                         },
                         {
+                            key: "togglePersistCookies",
+                            text: "Cookies speichern (Login)",
+                            iconProps: { iconName: (this.props.source.persistCookies || false) ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.props.source.persistCookies || false,
+                            disabled: !this.state.loadWebpage,
+                            onClick: this.togglePersistCookies,
+                        },
+                        {
                             key: "openAppDevTools",
                             text: "App Developer Tools",
                             iconProps: { iconName: "Code" },
@@ -695,6 +762,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // NSFW-Cleanup wird jetzt synchron beim Preload-Start geladen, kein IPC nötig
         } catch {}
         
+        // Cookies speichern nach dem Laden (für Login-Flows)
+        if (this.props.source.persistCookies && this.state.loadWebpage) {
+            console.log("[CookiePersist] Article: Saving cookies after page load (did-stop-loading)")
+            this.savePersistedCookies()
+        }
+        
         // Focus auf Webview setzen nachdem alles geladen ist
         this.focusWebviewAfterLoad()
     }
@@ -721,6 +794,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             }).catch((err: any) => {
                 console.error("[componentDidMount] Failed to get app path:", err)
             })
+        }
+        
+        // Persistierte Cookies laden beim ersten Mount
+        if (this.props.source.persistCookies) {
+            console.log("[CookiePersist] Article: Loading cookies on mount")
+            this.loadPersistedCookies()
         }
         
         // Load full content if needed
@@ -836,6 +915,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     componentDidUpdate = (prevProps: ArticleProps) => {
         if (prevProps.item._id != this.props.item._id) {
+            // Cookies des alten Artikels speichern (falls persistCookies aktiviert war)
+            if (prevProps.source.persistCookies) {
+                console.log("[CookiePersist] Article: Saving cookies before article change")
+                window.utils.savePersistedCookies(prevProps.item.link).catch(e => {
+                    console.error("[CookiePersist] Article: Error saving on article change:", e)
+                })
+            }
+            
             // Reset für neuen Artikel - webContentsId wird sich ändern
             this.mobileEmulationWebContentsId = null;
             
@@ -850,6 +937,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.webview.closeDevTools()
                 }
             } catch {}
+            
+            // Cookies für neuen Artikel laden (falls persistCookies aktiviert)
+            if (this.props.source.persistCookies) {
+                console.log("[CookiePersist] Article: Loading cookies for new article")
+                this.loadPersistedCookies()
+            }
             
             const loadFull = this.props.source.openTarget === SourceOpenTarget.FullContent
             this.setState({
@@ -902,6 +995,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     componentWillUnmount = () => {
         this._isMounted = false
+        
+        // Cookies speichern bevor die Komponente zerstört wird
+        if (this.props.source.persistCookies) {
+            console.log("[CookiePersist] Article: Saving cookies on unmount")
+            window.utils.savePersistedCookies(this.props.item.link).catch(e => {
+                console.error("[CookiePersist] Article: Error saving on unmount:", e)
+            })
+        }
         
         // Close DevTools before unmount to prevent crash
         try {

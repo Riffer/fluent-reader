@@ -232,10 +232,12 @@ function outlineToSource(
         defaultZoom = Number(defaultZoomString)
     let mobileModeString = outline.getAttribute("mobileMode")
     let mobileMode = mobileModeString === "true"
+    let persistCookiesString = outline.getAttribute("persistCookies")
+    let persistCookies = persistCookiesString === "true"
     
     let name = outline.getAttribute("text") || outline.getAttribute("title")
     if (url) {
-        return [addSource(url.trim(), name, true, openTarget, defaultZoom, mobileMode), url]
+        return [addSource(url.trim(), name, true, openTarget, defaultZoom, mobileMode, persistCookies), url]
     } else {
         return null
     }
@@ -331,6 +333,7 @@ function sourceToOutline(source: RSSSource, xml: Document) {
     outline.setAttribute("openTarget", SourceOpenTarget[source.openTarget])
     outline.setAttribute("defaultZoom", source.defaultZoom.toString())
     outline.setAttribute("mobileMode", source.mobileMode ? "true" : "false")
+    outline.setAttribute("persistCookies", source.persistCookies ? "true" : "false")
     return outline
 }
 
