@@ -156,11 +156,56 @@ webview.addEventListener('did-finish-load', () => {
 
 **Technische Umsetzung:**
 - Electron `session.cookies` API für Cookie-Zugriff
-- Host-Extraktion aus URL (z.B. `www.nytimes.com` → `nytimes.com`)
-- Speicherung in separater Tabelle/Store (nicht in RSSSource)
+- Host bleibt vollständig erhalten (inkl. Subdomain): `www.reddit.com`, `old.reddit.com` separat
+- Speicherung in separatem `cookies/`-Verzeichnis mit einer JSON-Datei pro Host
 
-**Noch zu klären:**
-- [ ] Speicherort: Lovefield/IndexedDB oder separate JSON-Datei?
+**Speicherstruktur:**
+```
+%APPDATA%/fluent-reader/
+└── cookies/
+    ├── www.reddit.com.json
+    ├── old.reddit.com.json
+    ├── shop.spiegel.de.json
+    └── www.nytimes.com.json
+```
+
+**Dateiformat (pro Host):**
+```json
+{
+  "host": "www.reddit.com",
+  "lastUpdated": "2025-01-15T10:30:00.000Z",
+  "cookies": [
+    {
+      "name": "session_token",
+      "value": "abc123...",
+      "domain": ".reddit.com",
+      "path": "/",
+      "httpOnly": true,
+      "secure": true,
+      "expirationDate": 1737000000
+    }
+  ]
+}
+```
+
+**Hostname-Sanitisierung für Dateinamen:**
+```typescript
+function hostToFilename(host: string): string {
+  // Ungültige Zeichen für Windows-Dateisysteme ersetzen
+  let sanitized = host.replace(/[<>:"\/\\|?*]/g, '_');
+  
+  // Maximale Länge beachten (255 chars inkl. .json)
+  if (sanitized.length > 200) {
+    const hash = crypto.createHash('md5').update(host).digest('hex').substring(0, 8);
+    sanitized = sanitized.substring(0, 190) + '_' + hash;
+  }
+  
+  return sanitized + '.json';
+}
+```
+
+**Wichtig:** Subdomains werden NICHT entfernt, da unterschiedliche Subdomains 
+unterschiedliche Sessions haben können (z.B. `www.reddit.com` vs `old.reddit.com`).
 
 ---
 
