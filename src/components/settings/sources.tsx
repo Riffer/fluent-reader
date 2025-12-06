@@ -205,7 +205,12 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
     addSource = (event: React.FormEvent) => {
         event.preventDefault()
         let trimmed = this.state.newUrl.trim()
-        if (urlTest(trimmed)) this.props.addSource(trimmed)
+        if (urlTest(trimmed)) {
+            // Fehler werden bereits in addSource() behandelt und dem Benutzer angezeigt
+            this.props.addSource(trimmed).catch(() => {
+                // Fehler bereits in Redux-Action behandelt - hier nur Promise-Rejection unterdrücken
+            })
+        }
     }
 
     onOpenTargetChange = (_, option: IChoiceGroupOption) => {
