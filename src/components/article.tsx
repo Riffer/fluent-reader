@@ -75,6 +75,7 @@ type ArticleState = {
     showZoomOverlay: boolean
     nsfwCleanupEnabled: boolean
     autoCookieConsentEnabled: boolean
+    inputModeEnabled: boolean  // Eingabe-Modus: Shortcuts deaktiviert für Login etc.
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -85,6 +86,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     currentZoom: number = 0  // Track zoom locally to avoid state lag
     private _isMounted = false
     private mobileEmulationWebContentsId: number | null = null  // Speichert die webContentsId für die Emulation aktiviert wurde
+    private cookieSaveTimeout: NodeJS.Timeout | null = null  // Debounce für Cookie-Speicherung
+    private lastCookieSaveTime: number = 0  // Timestamp der letzten Cookie-Speicherung
 
     constructor(props: ArticleProps) {
         super(props)
@@ -107,6 +110,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             showZoomOverlay: window.settings.getZoomOverlay(),
             nsfwCleanupEnabled: window.settings.getNsfwCleanup(),
             autoCookieConsentEnabled: window.settings.getAutoCookieConsent(),
+            inputModeEnabled: false,
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -169,11 +173,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     private togglePersistCookies = () => {
         const newValue = !this.props.source.persistCookies;
-        console.log("[CookiePersist] Article: Toggle persistCookies:", newValue)
+        console.log("[CookiePersist] Article: Toggle persistCookies:", newValue, "source:", this.props.source.name)
         this.props.updatePersistCookies(this.props.source, newValue);
         
         if (newValue) {
             // Wenn aktiviert, sofort aktuelle Cookies speichern
+            console.log("[CookiePersist] Article: Saving cookies immediately after enabling")
             this.savePersistedCookies();
         }
     }
@@ -294,9 +299,37 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         try {
             const result = await window.utils.savePersistedCookies(url)
             console.log("[CookiePersist] Article: Save result:", result)
+            this.lastCookieSaveTime = Date.now()
         } catch (e) {
             console.error("[CookiePersist] Article: Error saving cookies:", e)
         }
+    }
+    
+    /**
+     * Debounced Version von savePersistedCookies - verhindert zu häufiges Speichern
+     * bei vielen Navigation-Events (z.B. Reddit SPA)
+     */
+    private savePersistedCookiesDebounced = () => {
+        if (!this.props.source.persistCookies) {
+            return
+        }
+        
+        // Wenn kürzlich gespeichert wurde, ignorieren
+        const now = Date.now()
+        if (now - this.lastCookieSaveTime < 2000) {
+            console.log("[CookiePersist] Article: Skipping save (debounced, last save was", now - this.lastCookieSaveTime, "ms ago)")
+            return
+        }
+        
+        // Vorherigen Timeout löschen
+        if (this.cookieSaveTimeout) {
+            clearTimeout(this.cookieSaveTimeout)
+        }
+        
+        // Neuen Timeout setzen (500ms delay)
+        this.cookieSaveTimeout = setTimeout(() => {
+            this.savePersistedCookies()
+        }, 500)
     }
 
     setFontSize = (size: number) => {
@@ -535,6 +568,26 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             onClick: this.togglePersistCookies,
                         },
                         {
+                            key: "toggleInputMode",
+                            text: this.state.inputModeEnabled 
+                                ? "Eingabe-Modus beenden (Ctrl+I)" 
+                                : "Eingabe-Modus (Ctrl+I)",
+                            iconProps: { iconName: this.state.inputModeEnabled ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.state.inputModeEnabled,
+                            disabled: !this.state.loadWebpage,
+                            onClick: () => {
+                                const newValue = !this.state.inputModeEnabled;
+                                console.log('[InputMode] Menu toggle:', newValue ? 'ENABLED' : 'DISABLED');
+                                // Cookies speichern beim Verlassen des Eingabe-Modus
+                                if (!newValue && this.props.source.persistCookies && this.state.loadWebpage) {
+                                    console.log('[CookiePersist] Article: Saving cookies after leaving input mode (Menu)');
+                                    this.savePersistedCookies();
+                                }
+                                this.setState({ inputModeEnabled: newValue });
+                            },
+                        },
+                        {
                             key: "openAppDevTools",
                             text: "App Developer Tools",
                             iconProps: { iconName: "Code" },
@@ -607,6 +660,36 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
         }
         if (input.type === "keyDown") {
+            // Eingabe-Modus Toggle: Ctrl+I
+            if (input.control && (input.key === 'i' || input.key === 'I')) {
+                const newValue = !this.state.inputModeEnabled;
+                console.log('[InputMode] Toggle:', newValue ? 'ENABLED (shortcuts off)' : 'DISABLED (shortcuts on)');
+                // Cookies speichern beim Verlassen des Eingabe-Modus (z.B. nach Login)
+                if (!newValue && this.props.source.persistCookies && this.state.loadWebpage) {
+                    console.log('[CookiePersist] Article: Saving cookies after leaving input mode (Ctrl+I)');
+                    this.savePersistedCookies();
+                }
+                this.setState({ inputModeEnabled: newValue });
+                return;
+            }
+            
+            // Im Eingabe-Modus: nur Escape und Ctrl+I erlauben
+            if (this.state.inputModeEnabled) {
+                if (input.key === 'Escape') {
+                    console.log('[InputMode] Escape pressed - disabling input mode');
+                    console.log('[InputMode] persistCookies:', this.props.source.persistCookies, 'loadWebpage:', this.state.loadWebpage);
+                    this.setState({ inputModeEnabled: false });
+                    // Cookies speichern beim Verlassen des Eingabe-Modus (z.B. nach Login)
+                    if (this.props.source.persistCookies && this.state.loadWebpage) {
+                        console.log('[CookiePersist] Article: Saving cookies after leaving input mode');
+                        this.savePersistedCookies();
+                    }
+                    return;
+                }
+                // Alle anderen Tasten zum Webview durchlassen (nicht als Shortcuts behandeln)
+                return;
+            }
+            
             switch (input.key) {
                 case "Escape":
                     this.props.dismiss()
@@ -684,6 +767,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     webviewStartLoadingEarly = () => {
         if (!this.webview) return;
         console.log('[Article] webviewStartLoadingEarly - did-start-loading fired');
+        
+        // Cookie Persistence: Cookies laden bei jeder Navigation
+        if (this.props.source.persistCookies && this.state.loadWebpage) {
+            console.log("[CookiePersist] Article: Loading cookies at did-start-loading");
+            this.loadPersistedCookies();
+        }
         
         // Mobile Mode: Device Emulation nur EINMAL pro webContentsId aktivieren
         // getWebContentsId() kann fehlschlagen wenn das Webview noch nicht vollständig im DOM ist
@@ -915,6 +1004,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     componentDidUpdate = (prevProps: ArticleProps) => {
         if (prevProps.item._id != this.props.item._id) {
+            // Eingabe-Modus bei Artikelwechsel zurücksetzen
+            if (this.state.inputModeEnabled) {
+                console.log('[InputMode] Article changed - disabling input mode');
+                this.setState({ inputModeEnabled: false });
+            }
+            
             // Cookies des alten Artikels speichern (falls persistCookies aktiviert war)
             if (prevProps.source.persistCookies) {
                 console.log("[CookiePersist] Article: Saving cookies before article change")
@@ -1651,6 +1746,23 @@ window.__articleData = ${JSON.stringify({
                                     {this.props.item.creator}
                                 </span>
                             )}
+                            {this.state.inputModeEnabled && (
+                                <span 
+                                    className="input-mode-badge"
+                                    style={{
+                                        marginLeft: 8,
+                                        padding: '2px 6px',
+                                        backgroundColor: '#107c10',
+                                        color: 'white',
+                                        borderRadius: 3,
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                    }}
+                                    title="Eingabe-Modus aktiv - Shortcuts deaktiviert (Escape oder Ctrl+I zum Beenden)"
+                                >
+                                    ⌨ EINGABE
+                                </span>
+                            )}
                         </span>
                     </Stack.Item>
                     <CommandBarButton
@@ -1765,6 +1877,20 @@ window.__articleData = ${JSON.stringify({
                             try {
                                 webview.addEventListener('did-start-loading', this.webviewStartLoadingEarly)
                                 webview.addEventListener('did-stop-loading', this.webviewLoaded)
+                                // Cookie Persistence: Nach jeder Navigation speichern (z.B. nach Login)
+                                // Debounced wegen SPAs wie Reddit die viele navigate-Events auslösen
+                                webview.addEventListener('did-navigate', () => {
+                                    if (this.props.source.persistCookies && this.state.loadWebpage) {
+                                        console.log("[CookiePersist] Article: did-navigate event");
+                                        this.savePersistedCookiesDebounced();
+                                    }
+                                })
+                                webview.addEventListener('did-navigate-in-page', () => {
+                                    if (this.props.source.persistCookies && this.state.loadWebpage) {
+                                        console.log("[CookiePersist] Article: did-navigate-in-page event");
+                                        this.savePersistedCookiesDebounced();
+                                    }
+                                })
                                 // Close DevTools before navigation to prevent crash
                                 webview.addEventListener('will-navigate', () => {
                                     try {

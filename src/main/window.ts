@@ -154,6 +154,7 @@ export class WindowManager {
         // ===== Cookie Persistence IPC Handlers =====
 
         // Cookies für einen Host laden und in Session setzen
+        // WICHTIG: Die Webview nutzt partition="sandbox" (ohne persist:)
         ipcMain.handle("load-persisted-cookies", async (_event, url: string) => {
             const host = extractHost(url)
             if (!host) {
@@ -166,11 +167,14 @@ export class WindowManager {
                 return { success: true, count: 0 }
             }
 
-            const count = await setCookiesToSession(session.defaultSession, host, cookies)
+            // Webview verwendet partition="sandbox" (ohne persist: prefix!)
+            const sandboxSession = session.fromPartition("sandbox")
+            const count = await setCookiesToSession(sandboxSession, host, cookies)
             return { success: true, count }
         })
 
         // Cookies für einen Host aus Session holen und speichern
+        // WICHTIG: Die Webview nutzt partition="sandbox" (ohne persist:)
         ipcMain.handle("save-persisted-cookies", async (_event, url: string) => {
             const host = extractHost(url)
             if (!host) {
@@ -178,7 +182,9 @@ export class WindowManager {
                 return { success: false }
             }
 
-            const cookies = await getCookiesFromSession(session.defaultSession, host)
+            // Webview verwendet partition="sandbox" (ohne persist: prefix!)
+            const sandboxSession = session.fromPartition("sandbox")
+            const cookies = await getCookiesFromSession(sandboxSession, host)
             if (cookies.length === 0) {
                 console.log("[CookiePersist] No cookies to save for host:", host)
                 return { success: true, count: 0 }

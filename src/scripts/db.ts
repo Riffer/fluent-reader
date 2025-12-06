@@ -7,7 +7,7 @@ import { RSSItem } from "./models/item"
 // Note: db-sqlite is loaded only in Main Process, not in Renderer
 // See: src/main/db-sqlite.ts
 
-const sdbSchema = lf.schema.create("sourcesDB", 5)
+const sdbSchema = lf.schema.create("sourcesDB", 7)
 sdbSchema
     .createTable("sources")
     .addColumn("sid", lf.Type.INTEGER)
@@ -23,6 +23,8 @@ sdbSchema
     .addColumn("rules", lf.Type.OBJECT)
     .addColumn("textDir", lf.Type.NUMBER)
     .addColumn("hidden", lf.Type.BOOLEAN)
+    .addColumn("mobileMode", lf.Type.BOOLEAN)
+    .addColumn("persistCookies", lf.Type.BOOLEAN)
     .addNullable(["iconurl", "serviceRef", "rules"])
     .addIndex("idxURL", ["url"], true)
 
@@ -65,8 +67,14 @@ async function onUpgradeSourceDB(rawDb: lf.raw.BackStore) {
     if (version < 4) {
         await rawDb.addTableColumn("sources", "defaultZoom", 1)
     }
-    // Version 5: mobileMode field added via runtime migration in source.ts
-    // No schema change needed here (field is optional/dynamic)
+    if (version < 6) {
+        // Version 6: Add mobileMode column
+        await rawDb.addTableColumn("sources", "mobileMode", false)
+    }
+    if (version < 7) {
+        // Version 7: Add persistCookies column for cookie persistence feature
+        await rawDb.addTableColumn("sources", "persistCookies", false)
+    }
 }
 
 export async function init() {

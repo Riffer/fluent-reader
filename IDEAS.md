@@ -74,10 +74,41 @@ items:
 
 ## Persistente Cookie-Speicherung pro Feed
 
-**Status:** In Planung
+**Status:** ✅ Implementiert (v1.1.7)
 
 **Beschreibung:**
-Für Seiten die Login benötigen (z.B. Paywalls, Member-Bereiche) sollen Cookies automatisch gespeichert und beim Laden wiederhergestellt werden.
+Für Seiten die Login benötigen (z.B. Paywalls, Member-Bereiche) werden Cookies automatisch gespeichert und beim Laden wiederhergestellt.
+
+**Implementierte Features:**
+- ✅ `persistCookies` Eigenschaft pro Feed (aktivierbar via Kontextmenü)
+- ✅ Automatisches Laden der Cookies beim Seitenstart (`did-start-loading`)
+- ✅ Automatisches Speichern nach Navigation (`did-navigate`, `did-stop-loading`)
+- ✅ Speicherung in JSON-Dateien pro Host (`%APPDATA%/Electron/cookies/`)
+- ✅ Input-Modus (Ctrl+I) für Login-Formulare ohne Shortcut-Konflikte
+- ✅ OPML Export/Import unterstützt `persistCookies`
+- ✅ Datenbank-Schema erweitert (Version 7)
+
+**Neue Dateien:**
+- `src/main/cookie-persist.ts` - Cookie-Service (laden, speichern, löschen)
+
+**Geänderte Dateien:**
+- `src/scripts/db.ts` - Schema v7 mit `mobileMode` und `persistCookies` Spalten
+- `src/scripts/models/source.ts` - `persistCookies` Feld + Migration
+- `src/scripts/models/group.ts` - OPML Export/Import
+- `src/main/window.ts` - IPC-Handler für Cookie-Operationen
+- `src/bridges/utils.ts` - Renderer-Bridge-Funktionen
+- `src/components/article.tsx` - Cookie-Integration + Input-Modus
+
+**Benutzung:**
+1. Feed auswählen → Rechtsklick → "Cookies speichern (Login)" aktivieren
+2. Artikel in Webseiten-Ansicht öffnen
+3. **Ctrl+I** → Input-Modus aktivieren → Einloggen → **ESC**
+4. App neu starten → Eingeloggt bleiben!
+
+**Technische Details:**
+- Session-Partition: `sandbox` (ohne `persist:` Prefix)
+- Debouncing: Max. 1 Cookie-Speicherung pro Sekunde (für SPAs wie Reddit)
+- Umfassendes Cookie-Sammeln: URL, Domain, Dot-Domain, www-Subdomain, Fallback-Filter
 
 **Anwendungsfälle:**
 - Paywalled Nachrichtenseiten (z.B. NYTimes, Spiegel+)
@@ -284,10 +315,40 @@ Derzeit gibt es ein Browser-Symbol, das beim Klick "Lade vollständigen Inhalt" 
 
 ## Shortcut-Deaktivierung bei Webview-Eingabefeldern
 
-**Status:** Idee
+**Status:** ✅ Implementiert (v1.1.7) - als "Input-Modus"
 
 **Beschreibung:**
 Wenn der Benutzer im Webview in ein Login-Formular oder anderes Eingabefeld tippt, werden die Shortcuts (z.B. `L`, `M`, `S`, `+`, `-`) fälschlicherweise als Befehle interpretiert statt als Texteingabe.
+
+**Implementierte Lösung: Manueller Input-Modus**
+
+Statt automatischer Fokus-Erkennung wurde ein manueller Input-Modus implementiert:
+
+| Taste | Aktion |
+|-------|--------|
+| **Ctrl+I** | Input-Modus ein/aus |
+| **ESC** | Input-Modus beenden + Cookies speichern |
+
+**Visuelles Feedback:**
+- Grüner Badge "⌨ EINGABE" in der Toolbar wenn Input-Modus aktiv
+- Menüeintrag zeigt aktuellen Status
+
+**Vorteile gegenüber automatischer Fokus-Erkennung:**
+- Zuverlässiger (keine Fokus-Events aus Iframes/Shadow DOM)
+- Explizite Kontrolle durch Benutzer
+- Cookie-Speicherung bei ESC (nach Login-Abschluss)
+
+**Erlaubte Shortcuts im Input-Modus:**
+| Taste | Aktion |
+|-------|--------|
+| `Ctrl+I` | Input-Modus beenden |
+| `ESC` | Input-Modus beenden + Cookies speichern |
+
+Alle anderen Shortcuts sind deaktiviert um normale Texteingabe zu ermöglichen.
+
+---
+
+## Ursprüngliche Idee: Automatische Fokus-Erkennung (nicht implementiert)
 
 **Problem:**
 - `keyDownHandler` in `article.tsx` empfängt alle Tasteneingaben aus dem Webview via IPC
@@ -358,6 +419,4 @@ keyDownHandler = (input: Electron.Input) => {
 | `+`/`-` | Zoom | Zahlen/Sonderzeichen |
 | `W` | Toggle Full | Buchstabe W |
 
-**Zu klären:**
-- [ ] Soll ein visueller Hinweis angezeigt werden wenn Shortcuts deaktiviert sind?
-- [ ] Globales Tastenkürzel zum manuellen Umschalten (z.B. `Ctrl+I` für "Input-Modus")?
+**Fazit:** Automatische Fokus-Erkennung wurde verworfen zugunsten des manuellen Input-Modus (Ctrl+I), da dieser zuverlässiger und einfacher zu implementieren ist.

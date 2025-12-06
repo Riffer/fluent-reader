@@ -169,6 +169,7 @@ export async function deleteCookiesForHost(host: string): Promise<boolean> {
 
 /**
  * Holt aktuelle Cookies aus der Session für einen Host
+ * Sammelt alle Cookies die für die Domain relevant sind
  */
 export async function getCookiesFromSession(
     ses: Electron.Session,
@@ -177,23 +178,79 @@ export async function getCookiesFromSession(
     console.log("[CookiePersist] Getting cookies from session for host:", host)
     
     try {
-        // Cookies für die Domain abrufen (inkl. Subdomains)
-        const cookies = await ses.cookies.get({ domain: host })
-        console.log("[CookiePersist] Found", cookies.length, "cookies in session for host:", host)
-        
-        // Auch Cookies mit .domain (z.B. .reddit.com) einbeziehen
         const baseDomain = host.replace(/^www\./, "")
-        const domainCookies = await ses.cookies.get({ domain: "." + baseDomain })
+        const allCookies: Electron.Cookie[] = []
+        const seenKeys = new Set<string>()
         
-        // Zusammenführen und Duplikate entfernen
-        const allCookies = [...cookies]
-        domainCookies.forEach(dc => {
-            if (!allCookies.find(c => c.name === dc.name && c.domain === dc.domain)) {
-                allCookies.push(dc)
+        // Helper um Duplikate zu vermeiden
+        const addCookie = (cookie: Electron.Cookie) => {
+            const key = `${cookie.name}|${cookie.domain}|${cookie.path}`
+            if (!seenKeys.has(key)) {
+                seenKeys.add(key)
+                allCookies.push(cookie)
             }
+        }
+        
+        // 1. Alle Cookies für die URL (http + https)
+        try {
+            const urlCookies = await ses.cookies.get({ url: `https://${host}` })
+            console.log("[CookiePersist] Found", urlCookies.length, "cookies for https URL")
+            urlCookies.forEach(addCookie)
+        } catch (e) {
+            console.log("[CookiePersist] Error getting URL cookies:", e)
+        }
+        
+        // 2. Cookies mit exakter Domain
+        try {
+            const exactCookies = await ses.cookies.get({ domain: host })
+            console.log("[CookiePersist] Found", exactCookies.length, "cookies for exact domain:", host)
+            exactCookies.forEach(addCookie)
+        } catch (e) {
+            console.log("[CookiePersist] Error getting exact domain cookies:", e)
+        }
+        
+        // 3. Cookies mit .domain (z.B. .reddit.com)
+        try {
+            const dotDomainCookies = await ses.cookies.get({ domain: "." + baseDomain })
+            console.log("[CookiePersist] Found", dotDomainCookies.length, "cookies for dot-domain:", "." + baseDomain)
+            dotDomainCookies.forEach(addCookie)
+        } catch (e) {
+            console.log("[CookiePersist] Error getting dot-domain cookies:", e)
+        }
+        
+        // 4. Cookies für www. subdomain falls nicht bereits host
+        if (!host.startsWith("www.")) {
+            try {
+                const wwwCookies = await ses.cookies.get({ domain: "www." + baseDomain })
+                console.log("[CookiePersist] Found", wwwCookies.length, "cookies for www subdomain")
+                wwwCookies.forEach(addCookie)
+            } catch (e) {
+                console.log("[CookiePersist] Error getting www cookies:", e)
+            }
+        }
+        
+        // 5. Alle Cookies holen und nach Domain filtern (Fallback)
+        try {
+            const allSessionCookies = await ses.cookies.get({})
+            const relevantCookies = allSessionCookies.filter(c => 
+                c.domain === host ||
+                c.domain === "." + baseDomain ||
+                c.domain === "www." + baseDomain ||
+                c.domain.endsWith("." + baseDomain)
+            )
+            console.log("[CookiePersist] Found", relevantCookies.length, "cookies via fallback filter (from", allSessionCookies.length, "total)")
+            relevantCookies.forEach(addCookie)
+        } catch (e) {
+            console.log("[CookiePersist] Error getting all cookies:", e)
+        }
+        
+        console.log("[CookiePersist] Total unique cookies collected:", allCookies.length)
+        
+        // Cookie-Namen loggen
+        allCookies.forEach((cookie, i) => {
+            console.log(`[CookiePersist]   [${i + 1}] ${cookie.name} (domain: ${cookie.domain}, secure: ${cookie.secure}, httpOnly: ${cookie.httpOnly})`)
         })
         
-        console.log("[CookiePersist] Total cookies after merge:", allCookies.length)
         return allCookies
     } catch (e) {
         console.error("[CookiePersist] Error getting cookies from session:", e)

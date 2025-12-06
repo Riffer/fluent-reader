@@ -256,6 +256,10 @@ export function initSources(): AppThunk<Promise<void>> {
             if (source.mobileMode === undefined) {
                 source.mobileMode = false
             }
+            // Migration: Ensure persistCookies field exists (for older databases)
+            if (source.persistCookies === undefined) {
+                source.persistCookies = false
+            }
             state[source.sid] = source
         }
         await unreadCount(state)
