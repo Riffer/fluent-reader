@@ -248,3 +248,34 @@ parseRSS @ utils.ts:113
 - `.catch()` in `sources.tsx:addSource()` hinzugefügt
 - Fehler werden bereits in Redux-Action behandelt und dem Benutzer angezeigt
 - Der `.catch()` verhindert nur die Console-Warnung
+
+---
+
+## Mobile Mode Toggle via Browser-Symbol
+
+**Status:** Idee
+
+**Beschreibung:**
+Derzeit gibt es ein Browser-Symbol, das beim Klick "Lade vollständigen Inhalt" aktiviert. Die Idee ist, bei einem zweiten Klick auf das Symbol stattdessen den Mobile Mode zu toggeln.
+
+**Konzept:**
+1. **Erster Klick**: Aktiviert "Lade vollständigen Inhalt" (wie bisher)
+2. **Zweiter Klick**: Schaltet Mobile Mode ein/aus
+3. **Visuelles Feedback**: Symbol-Änderung je nach aktivem Modus
+
+**Symbol-Zustände:**
+| Zustand | Symbol | Beschreibung |
+|---------|--------|--------------|
+| Standard | 🌐 | Normale Ansicht |
+| Vollständig | 📄 | Lade vollständigen Inhalt aktiv |
+| Mobile | 📱 | Mobile Emulation aktiv |
+
+**Vorteile:**
+- Schneller Zugriff auf Mobile Mode ohne zusätzlichen Menüeintrag
+- Intuitives 3-Stufen-Toggle
+- Spart Platz in der UI
+
+**Zu klären:**
+- [ ] Exaktes Symbol-Design für jeden Zustand
+- [ ] Soll der Zustand pro Feed oder global gespeichert werden?
+- [ ] Tooltip-Texte für jeden Zustand
