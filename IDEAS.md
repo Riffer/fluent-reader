@@ -74,21 +74,62 @@ items:
 
 ## Persistente Cookie-Speicherung pro Feed
 
-**Status:** Geplant
+**Status:** In Planung
 
 **Beschreibung:**
-Für Seiten die Login benötigen (z.B. Paywalls, Member-Bereiche) sollen Cookies pro Feed/Source gespeichert und beim Laden automatisch wiederhergestellt werden.
+Für Seiten die Login benötigen (z.B. Paywalls, Member-Bereiche) sollen Cookies automatisch gespeichert und beim Laden wiederhergestellt werden.
 
 **Anwendungsfälle:**
-- Paywalled Nachrichtenseiten
+- Paywalled Nachrichtenseiten (z.B. NYTimes, Spiegel+)
 - Member-Bereiche mit Login
 - Seiten mit Session-basierter Authentifizierung
+- Trennung von NSFW/normalen Inhalten bei gleichem Host (z.B. Reddit)
 
-**Technische Überlegungen:**
-- Cookies pro `RSSSource` in der Datenbank speichern
-- Beim Laden der Webview die gespeicherten Cookies setzen
-- Optional: UI zum manuellen Speichern/Löschen von Cookies pro Feed
-- Electron `session.cookies` API nutzen
+**Architektur-Entscheidungen:**
+
+| Aspekt | Entscheidung | Begründung |
+|--------|--------------|------------|
+| Aktivierung | Pro Feed | Ermöglicht gezielte Kontrolle, z.B. NSFW-Feeds ohne Cookie-Speicherung |
+| Speicherung | Pro Host | Vermeidet Redundanz, Login gilt für alle Feeds mit gleichem Host |
+| Modus | Automatisch | Cookies werden automatisch gespeichert/geladen |
+| Verschlüsselung | Nein | Einfachheit, lokale Speicherung |
+
+**Datenmodell:**
+
+```typescript
+// RSSSource (bestehendes Model erweitern)
+interface RSSSource {
+  // ... bestehende Felder
+  persistCookies: boolean  // NEU: Aktiviert Cookie-Persistenz für diesen Feed
+}
+
+// Neue Tabelle/Store für Host-Cookies
+interface HostCookies {
+  host: string           // PK, z.B. "reddit.com"
+  cookies: string        // JSON-serialisierte Cookies
+  lastUpdated: Date
+}
+```
+
+**Ablauf:**
+1. Artikel öffnen → Prüfen ob `source.persistCookies === true`
+2. Falls ja → Host aus URL extrahieren, gespeicherte Cookies für Host laden
+3. Cookies in Webview-Session setzen
+4. Beim Verlassen/Navigation → Falls `persistCookies` aktiv → Aktuelle Cookies für Host speichern
+5. Falls `persistCookies: false` → Keine Speicherung, Session bleibt temporär
+
+**UI-Integration:**
+- Feed-Einstellungen: Checkbox "Cookies persistent speichern"
+- Artikel-Menü: "Cookies für [host] löschen" (optional)
+
+**Technische Umsetzung:**
+- Electron `session.cookies` API für Cookie-Zugriff
+- Host-Extraktion aus URL (z.B. `www.nytimes.com` → `nytimes.com`)
+- Speicherung in separater Tabelle/Store (nicht in RSSSource)
+
+**Noch zu klären:**
+- [ ] Speicherort: Lovefield/IndexedDB oder separate JSON-Datei?
+- [ ] Session-Wechsel: Wie wird die Session beim Artikelwechsel gehandhabt?
 
 ---
 
