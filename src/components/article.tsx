@@ -47,6 +47,10 @@ type ArticleProps = {
         source: RSSSource,
         direction: SourceTextDirection
     ) => void
+    updateMobileMode: (
+        source: RSSSource,
+        mobileMode: boolean
+    ) => void
 }
 
 type ArticleState = {
@@ -66,6 +70,7 @@ type ArticleState = {
     extractorDate?: Date
     showZoomOverlay: boolean
     nsfwCleanupEnabled: boolean
+    autoCookieConsentEnabled: boolean
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -75,6 +80,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     pressedZoomKeys: Set<string>
     currentZoom: number = 0  // Track zoom locally to avoid state lag
     private _isMounted = false
+    private mobileEmulationWebContentsId: number | null = null  // Speichert die webContentsId für die Emulation aktiviert wurde
 
     constructor(props: ArticleProps) {
         super(props)
@@ -96,6 +102,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             appPath: "",
             showZoomOverlay: window.settings.getZoomOverlay(),
             nsfwCleanupEnabled: window.settings.getNsfwCleanup(),
+            autoCookieConsentEnabled: window.settings.getAutoCookieConsent(),
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -147,10 +154,81 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.sendZoomOverlaySettingToPreload(newValue);
     }
 
+    private toggleMobileMode = () => {
+        const newMobileMode = !this.props.source.mobileMode;
+        this.props.updateMobileMode(this.props.source, newMobileMode);
+        // Reset webContentsId damit Emulation beim Reload neu initialisiert wird
+        this.mobileEmulationWebContentsId = null;
+        // Webview neu laden damit die Einstellung greift
+        this.reloadWebview();
+    }
+
+    // Device Emulation für Mobile Mode aktivieren
+    private enableMobileEmulation = async () => {
+        if (!this.webview) return false;
+        try {
+            const webContentsId = (this.webview as any).getWebContentsId();
+            if (!webContentsId) {
+                console.error('[MobileMode] Could not get webContentsId');
+                return false;
+            }
+            
+            // Hole die tatsächliche Webview-Größe für dynamischen Viewport
+            const webviewRect = this.webview.getBoundingClientRect();
+            const viewportWidth = Math.min(768, Math.round(webviewRect.width));  // Max 768px (Mobile Breakpoint)
+            const viewportHeight = Math.round(webviewRect.height);
+            
+            const ipcRenderer = (window as any).ipcRenderer;
+            if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
+                const result = await ipcRenderer.invoke('enable-device-emulation', webContentsId, {
+                    screenPosition: "mobile",
+                    screenSize: { width: viewportWidth, height: viewportHeight },
+                    deviceScaleFactor: 1,  // Kein extra Scaling
+                    viewSize: { width: viewportWidth, height: viewportHeight },
+                    fitToView: false,
+                    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+                });
+                console.log('[MobileMode] Device emulation enabled:', result, 'viewport:', viewportWidth, 'x', viewportHeight);
+                return result;
+            }
+            return false;
+        } catch (e) {
+            console.error('[MobileMode] Error enabling emulation:', e);
+            return false;
+        }
+    }
+
+    // Device Emulation deaktivieren
+    private disableMobileEmulation = async () => {
+        if (!this.webview) return false;
+        try {
+            const webContentsId = (this.webview as any).getWebContentsId();
+            if (!webContentsId) return false;
+            const ipcRenderer = (window as any).ipcRenderer;
+            if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
+                const result = await ipcRenderer.invoke('disable-device-emulation', webContentsId);
+                console.log('[MobileMode] Device emulation disabled:', result);
+                return result;
+            }
+            return false;
+        } catch (e) {
+            console.error('[MobileMode] Error disabling emulation:', e);
+            return false;
+        }
+    }
+
     private toggleNsfwCleanup = () => {
         const newValue = !this.state.nsfwCleanupEnabled;
         window.settings.setNsfwCleanup(newValue);
         this.setState({ nsfwCleanupEnabled: newValue });
+        // Webview neu laden damit die Einstellung greift
+        this.reloadWebview();
+    }
+
+    private toggleAutoCookieConsent = () => {
+        const newValue = !this.state.autoCookieConsentEnabled;
+        window.settings.setAutoCookieConsent(newValue);
+        this.setState({ autoCookieConsentEnabled: newValue });
         // Webview neu laden damit die Einstellung greift
         this.reloadWebview();
     }
@@ -365,12 +443,29 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             onClick: this.toggleZoomOverlay,
                         },
                         {
+                            key: "toggleMobileMode",
+                            text: "Mobile Ansicht",
+                            iconProps: { iconName: (this.props.source.mobileMode || false) ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.props.source.mobileMode || false,
+                            disabled: !this.state.loadWebpage,
+                            onClick: this.toggleMobileMode,
+                        },
+                        {
                             key: "toggleNsfwCleanup",
                             text: "NSFW-Cleanup (experimentell)",
                             iconProps: { iconName: this.state.nsfwCleanupEnabled ? "CheckMark" : "" },
                             canCheck: true,
                             checked: this.state.nsfwCleanupEnabled,
                             onClick: this.toggleNsfwCleanup,
+                        },
+                        {
+                            key: "toggleAutoCookieConsent",
+                            text: "Auto Cookie-Consent",
+                            iconProps: { iconName: this.state.autoCookieConsentEnabled ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.state.autoCookieConsentEnabled,
+                            onClick: this.toggleAutoCookieConsent,
                         },
                         {
                             key: "openAppDevTools",
@@ -521,9 +616,35 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     // Früh beim Start der Navigation Zoom setzen und Sichtbarkeit aktivieren
     webviewStartLoadingEarly = () => {
         if (!this.webview) return;
+        console.log('[Article] webviewStartLoadingEarly - did-start-loading fired');
+        
+        // Mobile Mode: Device Emulation nur EINMAL pro webContentsId aktivieren
+        // getWebContentsId() kann fehlschlagen wenn das Webview noch nicht vollständig im DOM ist
+        let currentWebContentsId: number | null = null;
+        try {
+            currentWebContentsId = (this.webview as any).getWebContentsId?.();
+        } catch (e) {
+            // Webview ist noch nicht bereit - Emulation wird bei dom-ready nachgeholt
+            console.log('[Article] Mobile mode: Webview not ready yet, skipping emulation check');
+        }
+        
+        const shouldActivateMobileMode = this.state.loadWebpage && 
+            (this.props.source.mobileMode || false) && 
+            currentWebContentsId && 
+            this.mobileEmulationWebContentsId !== currentWebContentsId;
+            
+        if (shouldActivateMobileMode) {
+            console.log(`[Article] Mobile mode: Activating emulation for webContentsId ${currentWebContentsId} (previously: ${this.mobileEmulationWebContentsId})`);
+            this.mobileEmulationWebContentsId = currentWebContentsId;
+            this.enableMobileEmulation();
+        } else if (currentWebContentsId && this.mobileEmulationWebContentsId === currentWebContentsId) {
+            console.log(`[Article] Mobile mode: Skipping emulation (already active for webContentsId ${currentWebContentsId})`);
+        }
+        
         const targetZoom = this.props.source.defaultZoom || 0;
         // Synchronisiere currentZoom mit dem Feed-Zoom
         this.currentZoom = targetZoom;
+        console.log('[Article] Sending initial zoom:', targetZoom);
         try {
             // Verwende echten Zoom-Level statt Skalierung
             this.webview.send('set-webview-zoom', targetZoom);
@@ -532,9 +653,26 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     webviewStartLoading = () => { 
+        console.log('[Article] webviewStartLoading - dom-ready fired');
+        
+        // Mobile Mode: Falls Emulation bei did-start-loading nicht möglich war, jetzt nachholen
+        if (this.state.loadWebpage && (this.props.source.mobileMode || false)) {
+            try {
+                const currentWebContentsId = (this.webview as any).getWebContentsId?.();
+                if (currentWebContentsId && this.mobileEmulationWebContentsId !== currentWebContentsId) {
+                    console.log(`[Article] Mobile mode (dom-ready): Activating emulation for webContentsId ${currentWebContentsId}`);
+                    this.mobileEmulationWebContentsId = currentWebContentsId;
+                    this.enableMobileEmulation();
+                }
+            } catch (e) {
+                console.error('[Article] Mobile mode: Failed to get webContentsId at dom-ready', e);
+            }
+        }
+        
         const targetZoom = this.props.source.defaultZoom || 0;
         // Synchronisiere currentZoom mit dem Feed-Zoom
         this.currentZoom = targetZoom;
+        console.log('[Article] dom-ready: Sending zoom:', targetZoom, 'overlay:', this.state.showZoomOverlay);
         try {
             // Verwende echten Zoom-Level statt Skalierung
             this.webview.send('set-webview-zoom', targetZoom);
@@ -544,16 +682,19 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (!this.state.webviewVisible) this.setState({ webviewVisible: true });
     }
     webviewLoaded = () => {
+        console.log('[Article] webviewLoaded - did-stop-loading fired');
         this.setState({ loaded: true })
         const targetZoom = this.props.source.defaultZoom || 0;
         // Synchronisiere currentZoom mit dem Feed-Zoom
         this.currentZoom = targetZoom;
+        console.log('[Article] did-stop-loading: Sending zoom:', targetZoom);
         try {
             this.sendZoomToPreload(targetZoom);
             // Sende Zoom-Overlay-Einstellung nochmals
             this.sendZoomOverlaySettingToPreload(this.state.showZoomOverlay);
             // NSFW-Cleanup wird jetzt synchron beim Preload-Start geladen, kein IPC nötig
         } catch {}
+        
         // Focus auf Webview setzen nachdem alles geladen ist
         this.focusWebviewAfterLoad()
     }
@@ -695,6 +836,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     componentDidUpdate = (prevProps: ArticleProps) => {
         if (prevProps.item._id != this.props.item._id) {
+            // Reset für neuen Artikel - webContentsId wird sich ändern
+            this.mobileEmulationWebContentsId = null;
+            
             // Synchronisiere currentZoom sofort bei Artikelwechsel
             const savedZoom = this.props.source.defaultZoom || 0
             this.currentZoom = savedZoom

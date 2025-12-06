@@ -220,3 +220,11 @@ ipcMain.on("get-nsfw-cleanup", event => {
 ipcMain.handle("set-nsfw-cleanup", (_, flag: boolean) => {
     store.set(NSFW_CLEANUP_STORE_KEY, flag)
 })
+
+const AUTO_COOKIE_CONSENT_STORE_KEY = "autoCookieConsentEnabled"
+ipcMain.on("get-auto-cookie-consent", event => {
+    event.returnValue = store.get(AUTO_COOKIE_CONSENT_STORE_KEY, false)
+})
+ipcMain.handle("set-auto-cookie-consent", (_, flag: boolean) => {
+    store.set(AUTO_COOKIE_CONSENT_STORE_KEY, flag)
+})

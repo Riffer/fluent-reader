@@ -89,3 +89,45 @@ Für Seiten die Login benötigen (z.B. Paywalls, Member-Bereiche) sollen Cookies
 - Beim Laden der Webview die gespeicherten Cookies setzen
 - Optional: UI zum manuellen Speichern/Löschen von Cookies pro Feed
 - Electron `session.cookies` API nutzen
+
+---
+
+## Suchfunktion für die Feedverwaltung
+
+**Status:** Geplant
+
+**Beschreibung:**
+Eine Suchfunktion in der Feed-/Quellenverwaltung, um bei vielen Feeds schnell den gewünschten Feed zu finden.
+
+**Anwendungsfälle:**
+- Schnelles Auffinden eines Feeds bei großer Anzahl von Abonnements
+- Filtern nach Feed-Namen oder URL
+
+**Mögliche Features:**
+- Suchfeld im Feed-Management Dialog
+- Live-Filterung während der Eingabe
+- Suche nach Name und/oder URL
+
+---
+
+## Fix: Unhandled Promise Rejection in parseRSS
+
+**Status:** Offen
+
+**Beschreibung:**
+Bei fehlgeschlagenen RSS-Feed-Abrufen wird der Fehler als `Uncaught (in promise)` geworfen, da das Promise nicht korrekt behandelt wird.
+
+**Fehlermeldung:**
+```
+utils.ts:113 Uncaught (in promise) 
+parseRSS @ utils.ts:113
+```
+
+**Ursache:**
+- `parseRSS()` wirft Fehler wenn Feed ungültig ist oder Netzwerkfehler auftritt
+- Aufrufende Stelle(n) fangen den Fehler nicht mit `.catch()` ab
+
+**Zu prüfen:**
+- Alle Aufrufe von `parseRSS()` in `src/scripts/models/source.ts`
+- Sicherstellen dass Fehler korrekt geloggt/angezeigt werden
+- Benutzerfreundliche Fehlermeldung statt Console-Error

@@ -88,6 +88,14 @@ const mapDispatchToProps = (dispatch: AppDispatch) => {
                 updateSource({ ...source, defaultZoom: defaultZoom } as RSSSource)
             )
         },
+        updateMobileMode: (
+            source: RSSSource,
+            mobileMode: boolean
+        ) => {
+            dispatch(
+                updateSource({ ...source, mobileMode: mobileMode } as RSSSource)
+            )
+        },
     }
 }
 

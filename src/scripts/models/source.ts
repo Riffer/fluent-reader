@@ -41,6 +41,7 @@ export class RSSSource {
     name: string
     openTarget: SourceOpenTarget
     defaultZoom: number
+    mobileMode: boolean
     unreadCount: number
     lastFetched: Date
     serviceRef?: string
@@ -54,6 +55,7 @@ export class RSSSource {
         this.name = name
         this.openTarget = openTarget ?? SourceOpenTarget.Local
         this.defaultZoom = defaultZoom
+        this.mobileMode = false
         this.lastFetched = new Date()
         this.fetchFrequency = 0
         this.textDir = SourceTextDirection.LTR
@@ -248,6 +250,10 @@ export function initSources(): AppThunk<Promise<void>> {
         const state: SourceState = {}
         for (let source of sources) {
             source.unreadCount = 0
+            // Migration: Ensure mobileMode field exists (for older databases)
+            if (source.mobileMode === undefined) {
+                source.mobileMode = false
+            }
             state[source.sid] = source
         }
         await unreadCount(state)

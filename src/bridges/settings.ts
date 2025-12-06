@@ -138,6 +138,13 @@ const settingsBridge = {
         ipcRenderer.invoke("set-nsfw-cleanup", flag)
     },
 
+    getAutoCookieConsent: (): boolean => {
+        return ipcRenderer.sendSync("get-auto-cookie-consent")
+    },
+    setAutoCookieConsent: (flag: boolean) => {
+        ipcRenderer.invoke("set-auto-cookie-consent", flag)
+    },
+
     getAll: () => {
         return ipcRenderer.sendSync("get-all-settings") as Object
     },

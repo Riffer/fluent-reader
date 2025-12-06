@@ -7,7 +7,7 @@ import { RSSItem } from "./models/item"
 // Note: db-sqlite is loaded only in Main Process, not in Renderer
 // See: src/main/db-sqlite.ts
 
-const sdbSchema = lf.schema.create("sourcesDB", 4)
+const sdbSchema = lf.schema.create("sourcesDB", 5)
 sdbSchema
     .createTable("sources")
     .addColumn("sid", lf.Type.INTEGER)
@@ -65,6 +65,8 @@ async function onUpgradeSourceDB(rawDb: lf.raw.BackStore) {
     if (version < 4) {
         await rawDb.addTableColumn("sources", "defaultZoom", 1)
     }
+    // Version 5: mobileMode field added via runtime migration in source.ts
+    // No schema change needed here (field is optional/dynamic)
 }
 
 export async function init() {
