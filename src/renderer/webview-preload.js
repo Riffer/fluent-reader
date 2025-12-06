@@ -120,6 +120,7 @@ try {
   function ensureZoomContainer() {
     let wrapper = document.getElementById('fr-zoom-wrapper');
     if (!wrapper) {
+      console.log('[Preload] Creating zoom container - viewport:', window.innerWidth, 'x', window.innerHeight);
       // Erstelle Wrapper als Fixed Viewport (nicht scrollbar)
       wrapper = document.createElement('div');
       wrapper.id = 'fr-zoom-wrapper';
@@ -308,6 +309,7 @@ try {
 
   // Listener für externe Zoom-Befehle (von Keyboard - bewahre Scroll-Position)
   ipcRenderer.on('set-webview-zoom', (event, zoomLevel_) => {
+    console.log('[Preload] Received set-webview-zoom:', zoomLevel_, 'viewport:', window.innerWidth, 'x', window.innerHeight);
     zoomLevel = zoomLevel_;
     applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
     // Zeige Zoom-Overlay beim Artikelwechsel, wenn aktiviert
@@ -332,6 +334,15 @@ try {
     console.log('[webview-preload] NSFW-Cleanup loaded:', nsfwCleanupEnabled ? 'enabled' : 'disabled');
   } catch (e) {
     console.warn('[webview-preload] Could not load NSFW-Cleanup setting:', e);
+  }
+
+  // Auto Cookie-Consent Einstellung - synchron beim Start laden
+  let autoCookieConsentEnabled = false;
+  try {
+    autoCookieConsentEnabled = ipcRenderer.sendSync('get-auto-cookie-consent');
+    console.log('[webview-preload] Auto Cookie-Consent loaded:', autoCookieConsentEnabled ? 'enabled' : 'disabled');
+  } catch (e) {
+    console.warn('[webview-preload] Could not load Auto Cookie-Consent setting:', e);
   }
 
   // Fallback: postMessage von Embedder
@@ -552,25 +563,6 @@ try {
         document.querySelectorAll('[data-testid="xpromo-app-selector"]').forEach(el => el.remove());
         document.querySelectorAll('.XPromoPopupRpl, .XPromoBlockingModal').forEach(el => el.remove());
         
-        // Cookie/Consent/Datenschutz Banner - versuche "Ablehnen" zu klicken
-        const cookieDialog = document.querySelector('#data-protection-consent-dialog');
-        if (cookieDialog) {
-          // Suche nach "Ablehnen" Button (secondary-button Slot)
-          const rejectButton = cookieDialog.querySelector('[slot="secondary-button"]') ||
-                               cookieDialog.querySelector('button[data-testid="reject-nonessential-cookies-button"]');
-          if (rejectButton) {
-            rejectButton.click();
-            console.log('[webview-preload] Clicked cookie reject button');
-          } else {
-            // Fallback: Dialog entfernen wenn kein Button gefunden
-            cookieDialog.remove();
-          }
-        }
-        
-        // Weitere Cookie-Banner (die keinen "Ablehnen" Button haben)
-        document.querySelectorAll('[data-testid="cookie-policy-banner"]').forEach(el => el.remove());
-        document.querySelectorAll('shreddit-cookie-banner').forEach(el => el.remove());
-        
         // Weitere störende Elemente
         document.querySelectorAll('[class*="bottom-sheet"]').forEach(el => el.remove());
         document.querySelectorAll('[class*="overlay-container"]').forEach(el => el.remove());
@@ -604,14 +596,7 @@ try {
             const nsfwPrompt = nsfwContainer?.shadowRoot?.querySelector('.prompt');
             const blurFilter = document.querySelector('shreddit-blurred-container')?.shadowRoot?.querySelector('.inner.blurred');
             
-            // Cookie/Consent-Dialoge
-            const cookieDialog = document.querySelector('#data-protection-consent-dialog');
-            const cookieBanner = document.querySelector('shreddit-cookie-banner');
-            const rplModalCard = document.querySelector('rpl-modal-card');
-            const cookiePolicyBanner = document.querySelector('[data-testid="cookie-policy-banner"]');
-            
-            if (nsfwContainer || blurredContainer || nsfwPrompt || blurFilter ||
-                cookieDialog || cookieBanner || rplModalCard || cookiePolicyBanner) {
+            if (nsfwContainer || blurredContainer || nsfwPrompt || blurFilter) {
               foundBlockingElements = true;
             }
           }
@@ -635,6 +620,123 @@ try {
   function hasSiteTransformations() {
     const url = window.location.href;
     return siteTransformations.some(t => t.patterns.some(p => p.test(url)));
+  }
+
+  // ============================================
+  // Auto Cookie-Consent - Separate Feature
+  // ============================================
+  
+  const cookieConsentPatterns = [
+    {
+      // Reddit Cookie-Consent
+      patterns: [/reddit\.com/],
+      consent: () => {
+        // Cookie/Consent/Datenschutz Banner - versuche "Ablehnen" zu klicken
+        const cookieDialog = document.querySelector('#data-protection-consent-dialog');
+        if (cookieDialog) {
+          // Suche nach "Ablehnen" Button (secondary-button Slot)
+          const rejectButton = cookieDialog.querySelector('[slot="secondary-button"]') ||
+                               cookieDialog.querySelector('button[data-testid="reject-nonessential-cookies-button"]');
+          if (rejectButton) {
+            rejectButton.click();
+            console.log('[webview-preload] Cookie-Consent: Clicked Reddit reject button');
+            return true;
+          } else {
+            // Fallback: Dialog entfernen wenn kein Button gefunden
+            cookieDialog.remove();
+            console.log('[webview-preload] Cookie-Consent: Removed Reddit cookie dialog (no button found)');
+            return true;
+          }
+        }
+        
+        // Weitere Cookie-Banner
+        let handled = false;
+        document.querySelectorAll('[data-testid="cookie-policy-banner"]').forEach(el => { el.remove(); handled = true; });
+        document.querySelectorAll('shreddit-cookie-banner').forEach(el => { el.remove(); handled = true; });
+        
+        return handled;
+      }
+    },
+    // Hier können weitere Seiten hinzugefügt werden:
+    // {
+    //   patterns: [/example\.com/],
+    //   consent: () => { /* ... */ return true; }
+    // }
+  ];
+
+  let cookieConsentComplete = false;
+
+  function applyCookieConsent() {
+    const url = window.location.href;
+    let handled = false;
+    
+    cookieConsentPatterns.forEach(pattern => {
+      if (pattern.patterns.some(p => p.test(url))) {
+        try {
+          if (pattern.consent()) {
+            handled = true;
+          }
+        } catch (e) {
+          console.error('[webview-preload] Cookie-Consent failed:', e);
+        }
+      }
+    });
+    
+    if (handled) {
+      cookieConsentComplete = true;
+    }
+    
+    return cookieConsentComplete;
+  }
+
+  function hasCookieConsentPatterns() {
+    const url = window.location.href;
+    return cookieConsentPatterns.some(p => p.patterns.some(pat => pat.test(url)));
+  }
+
+  let cookieConsentObserver = null;
+  let cookieConsentStarted = false;
+
+  function startCookieConsent() {
+    if (cookieConsentStarted || !hasCookieConsentPatterns()) return;
+    cookieConsentStarted = true;
+    
+    console.log('[webview-preload] Starting Auto Cookie-Consent');
+    
+    // Initial consent handling
+    applyCookieConsent();
+    
+    // MutationObserver for delayed cookie banners
+    let debounceTimer = null;
+    
+    cookieConsentObserver = new MutationObserver((mutations) => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        const done = applyCookieConsent();
+        
+        if (done && cookieConsentObserver) {
+          cookieConsentObserver.disconnect();
+          cookieConsentObserver = null;
+          console.log('[webview-preload] Cookie-Consent complete, observer stopped');
+          showOverlayMessage('Cookie-Consent erledigt', 1500);
+        }
+      }, 100);
+    });
+
+    if (document.body) {
+      cookieConsentObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+    }
+
+    // Fallback: Stop observer after 30 seconds
+    setTimeout(() => {
+      if (cookieConsentObserver) {
+        cookieConsentObserver.disconnect();
+        cookieConsentObserver = null;
+      }
+    }, 30000);
   }
 
   // Observer und Cleanup werden erst gestartet wenn NSFW-Cleanup aktiviert ist
@@ -694,6 +796,15 @@ try {
       document.addEventListener('DOMContentLoaded', startSiteCleanup);
     } else {
       startSiteCleanup();
+    }
+  }
+
+  // Auto Cookie-Consent automatisch starten wenn aktiviert
+  if (autoCookieConsentEnabled && hasCookieConsentPatterns()) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startCookieConsent);
+    } else {
+      startCookieConsent();
     }
   }
 

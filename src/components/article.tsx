@@ -70,6 +70,7 @@ type ArticleState = {
     extractorDate?: Date
     showZoomOverlay: boolean
     nsfwCleanupEnabled: boolean
+    autoCookieConsentEnabled: boolean
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -101,6 +102,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             appPath: "",
             showZoomOverlay: window.settings.getZoomOverlay(),
             nsfwCleanupEnabled: window.settings.getNsfwCleanup(),
+            autoCookieConsentEnabled: window.settings.getAutoCookieConsent(),
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -219,6 +221,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const newValue = !this.state.nsfwCleanupEnabled;
         window.settings.setNsfwCleanup(newValue);
         this.setState({ nsfwCleanupEnabled: newValue });
+        // Webview neu laden damit die Einstellung greift
+        this.reloadWebview();
+    }
+
+    private toggleAutoCookieConsent = () => {
+        const newValue = !this.state.autoCookieConsentEnabled;
+        window.settings.setAutoCookieConsent(newValue);
+        this.setState({ autoCookieConsentEnabled: newValue });
         // Webview neu laden damit die Einstellung greift
         this.reloadWebview();
     }
@@ -448,6 +458,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             canCheck: true,
                             checked: this.state.nsfwCleanupEnabled,
                             onClick: this.toggleNsfwCleanup,
+                        },
+                        {
+                            key: "toggleAutoCookieConsent",
+                            text: "Auto Cookie-Consent",
+                            iconProps: { iconName: this.state.autoCookieConsentEnabled ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.state.autoCookieConsentEnabled,
+                            onClick: this.toggleAutoCookieConsent,
                         },
                         {
                             key: "openAppDevTools",
