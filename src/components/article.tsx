@@ -158,6 +158,53 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.reloadWebview();
     }
 
+    // Device Emulation für Mobile Mode aktivieren
+    private enableMobileEmulation = async () => {
+        if (!this.webview) return false;
+        try {
+            const webContentsId = (this.webview as any).getWebContentsId();
+            if (!webContentsId) {
+                console.error('[MobileMode] Could not get webContentsId');
+                return false;
+            }
+            const ipcRenderer = (window as any).ipcRenderer;
+            if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
+                const result = await ipcRenderer.invoke('enable-device-emulation', webContentsId, {
+                    screenPosition: "mobile",
+                    screenSize: { width: 390, height: 844 },  // iPhone 14 Pro
+                    deviceScaleFactor: 3,
+                    viewSize: { width: 390, height: 844 },
+                    fitToView: true
+                });
+                console.log('[MobileMode] Device emulation enabled:', result);
+                return result;
+            }
+            return false;
+        } catch (e) {
+            console.error('[MobileMode] Error enabling emulation:', e);
+            return false;
+        }
+    }
+
+    // Device Emulation deaktivieren
+    private disableMobileEmulation = async () => {
+        if (!this.webview) return false;
+        try {
+            const webContentsId = (this.webview as any).getWebContentsId();
+            if (!webContentsId) return false;
+            const ipcRenderer = (window as any).ipcRenderer;
+            if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
+                const result = await ipcRenderer.invoke('disable-device-emulation', webContentsId);
+                console.log('[MobileMode] Device emulation disabled:', result);
+                return result;
+            }
+            return false;
+        } catch (e) {
+            console.error('[MobileMode] Error disabling emulation:', e);
+            return false;
+        }
+    }
+
     private toggleNsfwCleanup = () => {
         const newValue = !this.state.nsfwCleanupEnabled;
         window.settings.setNsfwCleanup(newValue);
@@ -574,6 +621,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.sendZoomOverlaySettingToPreload(this.state.showZoomOverlay);
             // NSFW-Cleanup wird jetzt synchron beim Preload-Start geladen, kein IPC nötig
         } catch {}
+        
+        // Mobile Mode: Device Emulation aktivieren wenn eingestellt
+        if (this.state.loadWebpage && (this.props.source.mobileMode || false)) {
+            this.enableMobileEmulation();
+        }
+        
         // Focus auf Webview setzen nachdem alles geladen ist
         this.focusWebviewAfterLoad()
     }

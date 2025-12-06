@@ -1,5 +1,5 @@
 import windowStateKeeper = require("electron-window-state")
-import { BrowserWindow, nativeTheme, app, ipcMain, session } from "electron"
+import { BrowserWindow, nativeTheme, app, ipcMain, session, webContents } from "electron"
 import path from 'path';
 import { setThemeListener } from "./settings"
 import { setUtilsListeners } from "./utils"
@@ -78,6 +78,44 @@ export class WindowManager {
                 } else {
                     this.mainWindow.webContents.openDevTools()
                 }
+            }
+        })
+
+        // Device Emulation für Webviews aktivieren (Mobile Mode)
+        ipcMain.handle("enable-device-emulation", (_event, webContentsId: number, params: any) => {
+            try {
+                const wc = webContents.fromId(webContentsId)
+                if (wc && !wc.isDestroyed()) {
+                    wc.enableDeviceEmulation({
+                        screenPosition: params.screenPosition || "mobile",
+                        screenSize: params.screenSize || { width: 390, height: 844 },
+                        deviceScaleFactor: params.deviceScaleFactor || 3,
+                        viewSize: params.viewSize || { width: 390, height: 844 },
+                        fitToView: params.fitToView !== undefined ? params.fitToView : true
+                    })
+                    console.log('[DeviceEmulation] Enabled for webContentsId:', webContentsId)
+                    return true
+                }
+                return false
+            } catch (e) {
+                console.error('[DeviceEmulation] Error:', e)
+                return false
+            }
+        })
+
+        // Device Emulation für Webviews deaktivieren
+        ipcMain.handle("disable-device-emulation", (_event, webContentsId: number) => {
+            try {
+                const wc = webContents.fromId(webContentsId)
+                if (wc && !wc.isDestroyed()) {
+                    wc.disableDeviceEmulation()
+                    console.log('[DeviceEmulation] Disabled for webContentsId:', webContentsId)
+                    return true
+                }
+                return false
+            } catch (e) {
+                console.error('[DeviceEmulation] Error:', e)
+                return false
             }
         })
 
