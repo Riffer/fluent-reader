@@ -112,10 +112,10 @@ Eine Suchfunktion in der Feed-/Quellenverwaltung, um bei vielen Feeds schnell de
 
 ## Fix: Unhandled Promise Rejection in parseRSS
 
-**Status:** Offen
+**Status:** ✅ Behoben (v1.1.7)
 
 **Beschreibung:**
-Bei fehlgeschlagenen RSS-Feed-Abrufen wird der Fehler als `Uncaught (in promise)` geworfen, da das Promise nicht korrekt behandelt wird.
+Bei fehlgeschlagenen RSS-Feed-Abrufen wurde der Fehler als `Uncaught (in promise)` geworfen, da das Promise nicht korrekt behandelt wurde.
 
 **Fehlermeldung:**
 ```
@@ -125,9 +125,9 @@ parseRSS @ utils.ts:113
 
 **Ursache:**
 - `parseRSS()` wirft Fehler wenn Feed ungültig ist oder Netzwerkfehler auftritt
-- Aufrufende Stelle(n) fangen den Fehler nicht mit `.catch()` ab
+- In `sources.tsx` wurde `addSource()` ohne `.catch()` aufgerufen
 
-**Zu prüfen:**
-- Alle Aufrufe von `parseRSS()` in `src/scripts/models/source.ts`
-- Sicherstellen dass Fehler korrekt geloggt/angezeigt werden
-- Benutzerfreundliche Fehlermeldung statt Console-Error
+**Lösung:**
+- `.catch()` in `sources.tsx:addSource()` hinzugefügt
+- Fehler werden bereits in Redux-Action behandelt und dem Benutzer angezeigt
+- Der `.catch()` verhindert nur die Console-Warnung
