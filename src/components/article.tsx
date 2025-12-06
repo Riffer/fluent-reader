@@ -378,7 +378,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         {
                             key: "toggleMobileMode",
                             text: "Mobile Ansicht",
-                            iconProps: { iconName: this.props.source.mobileMode ? "CheckMark" : "" },
+                            iconProps: { iconName: (this.props.source.mobileMode || false) ? "CheckMark" : "" },
                             canCheck: true,
                             checked: this.props.source.mobileMode || false,
                             disabled: !this.state.loadWebpage,

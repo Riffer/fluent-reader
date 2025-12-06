@@ -250,6 +250,10 @@ export function initSources(): AppThunk<Promise<void>> {
         const state: SourceState = {}
         for (let source of sources) {
             source.unreadCount = 0
+            // Migration: Ensure mobileMode field exists (for older databases)
+            if (source.mobileMode === undefined) {
+                source.mobileMode = false
+            }
             state[source.sid] = source
         }
         await unreadCount(state)
