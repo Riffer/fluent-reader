@@ -111,12 +111,44 @@ interface HostCookies {
 }
 ```
 
-**Ablauf:**
+**Ablauf - Cookie laden:**
 1. Artikel öffnen → Prüfen ob `source.persistCookies === true`
 2. Falls ja → Host aus URL extrahieren, gespeicherte Cookies für Host laden
-3. Cookies in Webview-Session setzen
-4. Beim Verlassen/Navigation → Falls `persistCookies` aktiv → Aktuelle Cookies für Host speichern
-5. Falls `persistCookies: false` → Keine Speicherung, Session bleibt temporär
+3. Cookies in Webview-Session setzen via Electron API
+4. Falls `persistCookies: false` → Keine Cookies laden, Session bleibt temporär
+
+**Ablauf - Cookie speichern (mehrere Trigger):**
+
+| Event | Beschreibung | Priorität |
+|-------|--------------|-----------|
+| `componentDidUpdate` | Artikelwechsel - alter Artikel wird verlassen | ✅ Kritisch |
+| `componentWillUnmount` | Webview wird zerstört | ✅ Kritisch |
+| `did-finish-load` | Seite fertig geladen (z.B. nach Login) | ✅ Wichtig |
+| App-Beenden | `beforeunload` / `will-quit` | ✅ Backup |
+
+```typescript
+// Artikelwechsel (React Component)
+componentDidUpdate(prevProps) {
+  if (prevProps.item._id !== this.props.item._id) {
+    // Alter Artikel wird verlassen → Cookies speichern
+    this.saveCookiesForCurrentHost();
+    // Neuer Artikel → Cookies laden
+    this.loadCookiesForNewHost();
+  }
+}
+
+componentWillUnmount() {
+  // Webview wird zerstört → Cookies speichern
+  this.saveCookiesForCurrentHost();
+}
+
+// Nach Seitenload (für Login-Flows)
+webview.addEventListener('did-finish-load', () => {
+  if (source.persistCookies) {
+    this.saveCookiesForCurrentHost();
+  }
+});
+```
 
 **UI-Integration:**
 - Feed-Einstellungen: Checkbox "Cookies persistent speichern"
@@ -129,7 +161,6 @@ interface HostCookies {
 
 **Noch zu klären:**
 - [ ] Speicherort: Lovefield/IndexedDB oder separate JSON-Datei?
-- [ ] Session-Wechsel: Wie wird die Session beim Artikelwechsel gehandhabt?
 
 ---
 
