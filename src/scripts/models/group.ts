@@ -229,11 +229,13 @@ function outlineToSource(
     let defaultZoomString = outline.getAttribute("defaultZoom")
     let defaultZoom = 0 
     if (!isNaN(Number(defaultZoomString)))
-        defaultZoom = Number(defaultZoomString) 
+        defaultZoom = Number(defaultZoomString)
+    let mobileModeString = outline.getAttribute("mobileMode")
+    let mobileMode = mobileModeString === "true"
     
     let name = outline.getAttribute("text") || outline.getAttribute("title")
     if (url) {
-        return [addSource(url.trim(), name, true, openTarget, defaultZoom), url]
+        return [addSource(url.trim(), name, true, openTarget, defaultZoom, mobileMode), url]
     } else {
         return null
     }
@@ -328,6 +330,7 @@ function sourceToOutline(source: RSSSource, xml: Document) {
     outline.setAttribute("xmlUrl", source.url)
     outline.setAttribute("openTarget", SourceOpenTarget[source.openTarget])
     outline.setAttribute("defaultZoom", source.defaultZoom.toString())
+    outline.setAttribute("mobileMode", source.mobileMode ? "true" : "false")
     return outline
 }
 
