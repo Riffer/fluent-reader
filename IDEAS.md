@@ -279,3 +279,85 @@ Derzeit gibt es ein Browser-Symbol, das beim Klick "Lade vollständigen Inhalt" 
 - [ ] Exaktes Symbol-Design für jeden Zustand
 - [ ] Soll der Zustand pro Feed oder global gespeichert werden?
 - [ ] Tooltip-Texte für jeden Zustand
+
+---
+
+## Shortcut-Deaktivierung bei Webview-Eingabefeldern
+
+**Status:** Idee
+
+**Beschreibung:**
+Wenn der Benutzer im Webview in ein Login-Formular oder anderes Eingabefeld tippt, werden die Shortcuts (z.B. `L`, `M`, `S`, `+`, `-`) fälschlicherweise als Befehle interpretiert statt als Texteingabe.
+
+**Problem:**
+- `keyDownHandler` in `article.tsx` empfängt alle Tasteneingaben aus dem Webview via IPC
+- Tasten wie `L` (Lade vollständigen Inhalt), `M` (Mark read), `S` (Star), `+`/`-` (Zoom) werden abgefangen
+- Benutzer kann nicht normal in Login-Formulare tippen
+
+**Technische Lösung:**
+
+1. **Signal aus webview-preload.js:**
+```javascript
+// Fokus-Tracking für Eingabefelder
+document.addEventListener('focusin', (e) => {
+    const isInput = e.target.tagName === 'INPUT' || 
+                    e.target.tagName === 'TEXTAREA' ||
+                    e.target.isContentEditable;
+    ipcRenderer.sendToHost('input-focus-changed', isInput);
+});
+
+document.addEventListener('focusout', (e) => {
+    ipcRenderer.sendToHost('input-focus-changed', false);
+});
+```
+
+2. **State in article.tsx:**
+```typescript
+state = {
+    // ... existing state
+    webviewInputFocused: boolean  // NEU
+}
+
+// Beim Webview-Setup
+webview.addEventListener('ipc-message', (event) => {
+    if (event.channel === 'input-focus-changed') {
+        this.setState({ webviewInputFocused: event.args[0] });
+    }
+});
+```
+
+3. **Anpassung keyDownHandler:**
+```typescript
+keyDownHandler = (input: Electron.Input) => {
+    // Bei fokussiertem Input: nur Escape und Navigation erlauben
+    if (this.state.webviewInputFocused) {
+        const allowedKeys = ['Escape', 'ArrowLeft', 'ArrowRight', 'F1', 'F2', 'F5'];
+        if (!allowedKeys.includes(input.key)) {
+            return; // Normale Texteingabe zulassen
+        }
+    }
+    // ... rest des Handlers
+}
+```
+
+**Erlaubte Shortcuts bei fokussiertem Input:**
+| Taste | Aktion | Grund |
+|-------|--------|-------|
+| `Escape` | Artikel schließen | Wichtige Navigation |
+| `ArrowLeft/Right` | Vorheriger/Nächster Artikel | Navigation |
+| `F1-F9` | Menü, Suche, etc. | Keine Texteingabe-Konflikte |
+
+**Blockierte Shortcuts bei fokussiertem Input:**
+| Taste | Normale Aktion | Konflikt mit |
+|-------|---------------|--------------|
+| `L` | Lade vollständigen Inhalt | Buchstabe L |
+| `M` | Als gelesen markieren | Buchstabe M |
+| `S` | Favorit | Buchstabe S |
+| `H` | Verstecken | Buchstabe H |
+| `B` | Im Browser öffnen | Buchstabe B |
+| `+`/`-` | Zoom | Zahlen/Sonderzeichen |
+| `W` | Toggle Full | Buchstabe W |
+
+**Zu klären:**
+- [ ] Soll ein visueller Hinweis angezeigt werden wenn Shortcuts deaktiviert sind?
+- [ ] Globales Tastenkürzel zum manuellen Umschalten (z.B. `Ctrl+I` für "Input-Modus")?
