@@ -42,6 +42,7 @@ export class RSSSource {
     openTarget: SourceOpenTarget
     defaultZoom: number
     mobileMode: boolean
+    persistCookies: boolean
     unreadCount: number
     lastFetched: Date
     serviceRef?: string
@@ -50,12 +51,13 @@ export class RSSSource {
     textDir: SourceTextDirection
     hidden: boolean
 
-    constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null, defaultZoom = 0, mobileMode = false) {
+    constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null, defaultZoom = 0, mobileMode = false, persistCookies = false) {
         this.url = url
         this.name = name
         this.openTarget = openTarget ?? SourceOpenTarget.Local
         this.defaultZoom = defaultZoom
         this.mobileMode = mobileMode
+        this.persistCookies = persistCookies
         this.lastFetched = new Date()
         this.fetchFrequency = 0
         this.textDir = SourceTextDirection.LTR
@@ -254,6 +256,10 @@ export function initSources(): AppThunk<Promise<void>> {
             if (source.mobileMode === undefined) {
                 source.mobileMode = false
             }
+            // Migration: Ensure persistCookies field exists (for older databases)
+            if (source.persistCookies === undefined) {
+                source.persistCookies = false
+            }
             state[source.sid] = source
         }
         await unreadCount(state)
@@ -321,13 +327,14 @@ export function addSource(
     batch = false,
     openTarget = null,
     defaultZoom = 0,
-    mobileMode = false
+    mobileMode = false,
+    persistCookies = false
 ): AppThunk<Promise<number>> {
     return async (dispatch, getState) => {
         const app = getState().app
         if (app.sourceInit) {
             dispatch(addSourceRequest(batch))
-            const source = new RSSSource(url, name, openTarget, defaultZoom, mobileMode)
+            const source = new RSSSource(url, name, openTarget, defaultZoom, mobileMode, persistCookies)
             try {
                 const feed = await RSSSource.fetchMetaData(source)
                 const inserted = await dispatch(insertSource(source))

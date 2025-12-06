@@ -4,6 +4,15 @@ import path from 'path';
 import { setThemeListener } from "./settings"
 import { setUtilsListeners } from "./utils"
 import { setupArticleExtractorHandlers } from "./article-extractor"
+import {
+    loadCookiesForHost,
+    saveCookiesForHost,
+    deleteCookiesForHost,
+    getCookiesFromSession,
+    setCookiesToSession,
+    extractHost,
+    listSavedHosts
+} from "./cookie-persist"
 
 /**
  * Set up cookies to bypass consent dialogs and age gates
@@ -140,6 +149,67 @@ export class WindowManager {
                 console.error('[DeviceEmulation] Error:', e)
                 return false
             }
+        })
+
+        // ===== Cookie Persistence IPC Handlers =====
+
+        // Cookies für einen Host laden und in Session setzen
+        // WICHTIG: Die Webview nutzt partition="sandbox" (ohne persist:)
+        ipcMain.handle("load-persisted-cookies", async (_event, url: string) => {
+            const host = extractHost(url)
+            if (!host) {
+                console.log("[CookiePersist] Invalid URL, cannot load cookies:", url)
+                return { success: false, count: 0 }
+            }
+
+            const cookies = await loadCookiesForHost(host)
+            if (cookies.length === 0) {
+                return { success: true, count: 0 }
+            }
+
+            // Webview verwendet partition="sandbox" (ohne persist: prefix!)
+            const sandboxSession = session.fromPartition("sandbox")
+            const count = await setCookiesToSession(sandboxSession, host, cookies)
+            return { success: true, count }
+        })
+
+        // Cookies für einen Host aus Session holen und speichern
+        // WICHTIG: Die Webview nutzt partition="sandbox" (ohne persist:)
+        ipcMain.handle("save-persisted-cookies", async (_event, url: string) => {
+            const host = extractHost(url)
+            if (!host) {
+                console.log("[CookiePersist] Invalid URL, cannot save cookies:", url)
+                return { success: false }
+            }
+
+            // Webview verwendet partition="sandbox" (ohne persist: prefix!)
+            const sandboxSession = session.fromPartition("sandbox")
+            const cookies = await getCookiesFromSession(sandboxSession, host)
+            if (cookies.length === 0) {
+                console.log("[CookiePersist] No cookies to save for host:", host)
+                return { success: true, count: 0 }
+            }
+
+            const success = await saveCookiesForHost(host, cookies)
+            return { success, count: cookies.length }
+        })
+
+        // Gespeicherte Cookies für einen Host löschen
+        ipcMain.handle("delete-persisted-cookies", async (_event, url: string) => {
+            const host = extractHost(url)
+            if (!host) {
+                console.log("[CookiePersist] Invalid URL, cannot delete cookies:", url)
+                return { success: false }
+            }
+
+            const success = await deleteCookiesForHost(host)
+            return { success }
+        })
+
+        // Liste aller Hosts mit gespeicherten Cookies
+        ipcMain.handle("list-persisted-cookie-hosts", async () => {
+            const hosts = listSavedHosts()
+            return { hosts }
         })
 
         app.on("second-instance", () => {
