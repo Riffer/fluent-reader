@@ -819,3 +819,29 @@ Für komplexe Feed-Bereinigung wird [RSS-Bridge](https://github.com/RSS-Bridge/r
 **Betroffene Dateien:**
 - `src/components/article.tsx` - `cleanDuplicateContent()`, `isComicMode` Logik
 
+---
+
+## Bekannte Electron/Chromium-Meldungen (harmlos)
+
+**Status:** Dokumentiert (Dezember 2025)
+
+**Beschreibung:**
+Beim Start der App erscheinen im Terminal einige Fehlermeldungen von Electron/Chromium. Diese sind **harmlos** und beeinträchtigen die Funktionalität nicht.
+
+**Bekannte Meldungen:**
+
+| Meldung | Ursache | Status |
+|---------|---------|--------|
+| `Failed to delete file ...Cookies: Das Verzeichnis ist nicht leer` | Chromium versucht beim Start alte Session-Daten zu migrieren. Das interne `Cookies`-Verzeichnis kann nicht gelöscht werden, wenn noch Handles offen sind. | ⚠️ Harmlos |
+| `Encountered error while migrating network context data` | Zusammenhängend mit dem Cookies-Problem - Chromium's Netzwerk-Sandbox kann nicht alle Daten migrieren. | ⚠️ Harmlos |
+| `Request Autofill.enable failed` | DevTools versucht Autofill-CDP-Befehle zu nutzen, die in Electron nicht unterstützt werden. Erscheint nur bei geöffneten DevTools. | ⚠️ Harmlos |
+| `Request Autofill.setAddresses failed` | Wie oben - CDP (Chrome DevTools Protocol) Befehl nicht verfügbar in Electron. | ⚠️ Harmlos |
+
+**Wichtig:** 
+- Das Chromium-interne `Cookies`-Verzeichnis (`%APPDATA%/Electron/Cookies`) ist **nicht** identisch mit unserem Cookie-Persistenz-Verzeichnis (`%APPDATA%/Electron/cookies/`).
+- Unsere Cookie-Persistenz-Dateien (JSON pro Host) sind davon nicht betroffen.
+- Diese Meldungen kommen direkt aus dem Chromium-Netzwerk-Stack und können nicht durch unseren Code behoben werden.
+
+**Workaround:**
+Keine Aktion erforderlich. Die Meldungen können ignoriert werden.
+
