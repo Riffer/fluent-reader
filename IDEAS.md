@@ -1,5 +1,62 @@
 # Feature Ideas
 
+---
+
+## Upstream-Contribution Strategie
+
+**Status:** Geplant
+
+**Ziel:**
+Ausgewählte Änderungen aus diesem Fork als Pull Requests an das Original-Repository (yang991178/fluent-reader) zurückgeben.
+
+### Empfohlene PR-Strategie
+
+**Phase 1: Kleine, isolierte Bug Fixes (hohe Akzeptanzchance)**
+
+| Feature | Commit | Aufwand | Priorität |
+|---------|--------|---------|-----------|
+| Fix: parseRSS Error Handling | `8afd1b5` | Gering | ⭐⭐⭐ Hoch |
+| OPML mobileMode Export/Import | `093cd85` | Gering | ⭐⭐⭐ Hoch |
+| Comic Mode: Duplicate Images Fix | `35ea74c` | Gering | ⭐⭐ Mittel |
+
+**Phase 2: Feature PRs (erst als Issue/Discussion vorstellen)**
+
+| Feature | Commits | Aufwand | Voraussetzung |
+|---------|---------|---------|---------------|
+| Mobile Mode (Device Emulation) | mehrere | Mittel | Lokalisierung, englische Kommentare |
+| Input Mode (Ctrl+I) | Teil von Cookies | Mittel | Kann separat extrahiert werden |
+| Zoom/Scroll Verbesserungen | `a55c6d5` | Gering | Review nötig |
+
+**Phase 3: Größere/Kontroverse Features (Fork-only oder später)**
+
+| Feature | Grund für Verzögerung |
+|---------|----------------------|
+| SQLite3 Migration | Breaking Change, Lovefield noch aktiv upstream |
+| Persistent Cookies | Security-Review nötig, Privacy-Bedenken |
+| NSFW-Cleanup | Kontrovers, Reddit-spezifisch |
+| Auto Cookie-Consent | Rechtlich fraglich in manchen Ländern |
+
+### Voraussetzungen für Upstream-PRs
+
+- [ ] Deutsche Kommentare auf Englisch umstellen
+- [ ] Hardcodierte deutsche Texte lokalisieren (alle 18 Sprachen)
+- [ ] Tests hinzufügen falls vorhanden
+- [ ] CHANGELOG aktualisieren
+- [ ] Code-Style an Upstream anpassen
+
+### Git-Workflow für PRs
+
+```bash
+# Einzelnen Commit für PR extrahieren
+git checkout upstream/master
+git checkout -b pr/fix-parserss-error
+git cherry-pick 8afd1b5
+git push origin pr/fix-parserss-error
+# Dann PR auf GitHub erstellen
+```
+
+---
+
 ## SQLite3 Datenbank-Migration
 
 **Status:** ✅ Implementiert (Dezember 2025)
@@ -905,6 +962,37 @@ Neu hinzugefuegte Funktionen und Schaltflaechen haben teilweise nur englische od
 
 **Loesung:**
 - Alle neu hinzugefuegten UI-Texte muessen in **allen verfuegbaren Sprachen** angelegt werden
-- Verfuegbare Sprachen: en-US, de, cs, es, fr, it, ja, ko, nl, pt_BR, pt_PT, ru, sv, tr, uk, zh_CN, zh_TW
+- Verfuegbare Sprachen: en-US, de, cs, es, fr-FR, fi-FI, it, ja, ko, nl, pt-BR, pt-PT, ru, sv, tr, uk, zh-CN, zh-TW (18 Sprachen)
 - Neue Strings fuer: Mobile Mode Toggle, Cookie-Persistenz, Zoom-Overlay, etc.
 - Lokalisierungsdateien: src/scripts/i18n/*.json
+
+**Hardcodierte Texte in `article.tsx` (zu lokalisieren):**
+
+| Zeile | Aktueller Text (DE) | Vorgeschlagener i18n-Key |
+|-------|---------------------|--------------------------|
+| 509 | `"Tools"` | `article.tools` |
+| 515 | `"Quelltext kopieren"` | `article.copySource` |
+| 539 | `"Berechneter Quelltext kopieren"` | `article.copyComputedSource` |
+| 586 | `"Zoom-Anzeige"` | `article.zoomOverlay` |
+| 594 | `"Mobile Ansicht"` | `article.mobileView` |
+| 603 | `"NSFW-Cleanup (experimentell)"` | `article.nsfwCleanup` |
+| 611 | `"Auto Cookie-Consent"` | `article.autoCookieConsent` |
+| 619 | `"Cookies speichern (Login)"` | `article.persistCookies` |
+| 631 | `"Eingabe-Modus beenden (Ctrl+I)"` | `article.inputModeEnd` |
+| 632 | `"Eingabe-Modus (Ctrl+I)"` | `article.inputMode` |
+| 648 | `"App Developer Tools"` | `article.appDevTools` |
+| 658 | `"Artikel Developer Tools"` | `article.articleDevTools` |
+| 1885 | `"Eingabe-Modus aktiv..."` (title) | `article.inputModeTooltip` |
+| 1887 | `"⌨ EINGABE"` | `article.inputModeBadge` |
+| 1929 | `"(wird geladen...)"` | `article.loading` |
+| 1931 | `"✓ (geladen)"` | `article.loaded` |
+
+**Hinweis:** Diese Texte sind aktuell auf Deutsch hardcodiert. Für eine vollständige Lokalisierung müssen sie:
+1. In `en-US.json` als englische Basis angelegt werden
+2. In alle 17 anderen Sprachdateien übersetzt werden
+3. Im Code durch `intl.get("key")` ersetzt werden
+
+**Mögliche Quellen für Übersetzungen:**
+- DeepL API (kostenlos bis 500k Zeichen/Monat)
+- Upstream-Repository synchronisieren (`git fetch upstream`)
+- Community-Beiträge (siehe README in src/scripts/i18n/)
