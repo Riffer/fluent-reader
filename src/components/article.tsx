@@ -1216,16 +1216,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 // Fallback: if extractor produces no content, extract manually
                 if (!contentToUse || contentToUse.length === 0) {
                     contentToUse = this.fallbackExtractContent(html)
-                } else {
-                    // Clean up the extracted content to remove duplicates
-                    contentToUse = this.cleanDuplicateContent(contentToUse)
-                    
-                    // DEBUG: Check the structure of extracted content
-                    console.log("[DEBUG] Extracted content starts with:", contentToUse.substring(0, 100))
-                    console.log("[DEBUG] Has <article>:", contentToUse.includes("<article"))
-                    console.log("[DEBUG] Has <div>:", contentToUse.substring(0, 200).includes("<div"))
-                    console.log("[DEBUG] Content length:", contentToUse.length)
                 }
+                
+                // Always clean up the content to remove duplicates (both extractor and fallback)
+                contentToUse = this.cleanDuplicateContent(contentToUse)
                 
                 // Wrap extracted content in semantic <article> structure
                 const escapeHtml = (text: string) => {
@@ -1355,6 +1349,63 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             // Remove script/style tags
             doc.querySelectorAll('script, style, noscript').forEach(el => el.remove())
+            
+            // ===== DUPLICATE IMAGE REMOVAL =====
+            // Track seen image sources to remove duplicates (e.g., from fancybox links)
+            const seenImageSrcs = new Set<string>()
+            
+            // Helper to normalize image URLs for comparison
+            // Uses host + pathname (without query params) to identify duplicates
+            const normalizeImageUrl = (url: string): string => {
+                try {
+                    const u = new URL(url, 'http://dummy')
+                    // Use host + pathname for comparison (ignore query params)
+                    // This correctly identifies duplicates across same domain
+                    return (u.host + u.pathname).toLowerCase()
+                } catch {
+                    return url.toLowerCase()
+                }
+            }
+            
+            // First pass: collect all unique image sources and remove duplicates
+            const allImages = Array.from(doc.querySelectorAll('img'))
+            
+            allImages.forEach((img) => {
+                const src = img.getAttribute('src')
+                if (src) {
+                    const normalized = normalizeImageUrl(src)
+                    
+                    if (seenImageSrcs.has(normalized)) {
+                        // Duplicate image - remove the element
+                        // If it's inside a link that only contains this image, remove the link too
+                        const parent = img.parentElement
+                        if (parent?.tagName === 'A' && parent.children.length === 1) {
+                            parent.remove()
+                        } else {
+                            img.remove()
+                        }
+                    } else {
+                        seenImageSrcs.add(normalized)
+                    }
+                }
+            })
+            
+            // Second pass: Unwrap fancybox/lightbox links (remove link, keep image)
+            // These often have the image both as href AND as img src inside
+            doc.querySelectorAll('a.fancybox, a[data-fancybox], a[data-lightbox], a[rel="lightbox"]').forEach((link) => {
+                const href = link.getAttribute('href')
+                if (href) {
+                    const normalizedHref = normalizeImageUrl(href)
+                    const innerImg = link.querySelector('img')
+                    if (innerImg) {
+                        const innerSrc = innerImg.getAttribute('src')
+                        if (innerSrc && normalizeImageUrl(innerSrc) === normalizedHref) {
+                            // The link and image point to the same file - unwrap the link, keep just the image
+                            link.replaceWith(innerImg)
+                        }
+                    }
+                }
+            })
             
             // Remove empty/junk elements (but preserve elements with images!)
             doc.querySelectorAll('div, section').forEach((div) => {

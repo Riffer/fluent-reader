@@ -784,3 +784,38 @@ function matchesPattern(url: string, pattern: string): boolean {
 - [Tampermonkey Documentation](https://www.tampermonkey.net/documentation.php)
 - [I don't care about cookies](https://www.i-dont-care-about-cookies.eu/) - Filterliste
 
+---
+
+## Comic-Modus Verbesserungen
+
+**Status:** Teilweise implementiert (Dezember 2025)
+
+**Beschreibung:**
+Der Comic-Modus optimiert die Darstellung von bildlastigen Feeds (Comics, Webcomics) mit wenig Text.
+
+**Implementierte Features:**
+- ✅ Automatische Erkennung: `totalImages > 0 && textLength < 200`
+- ✅ CSS-Klasse `comic-mode` für angepasstes Layout
+- ✅ Entfernung doppelter Bilder (Fancybox/Lightbox-Links)
+- ✅ URL-Normalisierung für zuverlässige Duplikaterkennung
+
+**Bekannte Einschränkungen:**
+
+| Problem | Beschreibung | Workaround |
+|---------|--------------|------------|
+| **Aufgeblähte kleine Bilder** | Alle Bilder werden im Comic-Modus auf gleiche Größe skaliert, auch kleine Icons oder Nebenbilder | Externe Feed-Bereinigung via RSS-Bridge |
+| **Hauptbild-Erkennung** | Keine zuverlässige Methode um das "Hauptbild" von Nebenbildern zu unterscheiden | - |
+| **Bildgröße unbekannt** | Tatsächliche Pixelgröße ist erst nach dem Laden bekannt | - |
+
+**Nicht implementiert (bewusst):**
+
+- **Größenbasierte Filterung**: Problematisch, da Werbebanner oft größer als Comics sind
+- **Positionsbasierte Filterung**: Erste Bilder sind nicht immer das Hauptbild
+- **Container-basierte Erkennung**: Jede Website hat andere HTML-Struktur
+
+**Empfohlene externe Lösung:**
+Für komplexe Feed-Bereinigung wird [RSS-Bridge](https://github.com/RSS-Bridge/rss-bridge) empfohlen. RSS-Bridge kann Feeds vor der Anzeige in Fluent Reader filtern und transformieren. Eine Integration in Fluent Reader selbst wäre zu umfangreich.
+
+**Betroffene Dateien:**
+- `src/components/article.tsx` - `cleanDuplicateContent()`, `isComicMode` Logik
+
