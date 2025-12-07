@@ -162,6 +162,12 @@ export function setUtilsListeners(manager: WindowManager) {
             contents.on(
                 "did-fail-load",
                 (event, code, desc, validated, isMainFrame) => {
+                    // Ignoriere ERR_ABORTED (-3) und ERR_FAILED (-2) - 
+                    // diese treten bei schnellem Artikelwechsel im Mobile-Mode auf
+                    // und sind harmlos (Navigation wurde abgebrochen)
+                    if (code === -3 || code === -2) {
+                        return
+                    }
                     if (isMainFrame && manager.hasWindow()) {
                         manager.mainWindow.webContents.send(
                             "webview-error",
