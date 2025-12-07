@@ -4,6 +4,7 @@
  */
 
 import type { createArticleExtractorBridge } from "../bridges/article-extractor"
+import type { DbBridge } from "../bridges/db"
 
 type ArticleExtractorBridge = ReturnType<typeof createArticleExtractorBridge>
 
@@ -18,6 +19,11 @@ declare global {
          * Utils bridge - utility functions
          */
         utils: any
+
+        /**
+         * Database bridge - SQLite database operations
+         */
+        db: DbBridge
 
         /**
          * Article Extractor bridge - extract article content

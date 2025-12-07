@@ -1,9 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron"
 import settingsBridge from "./bridges/settings"
 import utilsBridge from "./bridges/utils"
+import dbBridge from "./bridges/db"
 import { createArticleExtractorBridge } from "./bridges/article-extractor"
 
 contextBridge.exposeInMainWorld("settings", settingsBridge)
+contextBridge.exposeInMainWorld("db", dbBridge)
 contextBridge.exposeInMainWorld("utils", utilsBridge)
 
 // ipcRenderer für Webview-Zoom-Kommunikation (eingeschränkt auf benötigte Channels)

@@ -4,6 +4,7 @@ import path from 'path';
 import { setThemeListener } from "./settings"
 import { setUtilsListeners } from "./utils"
 import { setupArticleExtractorHandlers } from "./article-extractor"
+import { setupDatabaseIPC, initDatabase, closeDatabase } from "./db-sqlite"
 import {
     loadCookiesForHost,
     saveCookiesForHost,
@@ -65,12 +66,21 @@ export class WindowManager {
             this.setListeners()
             this.createWindow()
         })
+
+        // Close database cleanly on app quit
+        app.on("before-quit", () => {
+            closeDatabase()
+        })
     }
 
     private setListeners = () => {
         setThemeListener(this)
         setUtilsListeners(this)
         setupArticleExtractorHandlers()
+        
+        // Initialize SQLite database and IPC handlers
+        initDatabase()
+        setupDatabaseIPC()
 
         // Weiterleitung von Zoom-Änderungen aus Webviews -> Renderer
         ipcMain.on("webview-zoom-changed", (_event, zoom: number) => {

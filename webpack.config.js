@@ -34,6 +34,10 @@ module.exports = [
         node: {
             __dirname: false,
         },
+        // Exclude native modules from bundling - they need to be loaded at runtime
+        externals: {
+            "better-sqlite3": "commonjs better-sqlite3",
+        },
     },
     {
         mode: "production",
