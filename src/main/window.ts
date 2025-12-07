@@ -55,6 +55,31 @@ export class WindowManager {
     }
 
     private init = () => {
+        // Unterdrücke ERR_ABORTED und ERR_FAILED Fehler die beim schnellen Artikelwechsel auftreten
+        process.on('unhandledRejection', (reason: any) => {
+            // ERR_ABORTED (-3): Navigation wurde abgebrochen
+            // ERR_FAILED (-2): Allgemeiner Fehler (oft bei schnellem Wechsel)
+            if (reason?.code === 'ERR_ABORTED' || reason?.errno === -3 ||
+                reason?.code === 'ERR_FAILED' || reason?.errno === -2) {
+                // Ignoriere diese Fehler - treten auf wenn Navigation während des Ladens abgebrochen wird
+                return
+            }
+            console.error('Unhandled rejection:', reason)
+        })
+        
+        // Filtere Electron-interne GUEST_VIEW_MANAGER_CALL Fehler aus console.error
+        const originalConsoleError = console.error
+        console.error = (...args: any[]) => {
+            // Konvertiere args zu String für Prüfung
+            const message = args.map(a => String(a)).join(' ')
+            // Filtere ERR_ABORTED und ERR_FAILED Fehler bei GUEST_VIEW_MANAGER_CALL
+            if (message.includes('GUEST_VIEW_MANAGER_CALL') && 
+                (message.includes('ERR_ABORTED') || message.includes('ERR_FAILED'))) {
+                return // Ignoriere diese Fehler
+            }
+            originalConsoleError.apply(console, args)
+        }
+        
         app.on("ready", async () => {
             // Set bypass cookies before anything else
             await setupBypassCookies()
@@ -343,3 +368,61 @@ app.on('ready', () => {
   // Speichere den Pfad in einer globalen Variable für den Renderer-Prozess
   (global as any).webviewPreloadPath = getWebviewPreloadPath();
 });
+
+// ===== Mobile Mode: Globaler Status und Auto-Aktivierung für neue WebViews =====
+
+// Globaler Mobile-Mode Status (wird vom Renderer gesetzt)
+let globalMobileMode = false
+// Standard-Parameter für Mobile-Emulation (768px = Tablet/Mobile Breakpoint)
+let globalMobileEmulationParams: any = {
+    screenPosition: "mobile",
+    screenSize: { width: 768, height: 844 },
+    deviceScaleFactor: 1,
+    viewSize: { width: 768, height: 844 },
+    fitToView: false,
+    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+}
+
+// IPC: Renderer teilt uns den Mobile-Mode-Status mit
+ipcMain.on("set-global-mobile-mode", (_event, enabled: boolean, params?: any) => {
+    console.log('[MobileMode] Global status set to:', enabled, 'viewport:', params?.screenSize?.width, 'x', params?.screenSize?.height)
+    globalMobileMode = enabled
+    if (params) {
+        globalMobileEmulationParams = params
+    }
+})
+
+// Listener für neue WebViews - aktiviert Emulation BEVOR Navigation beginnt
+app.on('web-contents-created', (_event, contents) => {
+    // Nur für webview-Tags (type === 'webview')
+    if (contents.getType() === 'webview') {
+        const webContentsId = contents.id
+        console.log('[MobileMode] New webview created, id:', webContentsId, 'globalMobileMode:', globalMobileMode)
+        
+        // did-attach feuert wenn der webview an ein BrowserWindow attached wird
+        // Das ist der frühestmögliche Zeitpunkt für Emulation
+        contents.on('did-attach', () => {
+            if (globalMobileMode && globalMobileEmulationParams) {
+                console.log('[MobileMode] Applying emulation on did-attach for webContentsId:', webContentsId)
+                try {
+                    // User-Agent setzen
+                    if (globalMobileEmulationParams.userAgent) {
+                        contents.setUserAgent(globalMobileEmulationParams.userAgent)
+                    }
+                    // Device Emulation aktivieren
+                    const emulationParams = {
+                        screenPosition: globalMobileEmulationParams.screenPosition || "mobile",
+                        screenSize: globalMobileEmulationParams.screenSize || { width: 390, height: 844 },
+                        deviceScaleFactor: globalMobileEmulationParams.deviceScaleFactor || 3,
+                        viewSize: globalMobileEmulationParams.viewSize || { width: 390, height: 844 },
+                        fitToView: globalMobileEmulationParams.fitToView !== undefined ? globalMobileEmulationParams.fitToView : true
+                    }
+                    contents.enableDeviceEmulation(emulationParams)
+                    console.log('[MobileMode] Emulation enabled on did-attach')
+                } catch (e) {
+                    console.error('[MobileMode] Failed to enable emulation on did-attach:', e)
+                }
+            }
+        })
+    }
+})

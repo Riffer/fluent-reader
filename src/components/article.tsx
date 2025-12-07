@@ -85,7 +85,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     pressedZoomKeys: Set<string>
     currentZoom: number = 0  // Track zoom locally to avoid state lag
     private _isMounted = false
-    private mobileEmulationWebContentsId: number | null = null  // Speichert die webContentsId für die Emulation aktiviert wurde
     private cookieSaveTimeout: NodeJS.Timeout | null = null  // Debounce für Cookie-Speicherung
     private lastCookieSaveTime: number = 0  // Timestamp der letzten Cookie-Speicherung
 
@@ -94,6 +93,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Initialisiere mit dem gespeicherten Feed-Zoom
         const initialZoom = props.source.defaultZoom || 0
         this.currentZoom = initialZoom
+        // Initialisiere lokalen Mobile-Mode State
+        this.localMobileMode = props.source.mobileMode || false
         this.state = {
             fontFamily: window.settings.getFont(),
             fontSize: window.settings.getFontSize(),
@@ -162,12 +163,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.sendZoomOverlaySettingToPreload(newValue);
     }
 
-    private toggleMobileMode = () => {
+    // Lokaler State für Mobile Mode (für zuverlässiges IPC-Timing nach Reload)
+    private localMobileMode: boolean = false;
+
+    private toggleMobileMode = async () => {
         const newMobileMode = !this.props.source.mobileMode;
+        this.localMobileMode = newMobileMode;  // Lokalen State sofort setzen
         this.props.updateMobileMode(this.props.source, newMobileMode);
-        // Reset webContentsId damit Emulation beim Reload neu initialisiert wird
-        this.mobileEmulationWebContentsId = null;
-        // Webview neu laden damit die Einstellung greift
+        
+        console.log('[Article] Mobile mode toggled:', newMobileMode ? 'ON' : 'OFF');
+        
+        // Globalen Mobile-Mode Status setzen (für neue WebViews bei Artikelwechsel)
+        this.setGlobalMobileMode(newMobileMode);
+        
+        // Emulation sofort aktivieren/deaktivieren
+        if (newMobileMode) {
+            await this.enableMobileEmulation();
+        } else {
+            await this.disableMobileEmulation();
+        }
+        
+        // Webview neu laden damit die Seite mit korrektem User-Agent/Viewport lädt
         this.reloadWebview();
     }
 
@@ -194,9 +210,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             }
             
             // Hole die tatsächliche Webview-Größe für dynamischen Viewport
+            // Fallback auf 768x844 wenn noch nicht gerendert (getBoundingClientRect gibt 0 zurück)
             const webviewRect = this.webview.getBoundingClientRect();
-            const viewportWidth = Math.min(768, Math.round(webviewRect.width));  // Max 768px (Mobile Breakpoint)
-            const viewportHeight = Math.round(webviewRect.height);
+            const viewportWidth = webviewRect.width > 0 ? Math.min(768, Math.round(webviewRect.width)) : 768;
+            const viewportHeight = webviewRect.height > 0 ? Math.round(webviewRect.height) : 844;
             
             const ipcRenderer = (window as any).ipcRenderer;
             if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
@@ -209,6 +226,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
                 });
                 console.log('[MobileMode] Device emulation enabled:', result, 'viewport:', viewportWidth, 'x', viewportHeight);
+                // Sende Status an Webview-Preload für Overlay
+                try {
+                    this.webview.send('set-mobile-mode', true);
+                } catch {}
                 return result;
             }
             return false;
@@ -228,12 +249,47 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
                 const result = await ipcRenderer.invoke('disable-device-emulation', webContentsId);
                 console.log('[MobileMode] Device emulation disabled:', result);
+                // Sende Status an Webview-Preload für Overlay
+                try {
+                    this.webview.send('set-mobile-mode', false);
+                } catch {}
                 return result;
             }
             return false;
         } catch (e) {
             console.error('[MobileMode] Error disabling emulation:', e);
             return false;
+        }
+    }
+
+    // Setzt den globalen Mobile-Mode-Status im Main-Prozess
+    // Der Main-Prozess wendet dann automatisch Emulation auf neue WebViews an
+    private setGlobalMobileMode = (enabled: boolean) => {
+        const ipcRenderer = (window as any).ipcRenderer;
+        if (ipcRenderer && typeof ipcRenderer.send === 'function') {
+            // FESTE Viewport-Breite für konsistentes Mobile-Verhalten
+            // 768px ist der Standard-Breakpoint für Mobile/Tablet
+            // Höhe wird dynamisch berechnet falls Webview vorhanden
+            const viewportWidth = 768;
+            let viewportHeight = 844;
+            if (this.webview) {
+                try {
+                    const webviewRect = this.webview.getBoundingClientRect();
+                    viewportHeight = Math.round(webviewRect.height);
+                } catch {}
+            }
+            
+            const params = {
+                screenPosition: "mobile",
+                screenSize: { width: viewportWidth, height: viewportHeight },
+                deviceScaleFactor: 1,
+                viewSize: { width: viewportWidth, height: viewportHeight },
+                fitToView: false,
+                userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+            };
+            
+            console.log('[MobileMode] Setting global mobile mode:', enabled, 'viewport:', viewportWidth, 'x', viewportHeight);
+            ipcRenderer.send('set-global-mobile-mode', enabled, params);
         }
     }
 
@@ -741,6 +797,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "W":
                     this.toggleFull()
                     break
+                case "m":
+                case "M":
+                    // Toggle Mobile Mode
+                    this.toggleMobileMode()
+                    break
                 case "H":
                 case "h":
                     if (!input.meta) this.props.toggleHidden(this.props.item)
@@ -774,29 +835,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.loadPersistedCookies();
         }
         
-        // Mobile Mode: Device Emulation nur EINMAL pro webContentsId aktivieren
-        // getWebContentsId() kann fehlschlagen wenn das Webview noch nicht vollständig im DOM ist
-        let currentWebContentsId: number | null = null;
-        try {
-            currentWebContentsId = (this.webview as any).getWebContentsId?.();
-        } catch (e) {
-            // Webview ist noch nicht bereit - Emulation wird bei dom-ready nachgeholt
-            console.log('[Article] Mobile mode: Webview not ready yet, skipping emulation check');
-        }
-        
-        const shouldActivateMobileMode = this.state.loadWebpage && 
-            (this.props.source.mobileMode || false) && 
-            currentWebContentsId && 
-            this.mobileEmulationWebContentsId !== currentWebContentsId;
-            
-        if (shouldActivateMobileMode) {
-            console.log(`[Article] Mobile mode: Activating emulation for webContentsId ${currentWebContentsId} (previously: ${this.mobileEmulationWebContentsId})`);
-            this.mobileEmulationWebContentsId = currentWebContentsId;
-            this.enableMobileEmulation();
-        } else if (currentWebContentsId && this.mobileEmulationWebContentsId === currentWebContentsId) {
-            console.log(`[Article] Mobile mode: Skipping emulation (already active for webContentsId ${currentWebContentsId})`);
-        }
-        
         const targetZoom = this.props.source.defaultZoom || 0;
         // Synchronisiere currentZoom mit dem Feed-Zoom
         this.currentZoom = targetZoom;
@@ -811,44 +849,66 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     webviewStartLoading = () => { 
         console.log('[Article] webviewStartLoading - dom-ready fired');
         
-        // Mobile Mode: Falls Emulation bei did-start-loading nicht möglich war, jetzt nachholen
-        if (this.state.loadWebpage && (this.props.source.mobileMode || false)) {
-            try {
-                const currentWebContentsId = (this.webview as any).getWebContentsId?.();
-                if (currentWebContentsId && this.mobileEmulationWebContentsId !== currentWebContentsId) {
-                    console.log(`[Article] Mobile mode (dom-ready): Activating emulation for webContentsId ${currentWebContentsId}`);
-                    this.mobileEmulationWebContentsId = currentWebContentsId;
-                    this.enableMobileEmulation();
-                }
-            } catch (e) {
-                console.error('[Article] Mobile mode: Failed to get webContentsId at dom-ready', e);
-            }
+        // Guard: Prüfe ob this.webview noch gültig ist
+        if (!this.webview) {
+            console.log('[Article] dom-ready: webview is null, skipping');
+            return;
         }
+        
+        // Mobile Mode: Emulation wird bei did-stop-loading aktiviert (zuverlässiger)
+        // Hier nur IPC-Signal für Overlay senden
+        const currentMobileMode = this.localMobileMode;
         
         const targetZoom = this.props.source.defaultZoom || 0;
         // Synchronisiere currentZoom mit dem Feed-Zoom
         this.currentZoom = targetZoom;
-        console.log('[Article] dom-ready: Sending zoom:', targetZoom, 'overlay:', this.state.showZoomOverlay);
+        console.log('[Article] dom-ready: Sending zoom:', targetZoom, 'overlay:', this.state.showZoomOverlay, 'mobileMode:', currentMobileMode);
         try {
             // Verwende echten Zoom-Level statt Skalierung
             this.webview.send('set-webview-zoom', targetZoom);
             // Sende Zoom-Overlay-Einstellung
             this.webview.send('set-zoom-overlay-setting', this.state.showZoomOverlay);
+            // Sende Mobile-Mode-Status für Overlay
+            this.webview.send('set-mobile-mode', currentMobileMode);
         } catch {}
         if (!this.state.webviewVisible) this.setState({ webviewVisible: true });
     }
     webviewLoaded = () => {
         console.log('[Article] webviewLoaded - did-stop-loading fired');
         this.setState({ loaded: true })
+        
+        // Guard: Prüfe ob this.webview noch gültig ist
+        if (!this.webview) {
+            console.log('[Article] did-stop-loading: webview is null, skipping');
+            return;
+        }
+        
+        // Mobile Mode: Emulation aktivieren/deaktivieren (zuverlässiger Zeitpunkt als dom-ready)
+        const currentMobileMode = this.localMobileMode;
+        if (this.state.loadWebpage) {
+            if (currentMobileMode) {
+                console.log('[Article] did-stop-loading: Enabling mobile emulation');
+                this.enableMobileEmulation().catch(e => {
+                    console.warn('[Article] did-stop-loading: Failed to enable mobile emulation:', e.message);
+                });
+            } else {
+                console.log('[Article] did-stop-loading: Disabling mobile emulation');
+                this.disableMobileEmulation().catch(e => {
+                    console.warn('[Article] did-stop-loading: Failed to disable mobile emulation:', e.message);
+                });
+            }
+        }
+        
         const targetZoom = this.props.source.defaultZoom || 0;
         // Synchronisiere currentZoom mit dem Feed-Zoom
         this.currentZoom = targetZoom;
-        console.log('[Article] did-stop-loading: Sending zoom:', targetZoom);
+        console.log('[Article] did-stop-loading: Sending zoom:', targetZoom, 'mobileMode:', currentMobileMode);
         try {
             this.sendZoomToPreload(targetZoom);
             // Sende Zoom-Overlay-Einstellung nochmals
             this.sendZoomOverlaySettingToPreload(this.state.showZoomOverlay);
-            // NSFW-Cleanup wird jetzt synchron beim Preload-Start geladen, kein IPC nötig
+            // Sende Mobile-Mode-Status
+            this.webview.send('set-mobile-mode', currentMobileMode);
         } catch {}
         
         // Cookies speichern nach dem Laden (für Login-Flows)
@@ -884,6 +944,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 console.error("[componentDidMount] Failed to get app path:", err)
             })
         }
+        
+        // Globalen Mobile-Mode Status initial setzen (für den Fall dass bereits aktiviert)
+        this.setGlobalMobileMode(this.localMobileMode);
         
         // Persistierte Cookies laden beim ersten Mount
         if (this.props.source.persistCookies) {
@@ -1004,6 +1067,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     componentDidUpdate = (prevProps: ArticleProps) => {
         if (prevProps.item._id != this.props.item._id) {
+            // Fehler-State zurücksetzen bei Artikelwechsel
+            if (this.state.error) {
+                this.setState({ error: false, errorDescription: "" });
+            }
+            
             // Eingabe-Modus bei Artikelwechsel zurücksetzen
             if (this.state.inputModeEnabled) {
                 console.log('[InputMode] Article changed - disabling input mode');
@@ -1018,8 +1086,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 })
             }
             
-            // Reset für neuen Artikel - webContentsId wird sich ändern
-            this.mobileEmulationWebContentsId = null;
+            // Synchronisiere lokalen Mobile-Mode State mit neuer Source
+            this.localMobileMode = this.props.source.mobileMode || false;
+            console.log('[Article] Article changed - localMobileMode:', this.localMobileMode);
+            
+            // WICHTIG: Globalen Mobile-Mode Status setzen BEVOR neuer WebView erstellt wird!
+            // Der Main-Prozess wendet dann automatisch die Emulation bei 'did-attach' an.
+            this.setGlobalMobileMode(this.localMobileMode);
             
             // Synchronisiere currentZoom sofort bei Artikelwechsel
             const savedZoom = this.props.source.defaultZoom || 0
@@ -1911,9 +1984,13 @@ window.__articleData = ${JSON.stringify({
                         (this.state.appPath ? "_app" : "")
                     }
                     src={
-                        this.state.loadWebpage
-                            ? this.props.item.link
-                            : this.articleView()
+                        // Für externe Webseiten im Mobile-Mode: about:blank laden,
+                        // dann URL erst nach Emulation setzen (in ref callback)
+                        (this.state.loadWebpage && this.localMobileMode)
+                            ? "about:blank"
+                            : (this.state.loadWebpage
+                                ? this.props.item.link
+                                : this.articleView())
                     }
                     preload={(window as any).webviewPreloadPath || 'webview-preload.js'}
                     allowpopups={"true" as any}
@@ -1928,6 +2005,7 @@ window.__articleData = ${JSON.stringify({
                             try {
                                 webview.addEventListener('did-start-loading', this.webviewStartLoadingEarly)
                                 webview.addEventListener('did-stop-loading', this.webviewLoaded)
+                                webview.addEventListener('dom-ready', this.webviewStartLoading)
                                 // Cookie Persistence: Nach jeder Navigation speichern (z.B. nach Login)
                                 // Debounced wegen SPAs wie Reddit die viele navigate-Events auslösen
                                 webview.addEventListener('did-navigate', () => {
@@ -1951,6 +2029,51 @@ window.__articleData = ${JSON.stringify({
                                         }
                                     } catch {}
                                 })
+                                
+                                // Mobile Mode: Emulation aktivieren BEVOR URL geladen wird
+                                if (this.state.loadWebpage && this.localMobileMode) {
+                                    console.log('[Article] ref: Mobile mode active, setting up emulation before loading URL');
+                                    
+                                    // Flag um doppelte URL-Loads zu verhindern
+                                    let urlLoaded = false;
+                                    const targetUrl = this.props.item.link;
+                                    
+                                    // Warte auf did-stop-loading von about:blank (zuverlässiger als dom-ready)
+                                    const loadUrlAfterEmulation = async () => {
+                                        // Verhindere doppelte Ausführung
+                                        if (urlLoaded) return;
+                                        
+                                        // Prüfe ob wir noch auf about:blank sind
+                                        try {
+                                            const currentUrl = (webview as any).getURL();
+                                            if (currentUrl && currentUrl !== 'about:blank') {
+                                                console.log('[Article] ref: URL already loaded, skipping:', currentUrl);
+                                                return;
+                                            }
+                                        } catch {}
+                                        
+                                        urlLoaded = true;
+                                        webview.removeEventListener('did-stop-loading', loadUrlAfterEmulation);
+                                        
+                                        console.log('[Article] ref: about:blank ready, enabling emulation...');
+                                        try {
+                                            await this.enableMobileEmulation();
+                                            console.log('[Article] ref: Emulation enabled, now loading actual URL:', targetUrl);
+                                            // URL über src Attribut setzen (wirft keine Promise-Fehler wie loadURL)
+                                            if (this.webview && this._isMounted) {
+                                                (this.webview as HTMLWebViewElement).src = targetUrl;
+                                            }
+                                        } catch (e) {
+                                            console.error('[Article] ref: Failed to enable emulation:', e);
+                                            // Fallback: URL trotzdem laden über src Attribut
+                                            if (this.webview && this._isMounted) {
+                                                (this.webview as HTMLWebViewElement).src = targetUrl;
+                                            }
+                                        }
+                                    };
+                                    // did-stop-loading statt dom-ready verwenden
+                                    webview.addEventListener('did-stop-loading', loadUrlAfterEmulation);
+                                }
                             } catch {}
                         }
                     }}

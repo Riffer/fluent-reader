@@ -9,6 +9,9 @@ try {
 
   // Zoom-Overlay Einstellung (default: aus)
   let showZoomOverlayEnabled = false;
+  
+  // Mobile Mode Status
+  let mobileMode = false;
 
   // Overlay für Debug-Anzeige (Zoom, NSFW-Cleanup, etc.)
   let infoOverlay = null;
@@ -102,7 +105,8 @@ try {
   function showZoomOverlay(level) {
     const factor = zoomLevelToFactor(level);
     const percentage = Math.round(factor * 100);
-    updateOverlay(`Zoom: ${percentage}%`);
+    const modeIndicator = mobileMode ? ' (M)' : ' (D)';
+    updateOverlay(`Zoom: ${percentage}%${modeIndicator}`);
   }
 
   // Konvertierung: zoomLevel -> Faktor (linear: 10% pro Stufe)
@@ -324,6 +328,24 @@ try {
     // Wenn aktiviert, zeige sofort das aktuelle Zoom-Level an
     if (showZoomOverlayEnabled) {
       showZoomOverlay(zoomLevel);
+    }
+  });
+  
+  // Listener für Mobile Mode Status
+  ipcRenderer.on('set-mobile-mode', (event, enabled) => {
+    const wasEnabled = mobileMode;
+    mobileMode = !!enabled;
+    console.log('[Preload] Mobile mode changed:', wasEnabled ? 'ON' : 'OFF', '->', mobileMode ? 'ON' : 'OFF');
+    // Zeige kurz das Overlay um den Modus-Wechsel anzuzeigen (auch wenn Overlay sonst deaktiviert)
+    if (wasEnabled !== mobileMode) {
+      const factor = zoomLevelToFactor(zoomLevel);
+      const percentage = Math.round(factor * 100);
+      const modeIndicator = mobileMode ? ' (M)' : ' (D)';
+      // Temporär anzeigen auch wenn Overlay deaktiviert
+      const wasOverlayEnabled = showZoomOverlayEnabled;
+      showZoomOverlayEnabled = true;
+      updateOverlay(`Zoom: ${percentage}%${modeIndicator}`);
+      showZoomOverlayEnabled = wasOverlayEnabled;
     }
   });
 
