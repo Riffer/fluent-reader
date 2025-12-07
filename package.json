@@ -63,7 +63,6 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.4.6",
-    "node-polyfill-webpack-plugin": "^2.0.1",
-    "sqlite3": "^5.1.7"
+    "node-polyfill-webpack-plugin": "^2.0.1"
   }
 }

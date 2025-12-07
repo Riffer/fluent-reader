@@ -14,9 +14,10 @@ Die alte Datenbank-Komponente (Lovefield/IndexedDB) ist veraltet und hat Sicherh
 - Lovefield wird nicht mehr aktiv gewartet
 
 **Bereits vorbereitete Dependencies:**
-- `better-sqlite3`: ^12.4.6 (in package.json)
-- `sqlite3`: ^5.1.7 (in package.json)
+- `better-sqlite3`: ^12.4.6 (synchrone API, bessere Performance)
 - `@types/better-sqlite3`: ^7.6.8 (TypeScript-Typen)
+
+*Hinweis: `sqlite3` wurde entfernt da `better-sqlite3` die bevorzugte Lösung für Electron ist (synchrone API, 2-10x schneller).*
 
 **Geplante Architektur (Kommentar in db.ts):**
 - SQLite3 soll im Main Process laufen (`src/main/db-sqlite.ts` - noch zu erstellen)
