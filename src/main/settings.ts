@@ -205,6 +205,16 @@ ipcMain.handle("set-nedb-status", (_, flag: boolean) => {
     store.set(NEDB_STATUS_STORE_KEY, flag)
 })
 
+const LOVEFIELD_STATUS_STORE_KEY = "useLovefield"
+ipcMain.on("get-lovefield-status", event => {
+    // Default to true for existing users (they have Lovefield data)
+    // Will be set to false after migration to SQLite
+    event.returnValue = store.get(LOVEFIELD_STATUS_STORE_KEY, true)
+})
+ipcMain.handle("set-lovefield-status", (_, flag: boolean) => {
+    store.set(LOVEFIELD_STATUS_STORE_KEY, flag)
+})
+
 const ZOOM_OVERLAY_STORE_KEY = "showZoomOverlay"
 ipcMain.on("get-zoom-overlay", event => {
     event.returnValue = store.get(ZOOM_OVERLAY_STORE_KEY, false)

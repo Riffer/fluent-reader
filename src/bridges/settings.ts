@@ -124,6 +124,13 @@ const settingsBridge = {
         ipcRenderer.invoke("set-nedb-status", flag)
     },
 
+    getLovefieldStatus: (): boolean => {
+        return ipcRenderer.sendSync("get-lovefield-status")
+    },
+    setLovefieldStatus: (flag: boolean) => {
+        ipcRenderer.invoke("set-lovefield-status", flag)
+    },
+
     getZoomOverlay: (): boolean => {
         return ipcRenderer.sendSync("get-zoom-overlay")
     },

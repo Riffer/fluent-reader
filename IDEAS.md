@@ -421,3 +421,33 @@ keyDownHandler = (input: Electron.Input) => {
 | `W` | Toggle Full | Buchstabe W |
 
 **Fazit:** Automatische Fokus-Erkennung wurde verworfen zugunsten des manuellen Input-Modus (Ctrl+I), da dieser zuverlässiger und einfacher zu implementieren ist.
+
+---
+
+## Fortschritt: SQLite3 Migration
+
+**Status:** ✅ Migration abgeschlossen (Dez 2025)
+
+- SQLite3-Infrastruktur mit `better-sqlite3` im Main-Prozess implementiert (`src/main/db-sqlite.ts`)
+- IPC-Bridge für Renderer-Zugriff (`src/bridges/db.ts`)
+- Migration von Lovefield/IndexedDB zu SQLite3 automatisiert (`migrateLovefieldToSQLite()` in `db.ts`)
+- Migration prüft und setzt Flag `useLovefield: false` in `config.json`
+- Datenbankgröße und Item-Zahlen nach Migration: z.B. 96 Quellen, 14.492 Items, 21.7 MB
+- Migration läuft nur einmal, Backup empfohlen
+- Nach Migration: App nutzt ausschließlich SQLite3
+
+---
+
+## ToDo: Entfernung der alten Datenbank-Komponenten
+
+**Nach erfolgreicher Migration:**
+- [ ] Entfernen von Lovefield-Dependency und allen zugehörigen Imports
+- [ ] Entfernen von IndexedDB-Schema und Migrations-Code in `db.ts`
+- [ ] Entfernen von NeDB-Migrations-Code
+- [ ] Refactoring aller Datenbank-Operationen auf `window.db.*` (IPC/SQLite)
+- [ ] Tests: Sicherstellen, dass alle Features mit SQLite3 funktionieren
+- [ ] Dokumentation und Changelog aktualisieren
+- [ ] Endgültiges Löschen alter Datenbankdateien (IndexedDB, NeDB)
+
+**Hinweis:**
+Die Entfernung sollte erst nach mehreren Releases und Backups erfolgen, um Datenverlust zu vermeiden. Vorher alle Nutzer auf SQLite3 migrieren!

@@ -1,7 +1,7 @@
 import intl from "react-intl-universal"
 import Datastore from "@seald-io/nedb"
 import lf from "lovefield"
-import { RSSSource } from "./models/source"
+import { RSSSource, SourceOpenTarget, SourceTextDirection } from "./models/source"
 import { RSSItem } from "./models/item"
 
 // Note: db-sqlite is loaded only in Main Process, not in Renderer
@@ -84,9 +84,112 @@ export async function init() {
     itemsDB = await idbSchema.connect()
     items = itemsDB.getSchema().table("items")
     
-    // Check if we need to migrate from NeDB
+    // Check if we need to migrate from NeDB → Lovefield
     if (window.settings.getNeDBStatus()) {
         await migrateNeDB()
+    }
+
+    // Check if we need to migrate from Lovefield → SQLite
+    if (window.settings.getLovefieldStatus()) {
+        await migrateLovefieldToSQLite()
+    }
+}
+
+/**
+ * Migrate data from Lovefield (IndexedDB) to SQLite
+ * This runs once after the SQLite infrastructure is in place
+ */
+async function migrateLovefieldToSQLite() {
+    try {
+        console.log("[migration] Starting Lovefield → SQLite migration...")
+
+        // Initialize SQLite database via IPC
+        await window.db.init()
+
+        // Get all sources from Lovefield
+        const sourceDocs = await sourcesDB
+            .select()
+            .from(sources)
+            .exec() as RSSSource[]
+
+        console.log(`[migration] Found ${sourceDocs.length} sources in Lovefield`)
+
+        // Get all items from Lovefield
+        const itemDocs = await itemsDB
+            .select()
+            .from(items)
+            .exec() as RSSItem[]
+
+        console.log(`[migration] Found ${itemDocs.length} items in Lovefield`)
+
+        // Migrate sources to SQLite
+        if (sourceDocs.length > 0) {
+            for (const source of sourceDocs) {
+                await window.db.sources.insert({
+                    sid: source.sid,
+                    url: source.url,
+                    iconurl: source.iconurl || null,
+                    name: source.name,
+                    openTarget: source.openTarget ?? SourceOpenTarget.Local,
+                    defaultZoom: source.defaultZoom ?? 1.0,
+                    lastFetched: source.lastFetched?.toISOString() ?? new Date().toISOString(),
+                    serviceRef: source.serviceRef || null,
+                    fetchFrequency: source.fetchFrequency ?? 0,
+                    rules: source.rules ? JSON.stringify(source.rules) : null,
+                    textDir: source.textDir ?? SourceTextDirection.LTR,
+                    hidden: source.hidden ? 1 : 0,
+                    mobileMode: source.mobileMode ? 1 : 0,
+                    persistCookies: source.persistCookies ? 1 : 0,
+                })
+            }
+            console.log(`[migration] Migrated ${sourceDocs.length} sources to SQLite`)
+        }
+
+        // Migrate items to SQLite in batches (for performance)
+        if (itemDocs.length > 0) {
+            const BATCH_SIZE = 500
+            const batches = Math.ceil(itemDocs.length / BATCH_SIZE)
+            
+            for (let i = 0; i < batches; i++) {
+                const batch = itemDocs.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE)
+                const sqliteItems = batch.map(item => ({
+                    source: item.source,
+                    title: item.title || intl.get("article.untitled"),
+                    link: item.link || "",
+                    date: item.date?.toISOString() ?? new Date().toISOString(),
+                    fetchedDate: item.fetchedDate?.toISOString() ?? new Date().toISOString(),
+                    thumb: item.thumb || null,
+                    content: item.content || "",
+                    snippet: item.snippet || "",
+                    creator: item.creator || null,
+                    hasRead: item.hasRead ? 1 : 0,
+                    starred: item.starred ? 1 : 0,
+                    hidden: item.hidden ? 1 : 0,
+                    notify: item.notify ? 1 : 0,
+                    serviceRef: item.serviceRef || null,
+                }))
+                
+                await window.db.items.insertMany(sqliteItems)
+                console.log(`[migration] Migrated items batch ${i + 1}/${batches} (${batch.length} items)`)
+            }
+            console.log(`[migration] Migrated ${itemDocs.length} items to SQLite`)
+        }
+
+        // Mark migration as complete
+        window.settings.setLovefieldStatus(false)
+        console.log("[migration] Lovefield → SQLite migration complete!")
+
+        // Show stats
+        const stats = await window.db.getStats()
+        console.log(`[migration] SQLite DB stats: ${stats.sources} sources, ${stats.items} items, ${stats.dbSize}`)
+
+    } catch (err) {
+        console.error("[migration] Lovefield → SQLite migration failed:", err)
+        window.utils.showErrorBox(
+            "Database Migration Error",
+            `Failed to migrate from Lovefield to SQLite: ${String(err)}\n\nThe app will continue using Lovefield.`
+        )
+        // Don't mark as complete - will retry next time
     }
 }
 
