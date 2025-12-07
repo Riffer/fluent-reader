@@ -2,74 +2,125 @@
 
 ## SQLite3 Datenbank-Migration
 
-**Status:** In Vorbereitung
+**Status:** ✅ Implementiert (Dezember 2025)
 
 **Beschreibung:**
-Die alte Datenbank-Komponente (Lovefield/IndexedDB) ist veraltet und hat Sicherheitsprobleme. Migration auf SQLite3 für bessere Performance, Stabilität und Sicherheit.
+Die alte Datenbank-Komponente (Lovefield/IndexedDB) wurde auf SQLite3 migriert für bessere Performance, Stabilität und Sicherheit.
 
-**Aktuelle Situation:**
-- **Lovefield** (Google) als primäre DB im Renderer-Prozess
-- Nutzt **IndexedDB** als Backend
-- Alte **NeDB**-Migration bereits implementiert (`migrateNeDB()` in `db.ts`)
-- Lovefield wird nicht mehr aktiv gewartet
+**Implementierte Features:**
+- ✅ `src/main/db-sqlite.ts` - SQLite3-Wrapper im Main Process mit `better-sqlite3`
+- ✅ `src/bridges/db.ts` - IPC-Bridge für Renderer-Zugriff auf DB-Funktionen
+- ✅ Automatische Migration von Lovefield/IndexedDB zu SQLite3 (`migrateLovefieldToSQLite()`)
+- ✅ Schema-Definition für SQLite3 (sources + items Tabellen)
+- ✅ WAL-Modus für bessere Performance
+- ✅ Batch-Insert für große Datenmengen (500 Items pro Batch)
+- ✅ `useLovefield` Flag in `config.json` zur Steuerung der Migration
 
-**Bereits vorbereitete Dependencies:**
-- `better-sqlite3`: ^12.4.6 (synchrone API, bessere Performance)
+**Architektur:**
+- SQLite3 läuft im **Main Process** (`src/main/db-sqlite.ts`)
+- Renderer kommuniziert via **IPC** mit Main Process für alle DB-Operationen
+- Bridge exponiert `window.db.*` API für Renderer-Zugriff
+- Webpack `externals` für `better-sqlite3` (native Module)
+
+**Verwendete Dependencies:**
+- `better-sqlite3`: ^12.4.6 (synchrone API, 2-10x schneller als sqlite3)
 - `@types/better-sqlite3`: ^7.6.8 (TypeScript-Typen)
 
-*Hinweis: `sqlite3` wurde entfernt da `better-sqlite3` die bevorzugte Lösung für Electron ist (synchrone API, 2-10x schneller).*
+*Hinweis: `sqlite3` wurde entfernt da `better-sqlite3` die bevorzugte Lösung für Electron ist.*
 
-**Geplante Architektur (Kommentar in db.ts):**
-- SQLite3 soll im Main Process laufen (`src/main/db-sqlite.ts` - noch zu erstellen)
-- Renderer kommuniziert via IPC mit Main Process für DB-Operationen
+**Neue Dateien:**
+- `src/main/db-sqlite.ts` - SQLite3-Wrapper mit allen CRUD-Operationen
+- `src/bridges/db.ts` - IPC-Bridge für Renderer
 
-**Noch zu implementieren:**
-- [ ] `src/main/db-sqlite.ts` - SQLite3-Wrapper für Main Process
-- [ ] IPC-Bridges für DB-Operationen
-- [ ] Migrations-Logik von Lovefield/IndexedDB zu SQLite3
-- [ ] Backward-Compatibility während Migration
-- [ ] Schema-Definition für SQLite3 (basierend auf Lovefield-Schema)
-- [ ] Export/Import für bestehende Nutzer
+**Geänderte Dateien:**
+- `src/scripts/db.ts` - Migration von Lovefield → SQLite3
+- `src/main/window.ts` - DB-Initialisierung + IPC-Handler
+- `src/main/settings.ts` - `useLovefield` Setting
+- `src/bridges/settings.ts` - `getLovefieldStatus()` / `setLovefieldStatus()`
+- `src/preload.ts` - `window.db` exponiert
+- `src/types/window.d.ts` - `DbBridge` Typen
+- `src/schema-types.ts` - `useLovefield` in SchemaTypes
+- `webpack.config.js` - `externals` für `better-sqlite3`
 
-**Betroffene Dateien:**
-- `src/scripts/db.ts` - Aktuell Lovefield, muss auf SQLite3 umgestellt werden
-- `src/scripts/models/*.ts` - Nutzen `db.*` für alle Queries
-- `src/scripts/settings.ts` - Export/Import Funktionen
+**SQLite3-Schema:**
 
-**Lovefield-Schema (zu migrieren):**
+```sql
+-- sources Tabelle
+CREATE TABLE sources (
+    sid INTEGER PRIMARY KEY,
+    url TEXT NOT NULL UNIQUE,
+    iconurl TEXT,
+    name TEXT NOT NULL,
+    openTarget INTEGER NOT NULL DEFAULT 0,
+    defaultZoom REAL NOT NULL DEFAULT 1.0,
+    lastFetched TEXT NOT NULL,
+    serviceRef TEXT,
+    fetchFrequency INTEGER NOT NULL DEFAULT 0,
+    rules TEXT,  -- JSON
+    textDir INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    mobileMode INTEGER NOT NULL DEFAULT 0,
+    persistCookies INTEGER NOT NULL DEFAULT 0
+);
 
+-- items Tabelle
+CREATE TABLE items (
+    _id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    link TEXT NOT NULL,
+    date TEXT NOT NULL,
+    fetchedDate TEXT NOT NULL,
+    thumb TEXT,
+    content TEXT NOT NULL,
+    snippet TEXT NOT NULL,
+    creator TEXT,
+    hasRead INTEGER NOT NULL DEFAULT 0,
+    starred INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    notify INTEGER NOT NULL DEFAULT 0,
+    serviceRef TEXT,
+    FOREIGN KEY (source) REFERENCES sources(sid) ON DELETE CASCADE
+);
+
+-- Indizes für Performance
+CREATE INDEX idx_items_date ON items(date DESC);
+CREATE INDEX idx_items_source ON items(source);
+CREATE INDEX idx_items_serviceRef ON items(serviceRef);
+CREATE INDEX idx_items_hasRead ON items(hasRead);
+CREATE INDEX idx_items_starred ON items(starred);
 ```
-sources:
-  - sid (INTEGER, PK)
-  - url (STRING, unique index)
-  - iconurl (STRING, nullable)
-  - name (STRING)
-  - openTarget (NUMBER)
-  - defaultZoom (NUMBER)
-  - lastFetched (DATE_TIME)
-  - serviceRef (STRING, nullable)
-  - fetchFrequency (NUMBER)
-  - rules (OBJECT, nullable)
-  - textDir (NUMBER)
-  - hidden (BOOLEAN)
 
-items:
-  - _id (INTEGER, auto-increment PK)
-  - source (INTEGER, FK to sources)
-  - title (STRING)
-  - link (STRING)
-  - date (DATE_TIME, indexed DESC)
-  - fetchedDate (DATE_TIME)
-  - thumb (STRING, nullable)
-  - content (STRING)
-  - snippet (STRING)
-  - creator (STRING, nullable)
-  - hasRead (BOOLEAN)
-  - starred (BOOLEAN)
-  - hidden (BOOLEAN)
-  - notify (BOOLEAN)
-  - serviceRef (STRING, nullable, indexed)
-```
+**Migration:**
+- Migration läuft automatisch beim ersten Start nach Update
+- Prüft `useLovefield` Flag (Default: `true` für bestehende Nutzer)
+- Kopiert alle Sources und Items in Batches (500 Items/Batch)
+- Setzt `useLovefield: false` nach erfolgreicher Migration
+- Fehlerbehandlung: Bei Fehler bleibt Lovefield aktiv
+
+**Speicherort:**
+- SQLite-DB: `%APPDATA%/Electron/fluent-reader.db` (Dev) bzw. `%APPDATA%/Fluent Reader/fluent-reader.db` (Prod)
+- Config: `%APPDATA%/Electron/config.json`
+
+---
+
+## ToDo: Entfernung der alten Datenbank-Komponenten
+
+**Status:** Ausstehend (nach Stabilisierungsphase)
+
+**Nach erfolgreicher Migration und Stabilisierung:**
+- [ ] Entfernen von Lovefield-Dependency (`lovefield` Package)
+- [ ] Entfernen von NeDB-Dependency (`@seald-io/nedb` Package)
+- [ ] Entfernen der Lovefield-Schema-Definition in `db.ts`
+- [ ] Entfernen von `migrateNeDB()` und `migrateLovefieldToSQLite()`
+- [ ] Refactoring aller DB-Operationen auf `window.db.*` (direkte SQLite-Nutzung)
+- [ ] Entfernen von `useLovefield` und `useNeDB` Settings
+- [ ] Entfernen der IndexedDB-Daten (nach Bestätigung durch User)
+- [ ] Tests: Sicherstellen, dass alle Features mit SQLite3 funktionieren
+- [ ] Dokumentation und Changelog aktualisieren
+
+**Hinweis:**
+Die Entfernung sollte erst nach mehreren Releases und ausreichend Nutzer-Feedback erfolgen, um Datenverlust zu vermeiden. Vorher: Backup-Empfehlung für Nutzer!
 
 ---
 
@@ -422,32 +473,4 @@ keyDownHandler = (input: Electron.Input) => {
 
 **Fazit:** Automatische Fokus-Erkennung wurde verworfen zugunsten des manuellen Input-Modus (Ctrl+I), da dieser zuverlässiger und einfacher zu implementieren ist.
 
----
 
-## Fortschritt: SQLite3 Migration
-
-**Status:** ✅ Migration abgeschlossen (Dez 2025)
-
-- SQLite3-Infrastruktur mit `better-sqlite3` im Main-Prozess implementiert (`src/main/db-sqlite.ts`)
-- IPC-Bridge für Renderer-Zugriff (`src/bridges/db.ts`)
-- Migration von Lovefield/IndexedDB zu SQLite3 automatisiert (`migrateLovefieldToSQLite()` in `db.ts`)
-- Migration prüft und setzt Flag `useLovefield: false` in `config.json`
-- Datenbankgröße und Item-Zahlen nach Migration: z.B. 96 Quellen, 14.492 Items, 21.7 MB
-- Migration läuft nur einmal, Backup empfohlen
-- Nach Migration: App nutzt ausschließlich SQLite3
-
----
-
-## ToDo: Entfernung der alten Datenbank-Komponenten
-
-**Nach erfolgreicher Migration:**
-- [ ] Entfernen von Lovefield-Dependency und allen zugehörigen Imports
-- [ ] Entfernen von IndexedDB-Schema und Migrations-Code in `db.ts`
-- [ ] Entfernen von NeDB-Migrations-Code
-- [ ] Refactoring aller Datenbank-Operationen auf `window.db.*` (IPC/SQLite)
-- [ ] Tests: Sicherstellen, dass alle Features mit SQLite3 funktionieren
-- [ ] Dokumentation und Changelog aktualisieren
-- [ ] Endgültiges Löschen alter Datenbankdateien (IndexedDB, NeDB)
-
-**Hinweis:**
-Die Entfernung sollte erst nach mehreren Releases und Backups erfolgen, um Datenverlust zu vermeiden. Vorher alle Nutzer auf SQLite3 migrieren!
