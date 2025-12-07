@@ -845,3 +845,66 @@ Beim Start der App erscheinen im Terminal einige Fehlermeldungen von Electron/Ch
 **Workaround:**
 Keine Aktion erforderlich. Die Meldungen können ignoriert werden.
 
+
+---
+
+## UI/UX Verbesserungen
+
+**Status:** Idee
+
+### Keyboard-Shortcuts in der UI sichtbar machen
+
+**Problem:**
+Aktuell sind Keyboard-Shortcuts (W, M, R, +, -, 0, Pfeiltasten, etc.) nicht in der Oberflaeche sichtbar. Neue Nutzer muessen die Dokumentation lesen oder sie zufaellig entdecken.
+
+**Loesung:**
+- Jede Keyboard-Taste sollte einen **Menuepunkt mit entsprechender Beschriftung** haben
+- Buttons/Schaltflaechen sollten **Tooltips mit dem Shortcut** anzeigen (z.B. Webseite laden (W))
+- Beispiel: Zoom: 100% (M) zeigt bereits den Mobile-Mode-Indikator - aehnlich fuer andere Funktionen
+
+### Feed-spezifische Settings in der Feedverwaltung
+
+**Problem:**
+Permanente Feed-spezifische Settings (wie Zoom, Mobile Mode, Cookie-Persistenz) sind nur ueber das Tools-Menue im Artikel-View erreichbar, nicht aber in der zentralen Feedverwaltung.
+
+**Loesung:**
+- Alle permanenten Feed-spezifischen Settings (Zoom, Mobile Mode, Cookie-Persistenz, Text-Richtung, etc.) sollen auch in der **Feedverwaltung** (Einstellungen - Quellen) sichtbar und einstellbar sein
+- Ermoeglicht zentrale Konfiguration aller Feeds ohne jeden einzeln oeffnen zu muessen
+- Uebersicht ueber alle Feed-Einstellungen an einem Ort
+
+### Globale Settings in der Konfiguration
+
+**Problem:**
+Permanente Funktionen, die unabhaengig vom Feed sind, sind teilweise nur ueber Menues erreichbar, nicht in den App-Einstellungen.
+
+**Loesung:**
+- Alle globalen/permanenten Funktionen sollen **zusaetzlich zum Menue** auch in den **App-Einstellungen** direkt konfigurierbar sein
+- Zentrale Anlaufstelle fuer alle Konfigurationsoptionen
+- Konsistente Benutzererfahrung
+
+---
+
+## Code-Qualitaet und Internationalisierung
+
+**Status:** Idee / TODO
+
+### Deutsche Kommentare auf Englisch umstellen
+
+**Problem:**
+Im Quellcode befinden sich einige Kommentare auf Deutsch, was fuer internationale Programmierer schwer verstaendlich ist.
+
+**Loesung:**
+- Alle deutschen Kommentare im Quellcode sollen auf **Englisch** umgestellt werden
+- Einheitliche Sprache im gesamten Codebase fuer bessere internationale Zusammenarbeit
+- Betrifft: article.tsx, window.ts, utils.ts, webview-preload.js und weitere Dateien
+
+### Lokalisierung neuer Funktionen
+
+**Problem:**
+Neu hinzugefuegte Funktionen und Schaltflaechen haben teilweise nur englische oder deutsche Texte, aber keine Uebersetzungen fuer alle unterstuetzten Sprachen.
+
+**Loesung:**
+- Alle neu hinzugefuegten UI-Texte muessen in **allen verfuegbaren Sprachen** angelegt werden
+- Verfuegbare Sprachen: en-US, de, cs, es, fr, it, ja, ko, nl, pt_BR, pt_PT, ru, sv, tr, uk, zh_CN, zh_TW
+- Neue Strings fuer: Mobile Mode Toggle, Cookie-Persistenz, Zoom-Overlay, etc.
+- Lokalisierungsdateien: src/scripts/i18n/*.json
