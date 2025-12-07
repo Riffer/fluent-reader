@@ -473,4 +473,113 @@ keyDownHandler = (input: Electron.Input) => {
 
 **Fazit:** Automatische Fokus-Erkennung wurde verworfen zugunsten des manuellen Input-Modus (Ctrl+I), da dieser zuverlässiger und einfacher zu implementieren ist.
 
+---
+
+## Kollabierbare Feedliste mit veränderbarer Breite
+
+**Status:** Geplant
+
+**Beschreibung:**
+Die Feedliste (linke Sidebar) soll kollabierbar sein, um mehr Platz für die Artikelanzeige zu schaffen. Zusätzlich soll die Breite der Feedliste via Drag & Drop anpassbar sein.
+
+**Geplante Features:**
+- [ ] Kollabierter Modus: Nur Icons anzeigen (Feed-Icons oder Gruppen-Icons)
+- [ ] Expandierter Modus: Vollständige Ansicht mit Namen (wie bisher)
+- [ ] Verschiebbarer Teiler (Splitter/Divider) zwischen Feedliste und Artikelbereich
+- [ ] Drag & Drop mit Maus oder Touchscreen
+- [ ] Speicherung der Breite in den Einstellungen (persistent)
+- [ ] Minimum-/Maximum-Breite für beide Bereiche
+
+**UI-Konzept:**
+
+| Modus | Darstellung | Breite |
+|-------|-------------|--------|
+| Expandiert | Icon + Feed-Name | ~200-400px (anpassbar) |
+| Kollabiert | Nur Icon | ~48px (fest) |
+| Versteckt | Komplett ausgeblendet | 0px |
+
+**Toggle-Möglichkeiten:**
+- Button/Icon zum Ein-/Ausklappen
+- Doppelklick auf Teiler → Kollabieren/Expandieren
+- Shortcut (z.B. `Ctrl+B` für "toggle sidebar")
+- Ziehen des Teilers auf Minimum → automatisch kollabieren
+
+**Technische Umsetzung:**
+
+1. **CSS Flexbox/Grid mit variablen Breiten:**
+```css
+.sidebar {
+  width: var(--sidebar-width, 250px);
+  min-width: 48px;  /* Kollabiert: nur Icons */
+  max-width: 50vw;  /* Maximal 50% des Viewports */
+  transition: width 0.2s ease;
+}
+
+.sidebar.collapsed {
+  width: 48px;
+}
+
+.divider {
+  width: 4px;
+  cursor: col-resize;
+  background: var(--divider-color);
+}
+```
+
+2. **React State für Breite:**
+```typescript
+interface SidebarState {
+  width: number;       // Aktuelle Breite in px
+  isCollapsed: boolean; // Kollabierter Modus
+  isDragging: boolean;  // Wird gerade gezogen?
+}
+```
+
+3. **Drag-Handler:**
+```typescript
+const handleMouseDown = (e: React.MouseEvent) => {
+  setIsDragging(true);
+  document.addEventListener('mousemove', handleMouseMove);
+  document.addEventListener('mouseup', handleMouseUp);
+};
+
+const handleMouseMove = (e: MouseEvent) => {
+  const newWidth = e.clientX;
+  if (newWidth < 80) {
+    setIsCollapsed(true);
+  } else {
+    setIsCollapsed(false);
+    setWidth(Math.min(newWidth, maxWidth));
+  }
+};
+```
+
+4. **Touch-Support:**
+```typescript
+const handleTouchStart = (e: React.TouchEvent) => {
+  setIsDragging(true);
+  // Touch-Events analog zu Mouse-Events
+};
+```
+
+**Betroffene Komponenten:**
+- `src/components/nav.tsx` - Feedliste-Komponente
+- `src/components/page.tsx` - Layout-Container
+- `src/components/root.tsx` - Hauptlayout
+- Neue Komponente: `src/components/utils/resizable-divider.tsx`
+
+**Einstellungen:**
+- `sidebarWidth: number` - Gespeicherte Breite
+- `sidebarCollapsed: boolean` - Kollabierter Zustand
+- In `config.json` oder Redux Store persistent speichern
+
+**Accessibility:**
+- Keyboard-Navigation für Teiler (z.B. Arrow-Keys zum Verschieben)
+- ARIA-Labels für Screen Reader
+- Fokus-Indikator auf Teiler
+
+**Ähnliche Implementierungen:**
+- VS Code Sidebar
+- Slack Workspace-Liste
+- Discord Server-Liste (kollabiert nur Icons)
 
