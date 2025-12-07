@@ -583,3 +583,204 @@ const handleTouchStart = (e: React.TouchEvent) => {
 - Slack Workspace-Liste
 - Discord Server-Liste (kollabiert nur Icons)
 
+---
+
+## Userscript-System für Cookie-Banner und Webseiten-Automatisierung
+
+**Status:** Idee
+
+**Beschreibung:**
+Ein Greasemonkey/Tampermonkey-ähnliches System zur automatischen Ausführung von JavaScript auf Webseiten im Webview. Hauptanwendungsfall: Automatisches Wegklicken von Cookie-Consent-Bannern, aber auch andere Automatisierungen möglich.
+
+**Motivation:**
+- Cookie-Banner nerven beim Lesen von Artikeln
+- Viele Seiten haben unterschiedliche Banner-Implementierungen
+- Community kann Skripte teilen und pflegen
+- Flexibler als hartcodierte Lösungen
+
+**Geplante Features:**
+- [ ] Userscript-Manager in den Einstellungen
+- [ ] Skript-Editor mit Syntax-Highlighting
+- [ ] Import/Export von Skripten
+- [ ] Aktivierung pro Domain oder global
+- [ ] `@match`/`@include`/`@exclude` Pattern wie Greasemonkey
+- [ ] Vorgefertigte Skripte für gängige Cookie-Banner
+- [ ] Community-Repository für Skripte (optional)
+
+**Userscript-Format (kompatibel mit Greasemonkey):**
+
+```javascript
+// ==UserScript==
+// @name         Auto Cookie Consent
+// @namespace    fluent-reader
+// @version      1.0
+// @description  Automatically accepts cookie banners
+// @match        *://*/*
+// @grant        none
+// @run-at       document-end
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    
+    // Gängige Cookie-Banner Selektoren
+    const selectors = [
+        // "Alle akzeptieren" Buttons
+        '[data-testid="cookie-accept"]',
+        '#onetrust-accept-btn-handler',
+        '.cookie-consent-accept',
+        '[aria-label*="accept cookies"]',
+        'button[contains(text(), "Alle akzeptieren")]',
+        'button[contains(text(), "Accept all")]',
+        '.sp_choice_type_11', // SourcePoint
+        '#didomi-notice-agree-button', // Didomi
+        '.css-47sehv', // Vercel/Next.js common
+        
+        // CMP-spezifische
+        '.cmp-accept-all',
+        '#consent-accept-all',
+        '.fc-cta-consent', // Funding Choices
+    ];
+    
+    function clickFirstMatch() {
+        for (const selector of selectors) {
+            const el = document.querySelector(selector);
+            if (el && el.offsetParent !== null) {
+                el.click();
+                console.log('[Fluent Reader] Cookie banner dismissed:', selector);
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    // Sofort versuchen
+    if (!clickFirstMatch()) {
+        // Falls nicht sofort gefunden, mit MutationObserver warten
+        const observer = new MutationObserver(() => {
+            if (clickFirstMatch()) {
+                observer.disconnect();
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        
+        // Timeout nach 10 Sekunden
+        setTimeout(() => observer.disconnect(), 10000);
+    }
+})();
+```
+
+**Technische Umsetzung:**
+
+1. **Skript-Speicherung:**
+```typescript
+interface UserScript {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  code: string;
+  enabled: boolean;
+  matches: string[];      // URL-Pattern
+  excludes: string[];
+  runAt: 'document-start' | 'document-end' | 'document-idle';
+  lastModified: Date;
+}
+```
+
+2. **Speicherort:**
+```
+%APPDATA%/Fluent Reader/
+└── userscripts/
+    ├── manifest.json      // Liste aller Skripte mit Metadaten
+    ├── cookie-consent.js
+    ├── paywall-bypass.js
+    └── custom-styles.js
+```
+
+3. **Skript-Injection via webview-preload.js:**
+```javascript
+// In webview-preload.js
+const { ipcRenderer } = require('electron');
+
+// Skripte vom Main Process holen
+const scripts = ipcRenderer.sendSync('get-userscripts-for-url', window.location.href);
+
+scripts.forEach(script => {
+  if (script.runAt === 'document-start') {
+    executeScript(script.code);
+  }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  scripts.filter(s => s.runAt === 'document-end').forEach(s => executeScript(s.code));
+});
+
+// document-idle nach Load-Event
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    scripts.filter(s => s.runAt === 'document-idle').forEach(s => executeScript(s.code));
+  }, 100);
+});
+
+function executeScript(code) {
+  try {
+    const fn = new Function(code);
+    fn();
+  } catch (e) {
+    console.error('[UserScript Error]', e);
+  }
+}
+```
+
+4. **URL-Pattern Matching:**
+```typescript
+function matchesPattern(url: string, pattern: string): boolean {
+  // Konvertiere Greasemonkey-Pattern zu RegExp
+  // *://*.example.com/* → https?://[^/]*\.example\.com/.*
+  const regexPattern = pattern
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.')
+    .replace(/\./g, '\\.');
+  return new RegExp(`^${regexPattern}$`).test(url);
+}
+```
+
+**UI-Design:**
+
+| Bereich | Beschreibung |
+|---------|--------------|
+| Skript-Liste | Tabelle mit Name, Version, Status (an/aus), Match-Count |
+| Editor | Monaco Editor oder CodeMirror mit JS-Highlighting |
+| Import | Drag & Drop oder Datei-Dialog für .user.js Dateien |
+| Export | Einzeln oder alle als ZIP |
+| Vorlagen | Dropdown mit vorgefertigten Skripten |
+
+**Vorgefertigte Skripte:**
+- 🍪 **Cookie Consent Auto-Accept** - Klickt gängige Cookie-Banner weg
+- 🚫 **Ad-Placeholder Remover** - Entfernt leere Ad-Container
+- 📖 **Reader Mode Enhancer** - Verbessert Lesbarkeit
+- 🔗 **External Link Handler** - Öffnet externe Links im Browser
+
+**Sicherheitsüberlegungen:**
+- Skripte laufen im Webview-Context (sandboxed)
+- Kein Zugriff auf Electron/Node APIs aus Userscripts
+- Warnung beim Import von externen Skripten
+- Optional: Skript-Signierung für vertrauenswürdige Quellen
+
+**Betroffene Dateien:**
+- `src/renderer/webview-preload.js` - Skript-Injection
+- `src/main/userscripts.ts` - NEU: Skript-Management
+- `src/components/settings/userscripts.tsx` - NEU: UI
+- `src/bridges/userscripts.ts` - NEU: IPC-Bridge
+
+**Alternativen/Ergänzungen:**
+- Integration mit existierenden Filterlisten (EasyList, uBlock)
+- CSS-Injection für kosmetische Filter
+- Element-Picker zum visuellen Erstellen von Regeln
+
+**Referenzen:**
+- [Greasemonkey Manual](https://wiki.greasespot.net/)
+- [Tampermonkey Documentation](https://www.tampermonkey.net/documentation.php)
+- [I don't care about cookies](https://www.i-dont-care-about-cookies.eu/) - Filterliste
+
