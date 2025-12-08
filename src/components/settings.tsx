@@ -9,6 +9,7 @@ import GroupsTabContainer from "../containers/settings/groups-container"
 import AppTabContainer from "../containers/settings/app-container"
 import RulesTabContainer from "../containers/settings/rules-container"
 import ServiceTabContainer from "../containers/settings/service-container"
+import P2PSettings from "./settings/p2p"
 import { initTouchBarWithTexts } from "../scripts/utils"
 
 type SettingsProps = {
@@ -95,6 +96,11 @@ class Settings extends React.Component<SettingsProps> {
                             headerText={intl.get("settings.app")}
                             itemIcon="Settings">
                             <AppTabContainer />
+                        </PivotItem>
+                        <PivotItem
+                            headerText="P2P Share"
+                            itemIcon="Share">
+                            <P2PSettings />
                         </PivotItem>
                         <PivotItem
                             headerText={intl.get("settings.about")}

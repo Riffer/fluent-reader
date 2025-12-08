@@ -5,6 +5,7 @@
 
 import type { createArticleExtractorBridge } from "../bridges/article-extractor"
 import type { DbBridge } from "../bridges/db"
+import type { P2PBridge } from "../bridges/p2p"
 
 type ArticleExtractorBridge = ReturnType<typeof createArticleExtractorBridge>
 
@@ -34,6 +35,11 @@ declare global {
          * Article HTML base path for WebView (exposed from preload.ts)
          */
         articleHtmlPath: string
+
+        /**
+         * P2P bridge - peer-to-peer article sharing
+         */
+        p2p: P2PBridge
 
         /**
          * Limited IPC renderer for specific channels

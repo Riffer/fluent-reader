@@ -19,6 +19,8 @@ import {
 } from "../scripts/models/source"
 import { shareSubmenu } from "./context-menu"
 import { platformCtrl, decodeFetchResponse } from "../scripts/utils"
+import { P2PShareDialog } from "./p2p-share-dialog"
+import { P2PEchoDialog } from "./p2p-echo-dialog"
 
 const FONT_SIZE_OPTIONS = [8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
@@ -76,6 +78,8 @@ type ArticleState = {
     nsfwCleanupEnabled: boolean
     autoCookieConsentEnabled: boolean
     inputModeEnabled: boolean  // Eingabe-Modus: Shortcuts deaktiviert für Login etc.
+    showP2PShareDialog: boolean
+    showP2PEchoDialog: boolean
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -112,6 +116,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             nsfwCleanupEnabled: window.settings.getNsfwCleanup(),
             autoCookieConsentEnabled: window.settings.getAutoCookieConsent(),
             inputModeEnabled: false,
+            showP2PShareDialog: false,
+            showP2PEchoDialog: false,
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -469,6 +475,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 },
             },
             ...shareSubmenu(this.props.item),
+            {
+                key: "p2pShare",
+                text: "P2P Share",
+                iconProps: { iconName: "Share" },
+                onClick: () => this.setState({ showP2PShareDialog: true }),
+            },
         ]
         
         items.push({
@@ -642,6 +654,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                                 }
                                 this.setState({ inputModeEnabled: newValue });
                             },
+                        },
+                        {
+                            key: "p2pEcho",
+                            text: "P2P Echo Test",
+                            iconProps: { iconName: "Sync" },
+                            onClick: () => this.setState({ showP2PEchoDialog: true }),
                         },
                         {
                             key: "openAppDevTools",
@@ -2110,6 +2128,18 @@ window.__articleData = ${JSON.stringify({
                     </span>
                 </Stack>
             )}
+            
+            {/* P2P Dialogs */}
+            <P2PShareDialog
+                hidden={!this.state.showP2PShareDialog}
+                onDismiss={() => this.setState({ showP2PShareDialog: false })}
+                articleTitle={this.props.item.title}
+                articleLink={this.props.item.link}
+            />
+            <P2PEchoDialog
+                hidden={!this.state.showP2PEchoDialog}
+                onDismiss={() => this.setState({ showP2PEchoDialog: false })}
+            />
         </FocusZone>
         )
     }
