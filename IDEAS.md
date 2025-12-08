@@ -1,6 +1,29 @@
 # Feature Ideas
 
----
+
+## Link auf Artikel via Windows Local Share teilen
+
+**Status:** Idee
+
+**Beschreibung:**
+Ermöglicht das Teilen eines Artikellinks direkt über die Windows "Teilen"-Funktion (z.B. an andere Apps, Geräte oder Kontakte). Dies nutzt die Windows 10/11 Share UI, die in vielen nativen Apps verfügbar ist, aber in Electron/TypeScript erst angebunden werden müsste.
+
+**Herausforderungen:**
+- Windows Share API ist nicht direkt aus Node.js/Electron/TypeScript nutzbar
+- Mögliche Ansätze: WinRT-Bridge (z.B. via edge-js, winrt-node, oder C++/CLI-Addon)
+- Electron-Integration und Sicherheitsaspekte beachten
+
+**Mögliche Umsetzung:**
+- Kontextmenü-Eintrag oder Button "Teilen..." im Artikel-View
+- Übergabe des Links (und ggf. Titel) an die Windows Share UI
+- Fallback: Link in Zwischenablage kopieren, falls kein Share möglich
+
+**Referenzen:**
+- [Windows Share Contract (Microsoft Docs)](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.datatransfer.datatransfermanager)
+- [node-winrt](https://github.com/NodeRT/NodeRT)
+- [Electron Issue: Windows Share UI](https://github.com/electron/electron/issues/10980)
+
+**Status:** Noch keine Cross-Platform-Lösung für Electron/TypeScript verfügbar, aber für Windows-User sehr nützlich.
 
 ## Upstream-Contribution Strategie
 
