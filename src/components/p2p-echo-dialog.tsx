@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import {
     Dialog,
     DialogType,
@@ -16,7 +16,8 @@ import {
     Text,
     ProgressIndicator,
 } from "@fluentui/react"
-import { KnownPeer } from "../bridges/p2p"
+import { KnownPeer, ConnectionInfo, ShareMessage } from "../bridges/p2p"
+import { p2pConnectionManager } from "../scripts/p2p-connection"
 
 interface EchoResult {
     success: boolean
@@ -31,26 +32,59 @@ interface P2PEchoDialogProps {
 
 export const P2PEchoDialog: React.FC<P2PEchoDialogProps> = ({ hidden, onDismiss }) => {
     const [peers, setPeers] = useState<KnownPeer[]>([])
+    const [connections, setConnections] = useState<ConnectionInfo[]>([])
     const [selectedPeer, setSelectedPeer] = useState<string | null>(null)
     const [loading, setLoading] = useState(true)
     const [testing, setTesting] = useState(false)
     const [result, setResult] = useState<EchoResult | null>(null)
     const [error, setError] = useState<string | null>(null)
+    const echoTimestamp = useRef<number>(0)
+    const echoTimeout = useRef<NodeJS.Timeout | null>(null)
 
     useEffect(() => {
         if (!hidden) {
-            loadPeers()
+            loadData()
             setResult(null)
             setError(null)
+            
+            // Setup echo response listener using the connection manager
+            p2pConnectionManager.setOnMessage((peerHash, message) => {
+                if (message.type === "echo-response" && echoTimestamp.current > 0) {
+                    const roundTripMs = Date.now() - echoTimestamp.current
+                    setResult({
+                        success: true,
+                        roundTripMs,
+                    })
+                    setTesting(false)
+                    echoTimestamp.current = 0
+                    if (echoTimeout.current) {
+                        clearTimeout(echoTimeout.current)
+                        echoTimeout.current = null
+                    }
+                }
+            })
+        }
+        
+        return () => {
+            if (echoTimeout.current) {
+                clearTimeout(echoTimeout.current)
+            }
         }
     }, [hidden])
 
-    const loadPeers = async () => {
+    const loadData = async () => {
         try {
             setLoading(true)
             const peersData = await window.p2p.getPeers()
+            const connectionsData = p2pConnectionManager.getActiveConnections()
             setPeers(peersData)
-            if (peersData.length > 0 && !selectedPeer) {
+            setConnections(connectionsData)
+            
+            // Auto-select first connected peer
+            const connectedPeer = connectionsData.find(c => c.connected)
+            if (connectedPeer) {
+                setSelectedPeer(connectedPeer.peerHash)
+            } else if (peersData.length > 0 && !selectedPeer) {
                 setSelectedPeer(peersData[0].peerHash)
             }
         } catch (err) {
@@ -59,39 +93,84 @@ export const P2PEchoDialog: React.FC<P2PEchoDialogProps> = ({ hidden, onDismiss 
             setLoading(false)
         }
     }
+    
+    const isConnected = (peerHash: string): boolean => {
+        return p2pConnectionManager.isConnected(peerHash)
+    }
 
     const handleEchoTest = async () => {
         if (!selectedPeer) return
+        
+        // Check if peer is connected
+        if (!isConnected(selectedPeer)) {
+            setResult({
+                success: false,
+                error: "Peer is not connected. Connect first in Settings → P2P Share."
+            })
+            return
+        }
 
         try {
             setTesting(true)
             setResult(null)
             setError(null)
 
-            const startTime = Date.now()
-            // TODO: Implement actual echo when WebRTC is ready
-            // Simulate echo for now
-            await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200))
-            const endTime = Date.now()
-
-            setResult({
-                success: true,
-                roundTripMs: endTime - startTime,
-            })
+            // Record start time
+            echoTimestamp.current = Date.now()
+            
+            // Create echo request message
+            const message: ShareMessage = {
+                type: "echo-request",
+                senderHash: "local",
+                senderName: "Fluent Reader",
+                timestamp: echoTimestamp.current
+            }
+            
+            // Send echo request using the Renderer-side manager
+            const sent = p2pConnectionManager.sendMessage(selectedPeer, message)
+            
+            if (!sent) {
+                setResult({
+                    success: false,
+                    error: "Failed to send echo request. Connection may have been lost."
+                })
+                setTesting(false)
+                echoTimestamp.current = 0
+                return
+            }
+            
+            // Set timeout for response
+            echoTimeout.current = setTimeout(() => {
+                if (testing) {
+                    setResult({
+                        success: false,
+                        error: "Echo timeout - no response received within 10 seconds."
+                    })
+                    setTesting(false)
+                    echoTimestamp.current = 0
+                }
+            }, 10000)
+            
         } catch (err) {
             setResult({
                 success: false,
                 error: "Connection failed. Peer may be offline.",
             })
-        } finally {
             setTesting(false)
+            echoTimestamp.current = 0
         }
     }
 
-    const peerOptions: IDropdownOption[] = peers.map((peer) => ({
-        key: peer.peerHash,
-        text: peer.displayName,
-    }))
+    const peerOptions: IDropdownOption[] = peers.map((peer) => {
+        const connected = isConnected(peer.peerHash)
+        return {
+            key: peer.peerHash,
+            text: `${peer.displayName}${connected ? " ✓" : " (offline)"}`,
+            disabled: !connected,
+        }
+    })
+    
+    const hasConnectedPeers = connections.some(c => c.connected)
 
     const getLatencyQuality = (ms: number): { text: string; color: string } => {
         if (ms < 100) return { text: "Excellent", color: "#107c10" }
@@ -128,7 +207,11 @@ export const P2PEchoDialog: React.FC<P2PEchoDialogProps> = ({ hidden, onDismiss 
 
                     {peers.length === 0 ? (
                         <MessageBar messageBarType={MessageBarType.warning}>
-                            No peers configured. Go to Settings → P2P to add peers.
+                            No peers configured. Go to Settings → P2P Share to add peers.
+                        </MessageBar>
+                    ) : !hasConnectedPeers ? (
+                        <MessageBar messageBarType={MessageBarType.warning}>
+                            No peers connected. Go to Settings → P2P Share to connect.
                         </MessageBar>
                     ) : (
                         <>
@@ -218,7 +301,7 @@ export const P2PEchoDialog: React.FC<P2PEchoDialogProps> = ({ hidden, onDismiss 
                 <PrimaryButton
                     text={testing ? "Testing..." : "Run Echo Test"}
                     onClick={handleEchoTest}
-                    disabled={!selectedPeer || testing || loading || peers.length === 0}
+                    disabled={!selectedPeer || testing || loading || !hasConnectedPeers}
                     iconProps={{ iconName: "Sync" }}
                 />
                 <DefaultButton text="Close" onClick={onDismiss} disabled={testing} />

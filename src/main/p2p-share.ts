@@ -1,8 +1,9 @@
 ﻿/**
  * P2P Share Module - Main Process
  * 
- * Handles peer-to-peer article link sharing between Fluent Reader instances
- * using WebRTC data channels via simple-peer library.
+ * Handles peer-to-peer article link sharing between Fluent Reader instances.
+ * Note: WebRTC connections are managed in the renderer process via simple-peer.
+ * This module handles peer configuration storage and IPC coordination only.
  */
 import { ipcMain, BrowserWindow } from "electron"
 import * as crypto from "crypto"
@@ -180,7 +181,7 @@ export function updatePeerLastSeen(peerHash: string): void {
     }
 }
 
-// IPC Handlers
+// IPC Handlers (peer management only - WebRTC runs in renderer)
 export function registerP2PIpcHandlers(): void {
     ipcMain.handle("p2p:getConfig", () => p2pConfig)
     
@@ -200,6 +201,10 @@ export function registerP2PIpcHandlers(): void {
     ipcMain.handle("p2p:removePeer", (_, peerHash: string) => {
         removePeer(peerHash)
         return knownPeers
+    })
+    
+    ipcMain.handle("p2p:updatePeerLastSeen", (_, peerHash: string) => {
+        updatePeerLastSeen(peerHash)
     })
     
     ipcMain.handle("p2p:generateRoomCode", () => generateRoomCode())

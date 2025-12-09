@@ -8,6 +8,7 @@ import NavContainer from "../containers/nav-container"
 import LogMenuContainer from "../containers/log-menu-container"
 import SettingsContainer from "../containers/settings-container"
 import { RootState } from "../scripts/reducer"
+import { P2PIncomingNotification } from "./p2p-incoming-notification"
 
 const Root = ({ locale, dispatch }) =>
     locale && (
@@ -21,6 +22,7 @@ const Root = ({ locale, dispatch }) =>
             <MenuContainer />
             <SettingsContainer />
             <ContextMenuContainer />
+            <P2PIncomingNotification />
         </div>
     )
 

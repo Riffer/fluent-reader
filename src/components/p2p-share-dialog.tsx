@@ -15,7 +15,8 @@ import {
     SpinnerSize,
     Text,
 } from "@fluentui/react"
-import { KnownPeer } from "../bridges/p2p"
+import { KnownPeer, ConnectionInfo, ShareMessage } from "../bridges/p2p"
+import { p2pConnectionManager } from "../scripts/p2p-connection"
 
 interface P2PShareDialogProps {
     hidden: boolean
@@ -31,6 +32,7 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
     articleLink,
 }) => {
     const [peers, setPeers] = useState<KnownPeer[]>([])
+    const [connections, setConnections] = useState<ConnectionInfo[]>([])
     const [selectedPeer, setSelectedPeer] = useState<string | null>(null)
     const [loading, setLoading] = useState(true)
     const [sending, setSending] = useState(false)
@@ -39,18 +41,25 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
 
     useEffect(() => {
         if (!hidden) {
-            loadPeers()
+            loadData()
             setSuccess(false)
             setError(null)
         }
     }, [hidden])
 
-    const loadPeers = async () => {
+    const loadData = async () => {
         try {
             setLoading(true)
             const peersData = await window.p2p.getPeers()
+            const connectionsData = p2pConnectionManager.getActiveConnections()
             setPeers(peersData)
-            if (peersData.length > 0 && !selectedPeer) {
+            setConnections(connectionsData)
+            
+            // Auto-select first connected peer
+            const connectedPeer = connectionsData.find(c => c.connected)
+            if (connectedPeer) {
+                setSelectedPeer(connectedPeer.peerHash)
+            } else if (peersData.length > 0 && !selectedPeer) {
                 setSelectedPeer(peersData[0].peerHash)
             }
         } catch (err) {
@@ -59,6 +68,10 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
             setLoading(false)
         }
     }
+    
+    const isConnected = (peerHash: string): boolean => {
+        return p2pConnectionManager.isConnected(peerHash)
+    }
 
     const handleSend = async () => {
         if (!selectedPeer) return
@@ -66,13 +79,34 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
         try {
             setSending(true)
             setError(null)
-            // P2P send is not yet implemented in bridge - show placeholder
-            console.log("P2P Share:", { peer: selectedPeer, title: articleTitle, link: articleLink })
-            // TODO: Implement actual P2P send when WebRTC connection is ready
-            setSuccess(true)
-            setTimeout(() => {
-                onDismiss()
-            }, 1500)
+            
+            // Check if peer is connected
+            if (!isConnected(selectedPeer)) {
+                setError("Peer is not connected. Connect first in Settings → P2P Share.")
+                return
+            }
+            
+            // Create share message
+            const message: ShareMessage = {
+                type: "article-link",
+                senderHash: "local", // Will be replaced by receiver
+                senderName: "Fluent Reader",
+                timestamp: Date.now(),
+                url: articleLink,
+                title: articleTitle
+            }
+            
+            // Send via P2P using the Renderer-side manager
+            const sent = p2pConnectionManager.sendMessage(selectedPeer, message)
+            
+            if (sent) {
+                setSuccess(true)
+                setTimeout(() => {
+                    onDismiss()
+                }, 1500)
+            } else {
+                setError("Failed to send. Connection may have been lost.")
+            }
         } catch (err) {
             setError("Failed to send article. Peer may be offline.")
         } finally {
@@ -80,10 +114,16 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
         }
     }
 
-    const peerOptions: IDropdownOption[] = peers.map((peer) => ({
-        key: peer.peerHash,
-        text: peer.displayName,
-    }))
+    const peerOptions: IDropdownOption[] = peers.map((peer) => {
+        const connected = isConnected(peer.peerHash)
+        return {
+            key: peer.peerHash,
+            text: `${peer.displayName}${connected ? " ✓" : " (offline)"}`,
+            disabled: !connected,
+        }
+    })
+    
+    const hasConnectedPeers = connections.some(c => c.connected)
 
     return (
         <Dialog
@@ -151,7 +191,11 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
 
                     {peers.length === 0 ? (
                         <MessageBar messageBarType={MessageBarType.warning}>
-                            No peers configured. Go to Settings → P2P to add peers.
+                            No peers configured. Go to Settings → P2P Share to add peers.
+                        </MessageBar>
+                    ) : !hasConnectedPeers ? (
+                        <MessageBar messageBarType={MessageBarType.warning}>
+                            No peers connected. Go to Settings → P2P Share to connect.
                         </MessageBar>
                     ) : (
                         <Dropdown
@@ -169,7 +213,7 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                 <PrimaryButton
                     text={sending ? "Sending..." : "Send"}
                     onClick={handleSend}
-                    disabled={!selectedPeer || sending || loading || peers.length === 0}
+                    disabled={!selectedPeer || sending || loading || !hasConnectedPeers}
                 />
                 <DefaultButton text="Cancel" onClick={onDismiss} disabled={sending} />
             </DialogFooter>

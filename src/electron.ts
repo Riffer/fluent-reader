@@ -3,6 +3,7 @@ import { ThemeSettings, SchemaTypes } from "./schema-types"
 import { store } from "./main/settings"
 import performUpdate from "./main/update-scripts"
 import { WindowManager } from "./main/window"
+import { initP2P, registerP2PIpcHandlers } from "./main/p2p-share"
 
 if (!process.mas) {
     const locked = app.requestSingleInstanceLock()
@@ -20,6 +21,10 @@ let restarting = false
 function init() {
     performUpdate(store)
     nativeTheme.themeSource = store.get("theme", ThemeSettings.Default)
+    
+    // Initialize P2P module
+    initP2P()
+    registerP2PIpcHandlers()
 }
 
 init()
