@@ -10,9 +10,6 @@ import { AppDispatch } from "./scripts/utils"
 import { applyThemeSettings } from "./scripts/settings"
 import { initApp, openTextMenu } from "./scripts/models/app"
 
-// Initialize P2P message handlers early
-import "./scripts/p2p-init"
-
 window.settings.setProxy()
 
 applyThemeSettings()

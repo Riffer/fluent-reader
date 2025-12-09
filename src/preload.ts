@@ -4,11 +4,13 @@ import utilsBridge from "./bridges/utils"
 import dbBridge from "./bridges/db"
 import { createArticleExtractorBridge } from "./bridges/article-extractor"
 import { p2pBridge } from "./bridges/p2p"
+import { p2pLanBridge } from "./bridges/p2p-lan"
 
 contextBridge.exposeInMainWorld("settings", settingsBridge)
 contextBridge.exposeInMainWorld("db", dbBridge)
 contextBridge.exposeInMainWorld("utils", utilsBridge)
 contextBridge.exposeInMainWorld("p2p", p2pBridge)
+contextBridge.exposeInMainWorld("p2pLan", p2pLanBridge)
 
 // ipcRenderer für Webview-Zoom-Kommunikation (eingeschränkt auf benötigte Channels)
 const limitedIpcRenderer = {

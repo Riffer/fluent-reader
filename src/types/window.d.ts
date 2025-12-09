@@ -6,6 +6,7 @@
 import type { createArticleExtractorBridge } from "../bridges/article-extractor"
 import type { DbBridge } from "../bridges/db"
 import type { P2PBridge } from "../bridges/p2p"
+import type { P2PLanBridge } from "../bridges/p2p-lan"
 
 type ArticleExtractorBridge = ReturnType<typeof createArticleExtractorBridge>
 
@@ -37,9 +38,14 @@ declare global {
         articleHtmlPath: string
 
         /**
-         * P2P bridge - peer-to-peer article sharing
+         * P2P bridge - peer configuration storage (legacy)
          */
         p2p: P2PBridge
+
+        /**
+         * P2P LAN bridge - automatic peer discovery in local network
+         */
+        p2pLan: P2PLanBridge
 
         /**
          * Limited IPC renderer for specific channels

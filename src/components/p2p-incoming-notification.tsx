@@ -1,7 +1,7 @@
 /**
  * P2P Incoming Article Notification
  * 
- * Shows a notification when an article link is received via P2P.
+ * Shows a notification when an article link is received via P2P LAN.
  * Allows user to open the article in the reader or dismiss.
  */
 import React, { useState, useEffect } from "react"
@@ -17,10 +17,9 @@ import {
     MessageBarType,
     Link,
 } from "@fluentui/react"
-import { onArticleReceived } from "../scripts/p2p-init"
 
 interface IncomingArticle {
-    peerHash: string
+    peerId: string
     peerName: string
     url: string
     title: string
@@ -32,7 +31,8 @@ export const P2PIncomingNotification: React.FC = () => {
     const [queue, setQueue] = useState<IncomingArticle[]>([])
 
     useEffect(() => {
-        onArticleReceived((article) => {
+        // Listen for incoming articles from P2P LAN
+        window.p2pLan.onArticleReceived((article) => {
             console.log("[P2P Notification] Article received:", article.title)
             if (incomingArticle) {
                 // Queue if already showing one
@@ -41,6 +41,10 @@ export const P2PIncomingNotification: React.FC = () => {
                 setIncomingArticle(article)
             }
         })
+        
+        return () => {
+            window.p2pLan.removeAllListeners()
+        }
     }, [incomingArticle])
 
     const handleDismiss = () => {

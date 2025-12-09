@@ -19,7 +19,7 @@ import {
 } from "../scripts/models/source"
 import { shareSubmenu } from "./context-menu"
 import { platformCtrl, decodeFetchResponse } from "../scripts/utils"
-import { P2PShareDialog } from "./p2p-share-dialog"
+import { P2PShareDialog } from "./p2p-share-dialog-lan"
 import { P2PEchoDialog } from "./p2p-echo-dialog"
 
 const FONT_SIZE_OPTIONS = [8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20]
