@@ -26,10 +26,12 @@ import {
     SpinnerSize,
     Toggle,
     Text,
+    useTheme,
 } from "@fluentui/react"
 import { P2PStatus, P2PPeer } from "../../bridges/p2p-lan"
 
 export const P2PLanSettings: React.FC = () => {
+    const theme = useTheme()
     const [status, setStatus] = useState<P2PStatus>({
         inRoom: false,
         roomCode: null,
@@ -38,6 +40,7 @@ export const P2PLanSettings: React.FC = () => {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [successMessage, setSuccessMessage] = useState<string | null>(null)
+    const [collectLinks, setCollectLinks] = useState(false)
     
     // Dialog states
     const [showCreateDialog, setShowCreateDialog] = useState(false)
@@ -52,9 +55,10 @@ export const P2PLanSettings: React.FC = () => {
     // Load status on mount and setup listeners
     useEffect(() => {
         loadStatus()
+        setCollectLinks(window.settings.getP2PCollectLinks())
         
         // Listen for connection state changes
-        window.p2pLan.onConnectionStateChanged((newStatus) => {
+        const unsubscribe = window.p2pLan.onConnectionStateChanged((newStatus) => {
             console.log("[P2P-LAN UI] State changed:", newStatus)
             setStatus(newStatus)
             
@@ -66,9 +70,14 @@ export const P2PLanSettings: React.FC = () => {
         })
         
         return () => {
-            window.p2pLan.removeAllListeners()
+            unsubscribe()
         }
     }, [])
+
+    const handleCollectLinksChange = (checked: boolean) => {
+        setCollectLinks(checked)
+        window.settings.setP2PCollectLinks(checked)
+    }
     
     const loadStatus = async () => {
         try {
@@ -135,19 +144,6 @@ export const P2PLanSettings: React.FC = () => {
             setError("Failed to leave room")
         }
     }
-    
-    const handleEchoTest = async (peerId: string) => {
-        try {
-            const sent = await window.p2pLan.sendEcho(peerId)
-            if (sent) {
-                setSuccessMessage("Echo sent! Waiting for response...")
-            } else {
-                setError("Failed to send echo")
-            }
-        } catch (err) {
-            setError("Echo test failed")
-        }
-    }
 
     const columns: IColumn[] = [
         {
@@ -177,26 +173,11 @@ export const P2PLanSettings: React.FC = () => {
             key: "peerId",
             name: "Peer ID",
             minWidth: 100,
-            maxWidth: 120,
+            maxWidth: 150,
             onRender: (item: P2PPeer) => (
                 <Text variant="small" styles={{ root: { fontFamily: "monospace", color: "#666" } }}>
                     {item.peerId.substring(0, 8)}...
                 </Text>
-            ),
-        },
-        {
-            key: "actions",
-            name: "",
-            minWidth: 80,
-            maxWidth: 80,
-            onRender: (item: P2PPeer) => (
-                item.connected && (
-                    <DefaultButton
-                        text="Echo"
-                        onClick={() => handleEchoTest(item.peerId)}
-                        styles={{ root: { minWidth: 60, height: 24 } }}
-                    />
-                )
             ),
         },
     ]
@@ -246,7 +227,7 @@ export const P2PLanSettings: React.FC = () => {
                     <MessageBar messageBarType={MessageBarType.info}>
                         <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 8 }}>
                             <Text>Room:</Text>
-                            <Text styles={{ root: { fontWeight: 600, fontFamily: "monospace", fontSize: 16, letterSpacing: 2 } }}>
+                            <Text styles={{ root: { fontWeight: 600, fontFamily: "monospace", fontSize: 16, letterSpacing: "2px" } }}>
                                 {status.roomCode}
                             </Text>
                             <Text>•</Text>
@@ -274,6 +255,15 @@ export const P2PLanSettings: React.FC = () => {
                     />
                 </Stack>
             )}
+
+            {/* Receive behavior toggle */}
+            <Toggle
+                label="Collect received links in notification bell"
+                checked={collectLinks}
+                onChange={(_, checked) => handleCollectLinksChange(checked || false)}
+                onText="Collect in bell (no dialog)"
+                offText="Show dialog immediately"
+            />
 
             {/* Peers List */}
             {status.inRoom && (
@@ -322,10 +312,11 @@ export const P2PLanSettings: React.FC = () => {
                             styles={{ 
                                 root: { 
                                     fontFamily: "monospace", 
-                                    letterSpacing: 8,
+                                    letterSpacing: "8px",
                                     textAlign: "center",
                                     padding: 16,
-                                    backgroundColor: "#f3f3f3",
+                                    backgroundColor: theme.palette.neutralLighter,
+                                    color: theme.palette.neutralPrimary,
                                     borderRadius: 4
                                 } 
                             }}
@@ -375,7 +366,7 @@ export const P2PLanSettings: React.FC = () => {
                         onChange={(_, v) => setRoomCode(v?.toUpperCase() || "")}
                         placeholder="ABC123"
                         maxLength={6}
-                        styles={{ field: { fontSize: 18, textAlign: "center", letterSpacing: 4, fontFamily: "monospace" } }}
+                        styles={{ field: { fontSize: 18, textAlign: "center", letterSpacing: "4px", fontFamily: "monospace" } }}
                     />
                 </Stack>
                 <DialogFooter>

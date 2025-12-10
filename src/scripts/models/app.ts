@@ -51,6 +51,7 @@ export const enum AppLogType {
     Warning,
     Failure,
     Article,
+    P2PLink,
 }
 
 export class AppLog {
@@ -58,18 +59,21 @@ export class AppLog {
     title: string
     details?: string
     iid?: number
+    url?: string
     time: Date
 
     constructor(
         type: AppLogType,
         title: string,
         details: string = null,
-        iid: number = null
+        iid: number = null,
+        url: string = null
     ) {
         this.type = type
         this.title = title
         this.details = details
         this.iid = iid
+        this.url = url
         this.time = new Date()
     }
 }
@@ -167,6 +171,7 @@ export type ContextMenuActionTypes =
 
 export const TOGGLE_LOGS = "TOGGLE_LOGS"
 export const PUSH_NOTIFICATION = "PUSH_NOTIFICATION"
+export const PUSH_P2P_LINK = "PUSH_P2P_LINK"
 
 interface ToggleLogMenuAction {
     type: typeof TOGGLE_LOGS
@@ -179,7 +184,14 @@ interface PushNotificationAction {
     source: string
 }
 
-export type LogMenuActionType = ToggleLogMenuAction | PushNotificationAction
+interface PushP2PLinkAction {
+    type: typeof PUSH_P2P_LINK
+    title: string
+    url: string
+    peerName: string
+}
+
+export type LogMenuActionType = ToggleLogMenuAction | PushNotificationAction | PushP2PLinkAction
 
 export const TOGGLE_MENU = "TOGGLE_MENU"
 export const HIDE_MENU = "HIDE_MENU"
@@ -375,6 +387,15 @@ export function pushNotification(item: RSSItem): AppThunk {
             title: item.title,
             source: sourceName,
         })
+    }
+}
+
+export function pushP2PLink(title: string, url: string, peerName: string): PushP2PLinkAction {
+    return {
+        type: PUSH_P2P_LINK,
+        title,
+        url,
+        peerName,
     }
 }
 
@@ -717,6 +738,24 @@ export function appReducer(
                             action.title,
                             action.source,
                             action.iid
+                        ),
+                    ],
+                },
+            }
+        case PUSH_P2P_LINK:
+            return {
+                ...state,
+                logMenu: {
+                    ...state.logMenu,
+                    notify: true,
+                    logs: [
+                        ...state.logMenu.logs,
+                        new AppLog(
+                            AppLogType.P2PLink,
+                            action.title,
+                            action.peerName,
+                            null,
+                            action.url
                         ),
                     ],
                 },

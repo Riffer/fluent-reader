@@ -238,3 +238,35 @@ ipcMain.on("get-auto-cookie-consent", event => {
 ipcMain.handle("set-auto-cookie-consent", (_, flag: boolean) => {
     store.set(AUTO_COOKIE_CONSENT_STORE_KEY, flag)
 })
+
+const P2P_COLLECT_LINKS_STORE_KEY = "p2pCollectLinks"
+ipcMain.on("get-p2p-collect-links", event => {
+    event.returnValue = store.get(P2P_COLLECT_LINKS_STORE_KEY, false)
+})
+ipcMain.handle("set-p2p-collect-links", (_, flag: boolean) => {
+    store.set(P2P_COLLECT_LINKS_STORE_KEY, flag)
+})
+
+// P2P Room persistence
+const P2P_ROOM_CODE_STORE_KEY = "p2pRoomCode"
+const P2P_DISPLAY_NAME_STORE_KEY = "p2pDisplayName"
+
+export function getStoredP2PRoom(): { roomCode: string | null, displayName: string } {
+    return {
+        roomCode: store.get(P2P_ROOM_CODE_STORE_KEY, null) as string | null,
+        displayName: store.get(P2P_DISPLAY_NAME_STORE_KEY, "Fluent Reader") as string
+    }
+}
+
+export function setStoredP2PRoom(roomCode: string | null, displayName: string): void {
+    if (roomCode) {
+        store.set(P2P_ROOM_CODE_STORE_KEY, roomCode)
+        store.set(P2P_DISPLAY_NAME_STORE_KEY, displayName)
+    } else {
+        store.delete(P2P_ROOM_CODE_STORE_KEY)
+    }
+}
+
+export function clearStoredP2PRoom(): void {
+    store.delete(P2P_ROOM_CODE_STORE_KEY)
+}

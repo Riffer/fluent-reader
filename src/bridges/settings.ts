@@ -152,6 +152,13 @@ const settingsBridge = {
         ipcRenderer.invoke("set-auto-cookie-consent", flag)
     },
 
+    getP2PCollectLinks: (): boolean => {
+        return ipcRenderer.sendSync("get-p2p-collect-links")
+    },
+    setP2PCollectLinks: (flag: boolean) => {
+        ipcRenderer.invoke("set-p2p-collect-links", flag)
+    },
+
     getAll: () => {
         return ipcRenderer.sendSync("get-all-settings") as Object
     },

@@ -14,6 +14,7 @@ import {
     Spinner,
     SpinnerSize,
     Text,
+    useTheme,
 } from "@fluentui/react"
 import { KnownPeer, ConnectionInfo, ShareMessage } from "../bridges/p2p"
 import { p2pConnectionManager } from "../scripts/p2p-connection"
@@ -31,6 +32,8 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
     articleTitle,
     articleLink,
 }) => {
+    const theme = useTheme()
+    const isDarkMode = theme.isInverted
     const [peers, setPeers] = useState<KnownPeer[]>([])
     const [connections, setConnections] = useState<ConnectionInfo[]>([])
     const [selectedPeer, setSelectedPeer] = useState<string | null>(null)
@@ -163,7 +166,8 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                             variant="medium"
                             styles={{
                                 root: {
-                                    backgroundColor: "#f3f3f3",
+                                    backgroundColor: isDarkMode ? "#333" : "#f3f3f3",
+                                    color: isDarkMode ? "#fff" : "#333",
                                     padding: 8,
                                     borderRadius: 4,
                                     wordBreak: "break-word",
@@ -180,7 +184,7 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                             variant="small"
                             styles={{
                                 root: {
-                                    color: "#666",
+                                    color: isDarkMode ? "#aaa" : "#666",
                                     wordBreak: "break-all",
                                 },
                             }}

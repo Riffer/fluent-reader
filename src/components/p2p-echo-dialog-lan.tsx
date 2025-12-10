@@ -42,6 +42,7 @@ export const P2PEchoDialog: React.FC<P2PEchoDialogProps> = ({ hidden, onDismiss 
     const [result, setResult] = useState<EchoResult | null>(null)
     const [error, setError] = useState<string | null>(null)
     const echoTimeout = useRef<NodeJS.Timeout | null>(null)
+    const unsubscribeRef = useRef<(() => void) | null>(null)
 
     useEffect(() => {
         if (!hidden) {
@@ -50,7 +51,7 @@ export const P2PEchoDialog: React.FC<P2PEchoDialogProps> = ({ hidden, onDismiss 
             setError(null)
             
             // Listen for echo responses
-            window.p2pLan.onEchoResponse((data) => {
+            unsubscribeRef.current = window.p2pLan.onEchoResponse((data) => {
                 console.log("[P2P Echo] Response received:", data)
                 setResult({
                     success: true,
@@ -67,6 +68,10 @@ export const P2PEchoDialog: React.FC<P2PEchoDialogProps> = ({ hidden, onDismiss 
         return () => {
             if (echoTimeout.current) {
                 clearTimeout(echoTimeout.current)
+            }
+            if (unsubscribeRef.current) {
+                unsubscribeRef.current()
+                unsubscribeRef.current = null
             }
         }
     }, [hidden])

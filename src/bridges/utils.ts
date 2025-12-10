@@ -18,6 +18,11 @@ const utilsBridge = {
         ipcRenderer.invoke("open-external", url, background)
     },
 
+    openInReaderWindow: (url: string, title?: string) => {
+        console.log("openInReaderWindow:", url)
+        ipcRenderer.invoke("open-in-reader-window", url, title)
+    },
+
     showErrorBox: (title: string, content: string, copy?: string) => {
         ipcRenderer.invoke("show-error-box", title, content, copy)
     },

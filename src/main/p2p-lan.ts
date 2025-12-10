@@ -9,13 +9,14 @@ import * as dgram from "dgram"
 import * as net from "net"
 import * as crypto from "crypto"
 import { getKnownPeers, addPeer, updatePeerLastSeen, KnownPeer, generatePeerHash } from "./p2p-share"
+import { getStoredP2PRoom, setStoredP2PRoom, clearStoredP2PRoom } from "./settings"
 
 // Constants
 const DISCOVERY_PORT = 41899  // UDP port for broadcast
 const TCP_PORT_START = 41900  // TCP port range start
 const TCP_PORT_END = 41999    // TCP port range end
-const BROADCAST_INTERVAL = 2000  // ms between broadcasts
-const PEER_TIMEOUT = 10000    // ms before peer considered offline
+const BROADCAST_INTERVAL = 5000  // ms between broadcasts (5 seconds)
+const PEER_TIMEOUT = 15000    // ms before peer considered offline
 
 // Message types
 interface DiscoveryMessage {
@@ -66,6 +67,28 @@ const discoveredPeers = new Map<string, {
 export function initP2PLan(): void {
     localPeerId = crypto.randomBytes(8).toString("hex")
     console.log("[P2P-LAN] Initialized with peerId:", localPeerId)
+    
+    // Auto-rejoin saved room after a short delay (allow app to fully initialize)
+    setTimeout(() => {
+        autoRejoinSavedRoom()
+    }, 2000)
+}
+
+/**
+ * Auto-rejoin a previously saved room
+ */
+async function autoRejoinSavedRoom(): Promise<void> {
+    const stored = getStoredP2PRoom()
+    if (stored.roomCode) {
+        console.log(`[P2P-LAN] Auto-rejoining saved room: ${stored.roomCode}`)
+        const success = await joinRoom(stored.roomCode, stored.displayName, false) // Don't re-save
+        if (success) {
+            console.log(`[P2P-LAN] Successfully rejoined room ${stored.roomCode}`)
+        } else {
+            console.log(`[P2P-LAN] Failed to rejoin room, clearing stored room`)
+            clearStoredP2PRoom()
+        }
+    }
 }
 
 /**
@@ -79,15 +102,21 @@ function getMainWindow(): BrowserWindow | null {
 /**
  * Start hosting/joining a room
  */
-export async function joinRoom(roomCode: string, displayName: string): Promise<boolean> {
+export async function joinRoom(roomCode: string, displayName: string, saveToStore: boolean = true): Promise<boolean> {
     try {
         // Clean up any existing room
-        await leaveRoom()
+        await leaveRoom(false) // Don't clear store during rejoin
         
         activeRoomCode = roomCode.toUpperCase()
         localDisplayName = displayName || "Fluent Reader"
         
         console.log(`[P2P-LAN] Joining room: ${activeRoomCode} as "${localDisplayName}"`)
+        
+        // Save to persistent store
+        if (saveToStore) {
+            setStoredP2PRoom(activeRoomCode, localDisplayName)
+            console.log(`[P2P-LAN] Room saved to store`)
+        }
         
         // Start TCP server
         await startTcpServer()
@@ -108,9 +137,16 @@ export async function joinRoom(roomCode: string, displayName: string): Promise<b
 
 /**
  * Leave the current room
+ * @param clearStore - Whether to clear the stored room (default: true)
  */
-export async function leaveRoom(): Promise<void> {
+export async function leaveRoom(clearStore: boolean = true): Promise<void> {
     console.log("[P2P-LAN] Leaving room")
+    
+    // Clear stored room if requested
+    if (clearStore) {
+        clearStoredP2PRoom()
+        console.log("[P2P-LAN] Cleared stored room")
+    }
     
     // Stop broadcasting
     if (broadcastInterval) {

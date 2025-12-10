@@ -4,7 +4,7 @@
  * Shows a notification when an article link is received via P2P LAN.
  * Allows user to open the article in the reader or dismiss.
  */
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef, useCallback } from "react"
 import {
     Dialog,
     DialogType,
@@ -26,57 +26,105 @@ interface IncomingArticle {
     timestamp: number
 }
 
-export const P2PIncomingNotification: React.FC = () => {
-    const [incomingArticle, setIncomingArticle] = useState<IncomingArticle | null>(null)
-    const [queue, setQueue] = useState<IncomingArticle[]>([])
+interface P2PIncomingNotificationProps {
+    addToLog: (title: string, url: string, peerName: string) => void
+}
 
+export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = ({ addToLog }) => {
+    const [incomingArticle, setIncomingArticle] = useState<IncomingArticle | null>(null)
+    const [collectLinksInLog, setCollectLinksInLog] = useState<boolean>(false)
+    const queueRef = useRef<IncomingArticle[]>([])
+    const listenerRegistered = useRef(false)
+
+    // Load setting on mount
     useEffect(() => {
-        // Listen for incoming articles from P2P LAN
-        window.p2pLan.onArticleReceived((article) => {
+        const loadSetting = async () => {
+            const setting = window.settings.getP2PCollectLinks()
+            setCollectLinksInLog(setting)
+        }
+        loadSetting()
+    }, [])
+
+    // Register listener only ONCE on mount
+    useEffect(() => {
+        if (listenerRegistered.current) return
+        listenerRegistered.current = true
+        
+        console.log("[P2P Notification] Registering article listener")
+        
+        const unsubscribe = window.p2pLan.onArticleReceived((article) => {
             console.log("[P2P Notification] Article received:", article.title)
-            if (incomingArticle) {
-                // Queue if already showing one
-                setQueue(prev => [...prev, article])
-            } else {
-                setIncomingArticle(article)
+            
+            // Check current setting (use getter to get fresh value)
+            const shouldCollect = window.settings.getP2PCollectLinks()
+            
+            if (shouldCollect) {
+                // Add to log instead of showing dialog
+                console.log("[P2P Notification] Collecting link in log")
+                addToLog(article.title, article.url, article.peerName)
+                return
             }
+            
+            setIncomingArticle(prev => {
+                if (prev) {
+                    // Queue if already showing one
+                    queueRef.current = [...queueRef.current, article]
+                    console.log("[P2P Notification] Queued, total in queue:", queueRef.current.length)
+                    return prev
+                } else {
+                    return article
+                }
+            })
         })
         
         return () => {
-            window.p2pLan.removeAllListeners()
+            console.log("[P2P Notification] Unregistering article listener")
+            unsubscribe()
+            listenerRegistered.current = false
         }
-    }, [incomingArticle])
+    }, [addToLog]) // addToLog is stable from mapDispatchToProps
 
-    const handleDismiss = () => {
+    const handleDismiss = useCallback(() => {
         // Show next in queue or close
-        if (queue.length > 0) {
-            const [next, ...rest] = queue
+        if (queueRef.current.length > 0) {
+            const [next, ...rest] = queueRef.current
+            queueRef.current = rest
             setIncomingArticle(next)
-            setQueue(rest)
         } else {
             setIncomingArticle(null)
         }
-    }
+    }, [])
 
-    const handleOpenInReader = () => {
+    const handleCopyLink = useCallback(() => {
         if (!incomingArticle) return
-        
-        // Dispatch action to open article (you'll need to connect this to your redux store)
-        // For now, we'll just copy to clipboard and show info
         navigator.clipboard.writeText(incomingArticle.url)
-        console.log("[P2P] Opening article:", incomingArticle.url)
-        
-        // You can dispatch a redux action here to actually open the article
-        // For example: store.dispatch(openArticle(incomingArticle.url))
-        
+        console.log("[P2P Notification] Link copied:", incomingArticle.url)
         handleDismiss()
-    }
+    }, [incomingArticle, handleDismiss])
 
-    const handleOpenInBrowser = () => {
+    const handleOpenInBrowser = useCallback(() => {
         if (!incomingArticle) return
-        window.open(incomingArticle.url, "_blank")
+        console.log("[P2P Notification] Opening in browser:", incomingArticle.url)
+        // Use Electron's shell to open external URLs
+        window.utils.openExternal(incomingArticle.url)
         handleDismiss()
-    }
+    }, [incomingArticle, handleDismiss])
+
+    const handleOpenInReader = useCallback(() => {
+        if (!incomingArticle) return
+        console.log("[P2P Notification] Opening in reader:", incomingArticle.url)
+        // Open URL in internal reader window
+        window.utils.openInReaderWindow(incomingArticle.url, incomingArticle.title)
+        handleDismiss()
+    }, [incomingArticle, handleDismiss])
+
+    const handleLater = useCallback(() => {
+        if (!incomingArticle) return
+        console.log("[P2P Notification] Saving for later:", incomingArticle.url)
+        // Add to log menu (notification bell) for later viewing
+        addToLog(incomingArticle.title, incomingArticle.url, incomingArticle.peerName)
+        handleDismiss()
+    }, [incomingArticle, addToLog, handleDismiss])
 
     if (!incomingArticle) return null
 
@@ -105,35 +153,31 @@ export const P2PIncomingNotification: React.FC = () => {
                     <Text variant="large" styles={{ root: { fontWeight: 600 } }}>
                         {incomingArticle.title}
                     </Text>
-                    <Link
-                        href={incomingArticle.url}
-                        target="_blank"
+                    <Text 
+                        variant="small"
                         styles={{
                             root: {
-                                fontSize: 12,
                                 color: "#666",
                                 wordBreak: "break-all",
                             },
                         }}
                     >
                         {incomingArticle.url}
-                    </Link>
+                    </Text>
                 </Stack>
 
-                {queue.length > 0 && (
+                {queueRef.current.length > 0 && (
                     <MessageBar>
-                        +{queue.length} more article{queue.length > 1 ? "s" : ""} waiting
+                        +{queueRef.current.length} more article{queueRef.current.length > 1 ? "s" : ""} waiting
                     </MessageBar>
                 )}
             </Stack>
 
             <DialogFooter>
-                <PrimaryButton text="Copy Link" onClick={() => {
-                    navigator.clipboard.writeText(incomingArticle.url)
-                    handleDismiss()
-                }} />
+                <PrimaryButton text="Open in Reader" onClick={handleOpenInReader} />
                 <DefaultButton text="Open in Browser" onClick={handleOpenInBrowser} />
-                <DefaultButton text="Dismiss" onClick={handleDismiss} />
+                <DefaultButton text="Copy Link" onClick={handleCopyLink} />
+                <DefaultButton text="Later" onClick={handleLater} iconProps={{ iconName: "Ringer" }} />
             </DialogFooter>
         </Dialog>
     )

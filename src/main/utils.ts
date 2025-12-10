@@ -1,4 +1,4 @@
-import { ipcMain, shell, dialog, app, session, clipboard } from "electron"
+import { ipcMain, shell, dialog, app, session, clipboard, BrowserWindow } from "electron"
 import { WindowManager } from "./window"
 import fs = require("fs")
 import { ImageCallbackTypes, TouchBarTexts } from "../schema-types"
@@ -50,6 +50,22 @@ export function setUtilsListeners(manager: WindowManager) {
     ipcMain.handle("open-external", (_, url: string, background: boolean) => {
         console.log("from ipcMain.handle()")
         openExternal(url, background)
+    })
+
+    // Open URL in a new internal browser window
+    ipcMain.handle("open-in-reader-window", (_, url: string, title: string = "Reader") => {
+        console.log("Opening in reader window:", url)
+        const readerWindow = new BrowserWindow({
+            width: 1000,
+            height: 800,
+            title: title,
+            webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+            },
+            autoHideMenuBar: true,
+        })
+        readerWindow.loadURL(url)
     })
 
     ipcMain.handle(

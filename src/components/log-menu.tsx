@@ -23,6 +23,8 @@ function getLogIcon(log: AppLog) {
             return "Info"
         case AppLogType.Article:
             return "KnowledgeArticle"
+        case AppLogType.P2PLink:
+            return "Share"
         default:
             return "Warning"
     }
@@ -39,6 +41,12 @@ class LogMenu extends React.Component<LogMenuProps> {
                             {l.title}
                         </Link>
                     </b>
+                ) : l.url ? (
+                    <b>
+                        <Link onClick={() => this.handleP2PLinkClick(l)}>
+                            {l.title}
+                        </Link>
+                    </b>
                 ) : (
                     <b>{l.title}</b>
                 ),
@@ -51,6 +59,11 @@ class LogMenu extends React.Component<LogMenuProps> {
     handleArticleClick = (log: AppLog) => {
         this.props.close()
         this.props.showItem(log.iid)
+    }
+
+    handleP2PLinkClick = (log: AppLog) => {
+        this.props.close()
+        window.utils.openExternal(log.url)
     }
 
     render() {
