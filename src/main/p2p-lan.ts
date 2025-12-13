@@ -4,7 +4,7 @@
  * Handles peer discovery via UDP broadcast and direct TCP connections
  * for article link sharing within a local network.
  */
-import { ipcMain, BrowserWindow } from "electron"
+import { ipcMain, BrowserWindow, powerMonitor } from "electron"
 import * as dgram from "dgram"
 import * as net from "net"
 import * as crypto from "crypto"
@@ -265,6 +265,100 @@ export async function shutdownP2P(): Promise<void> {
     console.log("[P2P-LAN] Shutting down P2P (app closing)")
     // Don't clear stored room (false), but do send goodbye (true)
     await leaveRoom(false, true)
+}
+
+/**
+ * Handle system suspend (sleep/hibernate)
+ * Send goodbye to peers so they know we're going offline
+ */
+export async function onSystemSuspend(): Promise<void> {
+    if (!activeRoomCode) return
+    
+    console.log("[P2P-LAN] System suspending - sending goodbye to peers")
+    
+    // Send goodbye but don't clear stored room or close connections fully
+    // (they'll be dead anyway after resume)
+    const goodbyeMsg: P2PMessage = {
+        type: "goodbye",
+        senderName: localDisplayName,
+        timestamp: Date.now()
+    }
+    broadcast(goodbyeMsg)
+}
+
+/**
+ * Handle system resume (wake from sleep/hibernate)
+ * Immediately re-announce presence and check peer connectivity
+ */
+export async function onSystemResume(): Promise<void> {
+    if (!activeRoomCode) return
+    
+    console.log("[P2P-LAN] System resumed - re-announcing presence")
+    
+    // Reset lastSeen for all peers (we don't know their state after resume)
+    const now = Date.now()
+    for (const [peerId, peer] of connectedPeers) {
+        // Give peers a grace period - they might also be resuming
+        peer.lastSeen = now
+    }
+    
+    // Immediately send UDP discovery to find/re-announce to peers
+    sendImmediateDiscovery()
+    
+    // Send heartbeat to all connected peers to verify connectivity
+    sendImmediateHeartbeat()
+    
+    // Process any pending shares for peers that are now online
+    setTimeout(() => {
+        for (const [peerId, peer] of connectedPeers) {
+            processPendingSharesForPeer(peerId, peer.displayName)
+        }
+    }, 1000) // Small delay to let connections stabilize
+}
+
+/**
+ * Send immediate UDP discovery broadcast
+ */
+function sendImmediateDiscovery(): void {
+    if (!udpSocket || !activeRoomCode) return
+    
+    const message: DiscoveryMessage = {
+        type: "discovery",
+        roomCode: activeRoomCode,
+        peerId: localPeerId,
+        displayName: localDisplayName,
+        tcpPort: tcpPort,
+        timestamp: Date.now()
+    }
+    
+    const data = Buffer.from(JSON.stringify(message))
+    
+    udpSocket.send(data, DISCOVERY_PORT, "255.255.255.255", (err) => {
+        if (err) console.error("[P2P-LAN] Immediate discovery broadcast error:", err)
+        else console.log("[P2P-LAN] Sent immediate discovery broadcast after resume")
+    })
+}
+
+/**
+ * Send immediate heartbeat to all connected peers
+ */
+function sendImmediateHeartbeat(): void {
+    if (!activeRoomCode) return
+    
+    for (const [peerId, peer] of connectedPeers) {
+        try {
+            const message: P2PMessage = {
+                type: "heartbeat",
+                senderId: localPeerId,
+                roomCode: activeRoomCode,
+                displayName: localDisplayName
+            }
+            peer.socket.write(JSON.stringify(message) + "\n")
+        } catch (err) {
+            console.error(`[P2P-LAN] Failed to send immediate heartbeat to ${peerId}:`, err)
+        }
+    }
+    console.log(`[P2P-LAN] Sent immediate heartbeat to ${connectedPeers.size} peers after resume`)
 }
 
 /**

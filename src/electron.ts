@@ -1,10 +1,10 @@
-import { app, ipcMain, Menu, nativeTheme } from "electron"
+import { app, ipcMain, Menu, nativeTheme, powerMonitor } from "electron"
 import { ThemeSettings, SchemaTypes } from "./schema-types"
 import { store } from "./main/settings"
 import performUpdate from "./main/update-scripts"
 import { WindowManager } from "./main/window"
 import { initP2P, registerP2PIpcHandlers } from "./main/p2p-share"
-import { initP2PLan, registerP2PLanIpcHandlers, shutdownP2P } from "./main/p2p-lan"
+import { initP2PLan, registerP2PLanIpcHandlers, shutdownP2P, onSystemSuspend, onSystemResume } from "./main/p2p-lan"
 
 if (!process.mas) {
     const locked = app.requestSingleInstanceLock()
@@ -129,6 +129,18 @@ if (process.platform === "win32") {
 app.commandLine.appendSwitch("touch-events", "enabled");
 
 console.debug("GPU disabled - using software rendering for stability");
+
+// Handle system sleep/hibernate - notify P2P peers
+powerMonitor.on("suspend", () => {
+    console.log("[Electron] System suspending (sleep/hibernate)")
+    onSystemSuspend()
+})
+
+// Handle system resume - re-announce to P2P peers
+powerMonitor.on("resume", () => {
+    console.log("[Electron] System resumed from sleep/hibernate")
+    onSystemResume()
+})
 
 // Gracefully shutdown P2P when app is quitting
 app.on("before-quit", async (event) => {
