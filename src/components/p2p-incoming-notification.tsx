@@ -212,11 +212,14 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
                 type: DialogType.normal,
                 title: "📥 Article Received",
                 subText: `${incomingArticle.peerName} shared an article with you`,
+                styles: { inner: { minWidth: 480 } },
             }}
             modalProps={{
                 isBlocking: false,
-                styles: { main: { maxWidth: 500 } },
+                styles: { main: { minWidth: 520, maxWidth: 600 } },
             }}
+            minWidth={520}
+            maxWidth={600}
         >
             <Stack tokens={{ childrenGap: 12 }}>
                 <MessageBar messageBarType={MessageBarType.info}>
@@ -248,10 +251,35 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
             </Stack>
 
             <DialogFooter>
-                <PrimaryButton text="Open in Reader" onClick={handleOpenInReader} />
-                <DefaultButton text="Open in Browser" onClick={handleOpenInBrowser} />
-                <DefaultButton text="Copy Link" onClick={handleCopyLink} />
-                <DefaultButton text="Later" onClick={handleLater} iconProps={{ iconName: "Ringer" }} />
+                <Stack 
+                    horizontal 
+                    tokens={{ childrenGap: 8 }}
+                    styles={{ root: { width: "100%" } }}
+                >
+                    <PrimaryButton 
+                        title="Open in Reader"
+                        onClick={handleOpenInReader} 
+                        iconProps={{ iconName: "NavigateExternalInline" }}
+                    />
+                    <DefaultButton 
+                        title="Open in Browser"
+                        onClick={handleOpenInBrowser} 
+                        iconProps={{ iconName: "Globe" }}
+                    />
+                    <DefaultButton 
+                        title="Copy Link"
+                        onClick={handleCopyLink} 
+                        iconProps={{ iconName: "Link" }}
+                    />
+                    <Stack.Item grow={1}>
+                        <span />
+                    </Stack.Item>
+                    <DefaultButton 
+                        title="Later"
+                        onClick={handleLater} 
+                        iconProps={{ iconName: "Ringer" }} 
+                    />
+                </Stack>
             </DialogFooter>
         </Dialog>
     )
