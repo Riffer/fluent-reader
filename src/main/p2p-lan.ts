@@ -789,7 +789,8 @@ function handleDiscoveryMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
         // Ignore messages from other rooms
         if (data.roomCode !== activeRoomCode) return
         
-        console.log(`[P2P-LAN] Discovery from ${data.displayName} (${rinfo.address}:${data.tcpPort})`)
+        const msgType = data.type === "discovery" ? "Discovery" : "Discovery-Response"
+        console.log(`[P2P-LAN] ${msgType} from ${data.displayName} (${rinfo.address}:${data.tcpPort})`)
         
         // Update discovered peers
         discoveredPeers.set(data.peerId, {
