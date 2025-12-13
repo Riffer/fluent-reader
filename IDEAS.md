@@ -1,32 +1,6 @@
 # Feature Ideas
 
 
-## Link auf Artikel via Windows Local Share teilen
-
-**Status:** Idee
-
-**Beschreibung:**
-Ermöglicht das Teilen eines Artikellinks direkt über die Windows "Teilen"-Funktion (z.B. an andere Apps, Geräte oder Kontakte). Dies nutzt die Windows 10/11 Share UI, die in vielen nativen Apps verfügbar ist, aber in Electron/TypeScript erst angebunden werden müsste.
-
-**Herausforderungen:**
-- Windows Share API ist nicht direkt aus Node.js/Electron/TypeScript nutzbar
-- Mögliche Ansätze: WinRT-Bridge (z.B. via edge-js, winrt-node, oder C++/CLI-Addon)
-- Electron-Integration und Sicherheitsaspekte beachten
-
-**Mögliche Umsetzung:**
-- Kontextmenü-Eintrag oder Button "Teilen..." im Artikel-View
-- Übergabe des Links (und ggf. Titel) an die Windows Share UI
-- Fallback: Link in Zwischenablage kopieren, falls kein Share möglich
-
-**Referenzen:**
-- [Windows Share Contract (Microsoft Docs)](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.datatransfer.datatransfermanager)
-- [node-winrt](https://github.com/NodeRT/NodeRT)
-- [Electron Issue: Windows Share UI](https://github.com/electron/electron/issues/10980)
-
-**Status:** Noch keine Cross-Platform-Lösung für Electron/TypeScript verfügbar, aber für Windows-User sehr nützlich.
-
----
-
 ## P2P LAN Artikel-Sharing
 
 **Status:** ✅ Implementiert (v1.1.9, Dezember 2025)
@@ -47,37 +21,36 @@ Ermöglicht das Teilen von Artikellinks zwischen Fluent Reader Instanzen im loka
 
 **Status:** Aus Produktivtest (Dezember 2025)
 
-#### 1. Schlafende/Zugeklappte Peers werden nicht erkannt
+#### ~~1. Schlafende/Zugeklappte Peers werden nicht erkannt~~ ✅ Erledigt
 
-**Problem:**
-Das Teilen mit einem "schlafenden" Peer-Rechner (z.B. zugeklappte Surface Pro Notebooks) funktioniert nicht. Der Peer wird nicht als anwesend gemeldet.
+**Status:** ✅ Implementiert (v1.1.9)
 
-**Fragen:**
-- Findet überhaupt eine regelmäßige Abfrage statt, ob der andere Rechner noch erreichbar ist?
-- Wie wird der Peer-Status aktualisiert wenn ein Gerät in den Standby geht?
-
-**Mögliche Lösungen:**
-- [ ] Heartbeat/Ping-Mechanismus implementieren
-- [ ] TCP-Connection-Timeout erkennen und Peer als offline markieren
-- [ ] Regelmäßige Verbindungsprüfung (alle 30s?)
-- [ ] Visuelles Feedback wenn Peer nicht mehr antwortet
+- Heartbeat alle 10 Sekunden
+- Peer wird nach 30 Sekunden ohne Antwort als offline markiert
+- Offline-Queue speichert Links für nicht erreichbare Peers
+- Bei Reconnect werden gequeuete Links automatisch übermittelt
 
 #### 2. Feed-Information beim Teilen mitgeben
+
+**Status:** 🔶 Teilweise implementiert (v1.1.10) - Feed-Info wird übertragen, UI fehlt noch
 
 **Problem:**
 Aktuell wird nur der Artikel-Link und Titel übermittelt, nicht aber der zugehörige Feed.
 
 **Anforderung:**
-- Feed-URL und Feed-Name sollen mit übertragen werden
-- Empfänger soll die Möglichkeit haben, den Feed als neuen Feed anzulegen
-- Dialog beim Empfänger: "Artikel von [Feed-Name] empfangen. Feed abonnieren?"
+- ✅ Feed-URL, Feed-Name und Feed-Icon werden mit übertragen
+- [ ] Empfänger soll die Möglichkeit haben, den Feed als neuen Feed anzulegen
+- [ ] Dialog beim Empfänger: "Artikel von [Feed-Name] empfangen. Feed abonnieren?"
+- [ ] Prüfung ob Feed bereits abonniert ist
 
 **Umsetzung:**
-- [ ] `ShareMessage` erweitern um `feedUrl`, `feedName`, `feedIconUrl`
+- [x] `ShareMessage` erweitern um `feedUrl`, `feedName`, `feedIconUrl`
 - [ ] UI beim Empfänger für Feed-Subscription-Option
 - [ ] Prüfung ob Feed bereits abonniert ist
 
-#### 3. Offline-Queue für nicht erreichbare Peers
+#### ~~3. Offline-Queue für nicht erreichbare Peers~~
+
+**Status:** ✅ Implementiert (v1.1.10)
 
 **Problem:**
 Wenn der Peer nicht verfügbar ist, geht der geteilte Link verloren.
@@ -88,10 +61,10 @@ Wenn der Peer nicht verfügbar ist, geht der geteilte Link verloren.
 - Queue sollte persistent sein (überleben App-Neustart)
 
 **Umsetzung:**
-- [ ] `pendingShares` Queue in SQLite oder JSON speichern
-- [ ] Bei Peer-Reconnect Queue abarbeiten
-- [ ] UI: "X Links warten auf Übermittlung an [Peer]"
-- [ ] Timeout/Verfallsdatum für Queue-Einträge?
+- [x] `pendingShares` Queue in SQLite oder JSON speichern → SQLite-Tabelle `p2p_pending_shares`
+- [x] Bei Peer-Reconnect Queue abarbeiten → `processPendingSharesForPeer()` bei Peer-Statuswechsel auf online
+- [x] UI: "X Links warten auf Übermittlung an [Peer]" → Pending-Count wird angezeigt
+- [x] Timeout/Verfallsdatum für Queue-Einträge? → Noch nicht implementiert (optional für später)
 
 #### 4. Geteilte Artikel als künstlicher Feed
 
@@ -119,6 +92,22 @@ Geteilte Artikel sind nach App-Neustart nicht mehr verfügbar (nur in der Notifi
 - [ ] Automatische Erstellung beim ersten empfangenen Artikel
 - [ ] Gruppierung: Ein Feed "P2P Geteilt" oder pro Peer "Von [Name]"
 - [ ] Items werden in SQLite gespeichert wie normale Artikel
+
+#### 5. Artikel-Modus beim Teilen mitgeben
+
+**Problem:**
+Aktuell wird nur der Artikel-Link und Titel übermittelt, aber nicht der Anzeigemodus (RSS/Webpage/FullContent) und andere Einstellungen.
+
+**Anforderung:**
+- Der aktuell verwendete Modus soll mit übertragen werden
+- Empfänger kann Artikel direkt im gleichen Modus öffnen wie der Sender
+- Weitere relevante Einstellungen könnten mitgesendet werden (z.B. Zoom-Level)
+
+**Umsetzung:**
+- [ ] `article-link-batch` Message erweitern um `viewMode` (0=RSS, 1=Webpage, 2=FullContent)
+- [ ] Optional: `zoomLevel`, `mobileMode` mitschicken
+- [ ] Empfänger-UI: "Öffnen im empfohlenen Modus" vs. "Standard-Modus verwenden"
+- [ ] Fallback wenn Modus nicht unterstützt wird
 
 ---
 
