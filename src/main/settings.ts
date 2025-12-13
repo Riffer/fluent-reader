@@ -250,6 +250,7 @@ ipcMain.handle("set-p2p-collect-links", (_, flag: boolean) => {
 // P2P Room persistence
 const P2P_ROOM_CODE_STORE_KEY = "p2pRoomCode"
 const P2P_DISPLAY_NAME_STORE_KEY = "p2pDisplayName"
+const P2P_PEER_ID_STORE_KEY = "p2pPeerId"
 
 export function getStoredP2PRoom(): { roomCode: string | null, displayName: string } {
     return {
@@ -269,4 +270,18 @@ export function setStoredP2PRoom(roomCode: string | null, displayName: string): 
 
 export function clearStoredP2PRoom(): void {
     store.delete(P2P_ROOM_CODE_STORE_KEY)
+}
+
+/**
+ * Get the stored P2P peer ID or null if not set
+ */
+export function getStoredP2PPeerId(): string | null {
+    return store.get(P2P_PEER_ID_STORE_KEY, null) as string | null
+}
+
+/**
+ * Save the P2P peer ID persistently
+ */
+export function setStoredP2PPeerId(peerId: string): void {
+    store.set(P2P_PEER_ID_STORE_KEY, peerId)
 }

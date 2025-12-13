@@ -25,6 +25,103 @@ Ermöglicht das Teilen eines Artikellinks direkt über die Windows "Teilen"-Funk
 
 **Status:** Noch keine Cross-Platform-Lösung für Electron/TypeScript verfügbar, aber für Windows-User sehr nützlich.
 
+---
+
+## P2P LAN Artikel-Sharing
+
+**Status:** ✅ Implementiert (v1.1.9, Dezember 2025)
+
+**Beschreibung:**
+Ermöglicht das Teilen von Artikellinks zwischen Fluent Reader Instanzen im lokalen Netzwerk via UDP-Discovery und TCP-Verbindung.
+
+**Implementierte Features:**
+- ✅ Room-basierte Peer-Discovery via UDP Broadcast (Port 41899)
+- ✅ TCP-Verbindung für zuverlässige Nachrichtenübermittlung (Port 41900-41999)
+- ✅ Automatisches Rejoin beim App-Start (Room wird persistent gespeichert)
+- ✅ Dark Mode Support für alle Dialoge
+- ✅ "Later" Button zum Sammeln von Links in der Notification Bell
+- ✅ "Open in Reader" Button für internes Browser-Fenster
+- ✅ Option: Links direkt in Notification Bell sammeln statt Dialog zeigen
+
+### Bekannte Einschränkungen und offene Punkte
+
+**Status:** Aus Produktivtest (Dezember 2025)
+
+#### 1. Schlafende/Zugeklappte Peers werden nicht erkannt
+
+**Problem:**
+Das Teilen mit einem "schlafenden" Peer-Rechner (z.B. zugeklappte Surface Pro Notebooks) funktioniert nicht. Der Peer wird nicht als anwesend gemeldet.
+
+**Fragen:**
+- Findet überhaupt eine regelmäßige Abfrage statt, ob der andere Rechner noch erreichbar ist?
+- Wie wird der Peer-Status aktualisiert wenn ein Gerät in den Standby geht?
+
+**Mögliche Lösungen:**
+- [ ] Heartbeat/Ping-Mechanismus implementieren
+- [ ] TCP-Connection-Timeout erkennen und Peer als offline markieren
+- [ ] Regelmäßige Verbindungsprüfung (alle 30s?)
+- [ ] Visuelles Feedback wenn Peer nicht mehr antwortet
+
+#### 2. Feed-Information beim Teilen mitgeben
+
+**Problem:**
+Aktuell wird nur der Artikel-Link und Titel übermittelt, nicht aber der zugehörige Feed.
+
+**Anforderung:**
+- Feed-URL und Feed-Name sollen mit übertragen werden
+- Empfänger soll die Möglichkeit haben, den Feed als neuen Feed anzulegen
+- Dialog beim Empfänger: "Artikel von [Feed-Name] empfangen. Feed abonnieren?"
+
+**Umsetzung:**
+- [ ] `ShareMessage` erweitern um `feedUrl`, `feedName`, `feedIconUrl`
+- [ ] UI beim Empfänger für Feed-Subscription-Option
+- [ ] Prüfung ob Feed bereits abonniert ist
+
+#### 3. Offline-Queue für nicht erreichbare Peers
+
+**Problem:**
+Wenn der Peer nicht verfügbar ist, geht der geteilte Link verloren.
+
+**Anforderung:**
+- Geteilte Links sollen lokal in einer Queue gespeichert werden
+- Bei erneuter Verfügbarkeit des Peers automatisch übermitteln
+- Queue sollte persistent sein (überleben App-Neustart)
+
+**Umsetzung:**
+- [ ] `pendingShares` Queue in SQLite oder JSON speichern
+- [ ] Bei Peer-Reconnect Queue abarbeiten
+- [ ] UI: "X Links warten auf Übermittlung an [Peer]"
+- [ ] Timeout/Verfallsdatum für Queue-Einträge?
+
+#### 4. Geteilte Artikel als künstlicher Feed
+
+**Problem:**
+Geteilte Artikel sind nach App-Neustart nicht mehr verfügbar (nur in der Notification Bell während der Session).
+
+**Anforderung (zu diskutieren):**
+- Geteilte Artikel könnten in einen eigenen "künstlichen" Feed aufgenommen werden
+- Ermöglicht späteres Lesen auch nach Neustarts
+- Dieselben Methoden wie für normale Feeds verwendbar (Markieren, Favoriten, etc.)
+
+**Vorteile:**
+- Konsistente UX mit normalen Artikeln
+- Persistenz über Sessions hinweg
+- Alle Feed-Funktionen nutzbar (Read/Unread, Star, etc.)
+
+**Nachteile/Offene Fragen:**
+- Wie wird der "P2P Shared" Feed erstellt/verwaltet?
+- Soll es einen Feed pro Peer geben oder einen gemeinsamen?
+- Wie werden Duplikate behandelt (gleicher Artikel von mehreren Peers)?
+- Soll der Feed automatisch erstellt werden oder manuell aktivierbar?
+
+**Mögliche Umsetzung:**
+- [ ] Spezieller Feed-Typ `type: "p2p-shared"` oder `virtual: true`
+- [ ] Automatische Erstellung beim ersten empfangenen Artikel
+- [ ] Gruppierung: Ein Feed "P2P Geteilt" oder pro Peer "Von [Name]"
+- [ ] Items werden in SQLite gespeichert wie normale Artikel
+
+---
+
 ## Upstream-Contribution Strategie
 
 **Status:** Geplant

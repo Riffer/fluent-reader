@@ -17,6 +17,7 @@ import {
     Spinner,
     SpinnerSize,
     Text,
+    useTheme,
 } from "@fluentui/react"
 import { P2PStatus } from "../bridges/p2p-lan"
 
@@ -33,6 +34,7 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
     articleTitle,
     articleLink,
 }) => {
+    const theme = useTheme()
     const [status, setStatus] = useState<P2PStatus | null>(null)
     const [loading, setLoading] = useState(true)
     const [sending, setSending] = useState(false)
@@ -44,6 +46,17 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
             loadStatus()
             setSuccess(false)
             setError(null)
+            
+            // Subscribe to connection state changes while dialog is open
+            const unsubscribe = window.p2pLan.onConnectionStateChanged((newStatus) => {
+                console.log("[P2P Share Dialog] Connection state changed:", newStatus)
+                setStatus(newStatus)
+            })
+            
+            return () => {
+                // Cleanup: unsubscribe when dialog closes
+                unsubscribe()
+            }
         }
     }, [hidden])
 
@@ -64,16 +77,32 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
             setSending(true)
             setError(null)
             
-            // Share to all connected peers
-            const sentCount = await window.p2pLan.shareArticle(articleLink, articleTitle)
+            // Share to all connected peers with delivery acknowledgement
+            const results = await window.p2pLan.broadcastArticleLinkWithAck(articleTitle, articleLink)
             
-            if (sentCount > 0) {
+            const totalPeers = Object.keys(results).length
+            const successCount = Object.values(results).filter(r => r.success).length
+            const failedPeers = Object.entries(results)
+                .filter(([_, r]) => !r.success)
+                .map(([peerId, r]) => status?.peers.find(p => p.peerId === peerId)?.displayName ?? peerId)
+            
+            if (totalPeers === 0) {
+                setError("No peers connected. Join a room first in Settings → P2P Share.")
+            } else if (successCount === totalPeers) {
                 setSuccess(true)
                 setTimeout(() => {
                     onDismiss()
                 }, 1500)
+            } else if (successCount > 0) {
+                // Partial success
+                setError(`Delivered to ${successCount}/${totalPeers} peers. Failed: ${failedPeers.join(", ")}`)
+                setSuccess(true)
+                setTimeout(() => {
+                    onDismiss()
+                }, 2500)
             } else {
-                setError("No peers connected. Join a room first in Settings → P2P Share.")
+                // All failed
+                setError(`Failed to deliver to any peer. They may be offline.`)
             }
         } catch (err) {
             setError("Failed to send article")
@@ -124,7 +153,8 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                             variant="medium"
                             styles={{
                                 root: {
-                                    backgroundColor: "#f3f3f3",
+                                    backgroundColor: theme.palette.neutralLighter,
+                                    color: theme.palette.neutralPrimary,
                                     padding: 8,
                                     borderRadius: 4,
                                     wordBreak: "break-word",
@@ -141,7 +171,7 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                             variant="small"
                             styles={{
                                 root: {
-                                    color: "#666",
+                                    color: theme.palette.neutralSecondary,
                                     wordBreak: "break-all",
                                 },
                             }}

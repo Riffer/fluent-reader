@@ -34,12 +34,14 @@ export interface P2PStatus {
 type ConnectionCallback = (status: P2PStatus) => void
 type ArticleCallback = (data: { peerId: string; peerName: string; url: string; title: string; timestamp: number }) => void
 type EchoCallback = (data: { peerId: string; originalTimestamp: number; returnedAt: number; roundTripMs: number }) => void
+type PeerDisconnectedCallback = (data: { peerId: string; displayName: string; reason: string }) => void
 
 // Use Maps with unique IDs so components can unsubscribe individually
 let nextCallbackId = 0
 const connectionCallbacks = new Map<number, ConnectionCallback>()
 const articleCallbacks = new Map<number, ArticleCallback>()
 const echoCallbacks = new Map<number, EchoCallback>()
+const peerDisconnectedCallbacks = new Map<number, PeerDisconnectedCallback>()
 
 // Register IPC listeners once at module load
 ipcRenderer.on("p2p:connectionStateChanged", (_, status: P2PStatus) => {
@@ -59,6 +61,13 @@ ipcRenderer.on("p2p:articleReceived", (_, data) => {
 ipcRenderer.on("p2p:echoResponse", (_, data) => {
     console.log("[P2P-LAN Bridge] Echo response:", data, "callbacks:", echoCallbacks.size)
     echoCallbacks.forEach((cb, id) => {
+        try { cb(data) } catch (e) { console.error("[P2P-LAN Bridge] Callback error:", e) }
+    })
+})
+
+ipcRenderer.on("p2p:peerDisconnected", (_, data) => {
+    console.log("[P2P-LAN Bridge] Peer disconnected:", data, "callbacks:", peerDisconnectedCallbacks.size)
+    peerDisconnectedCallbacks.forEach((cb, id) => {
         try { cb(data) } catch (e) { console.error("[P2P-LAN Bridge] Callback error:", e) }
     })
 })
@@ -94,6 +103,18 @@ export const p2pLanBridge = {
      */
     sendToPeer: (peerId: string, message: P2PMessage): Promise<boolean> =>
         ipcRenderer.invoke("p2p-lan:sendToPeer", peerId, message),
+    
+    /**
+     * Send an article link with delivery acknowledgement to a specific peer
+     */
+    sendArticleLinkWithAck: (peerId: string, title: string, url: string, feedName?: string): Promise<{ success: boolean, error?: string }> =>
+        ipcRenderer.invoke("p2p-lan:sendArticleLinkWithAck", peerId, title, url, feedName),
+    
+    /**
+     * Broadcast an article link to all peers with delivery acknowledgement
+     */
+    broadcastArticleLinkWithAck: (title: string, url: string, feedName?: string): Promise<Record<string, { success: boolean, error?: string }>> =>
+        ipcRenderer.invoke("p2p-lan:broadcastArticleLinkWithAck", title, url, feedName),
     
     /**
      * Send an echo request to test connection latency
@@ -160,12 +181,27 @@ export const p2pLanBridge = {
     },
     
     /**
+     * Called when a peer disconnects (timeout, error, etc.)
+     * Returns an unsubscribe function
+     */
+    onPeerDisconnected: (callback: PeerDisconnectedCallback): (() => void) => {
+        const id = nextCallbackId++
+        peerDisconnectedCallbacks.set(id, callback)
+        console.log("[P2P-LAN Bridge] Peer disconnected callback registered, id:", id, "total:", peerDisconnectedCallbacks.size)
+        return () => {
+            peerDisconnectedCallbacks.delete(id)
+            console.log("[P2P-LAN Bridge] Peer disconnected callback removed, id:", id, "total:", peerDisconnectedCallbacks.size)
+        }
+    },
+    
+    /**
      * Remove all event callbacks (use sparingly - prefer individual unsubscribe)
      */
     removeAllListeners: () => {
         connectionCallbacks.clear()
         articleCallbacks.clear()
         echoCallbacks.clear()
+        peerDisconnectedCallbacks.clear()
         console.log("[P2P-LAN Bridge] All callbacks removed")
     }
 }

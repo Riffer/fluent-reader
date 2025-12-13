@@ -9,7 +9,7 @@ import * as dgram from "dgram"
 import * as net from "net"
 import * as crypto from "crypto"
 import { getKnownPeers, addPeer, updatePeerLastSeen, KnownPeer, generatePeerHash } from "./p2p-share"
-import { getStoredP2PRoom, setStoredP2PRoom, clearStoredP2PRoom } from "./settings"
+import { getStoredP2PRoom, setStoredP2PRoom, clearStoredP2PRoom, getStoredP2PPeerId, setStoredP2PPeerId } from "./settings"
 
 // Constants
 const DISCOVERY_PORT = 41899  // UDP port for broadcast
@@ -17,6 +17,16 @@ const TCP_PORT_START = 41900  // TCP port range start
 const TCP_PORT_END = 41999    // TCP port range end
 const BROADCAST_INTERVAL = 5000  // ms between broadcasts (5 seconds)
 const PEER_TIMEOUT = 15000    // ms before peer considered offline
+const HEARTBEAT_INTERVAL = 10000 // ms between heartbeats (10 seconds)
+const HEARTBEAT_TIMEOUT = 30000  // ms before peer considered dead (30 seconds)
+const ACK_TIMEOUT = 5000      // ms to wait for delivery acknowledgement
+
+/**
+ * Generate a unique message ID for ACK tracking
+ */
+function generateMessageId(): string {
+    return crypto.randomBytes(8).toString("hex") + "-" + Date.now().toString(36)
+}
 
 // Message types
 interface DiscoveryMessage {
@@ -29,7 +39,8 @@ interface DiscoveryMessage {
 }
 
 interface P2PMessage {
-    type: "article-link" | "echo-request" | "echo-response"
+    type: "article-link" | "article-ack" | "heartbeat" | "heartbeat-ack" | "echo-request" | "echo-response"
+    messageId?: string
     senderName: string
     timestamp: number
     url?: string
@@ -45,12 +56,14 @@ let activeRoomCode: string | null = null
 let localPeerId: string = ""
 let localDisplayName: string = "Fluent Reader"
 let broadcastInterval: NodeJS.Timeout | null = null
+let heartbeatInterval: NodeJS.Timeout | null = null
 
 // Connected peers (TCP sockets)
 const connectedPeers = new Map<string, {
     socket: net.Socket
     displayName: string
     lastSeen: number
+    lastHeartbeat: number
 }>()
 
 // Discovered peers (seen via UDP but not yet connected)
@@ -61,12 +74,29 @@ const discoveredPeers = new Map<string, {
     lastSeen: number
 }>()
 
+// Pending ACKs for article delivery confirmation
+const pendingAcks = new Map<string, {
+    resolve: (delivered: boolean) => void
+    timeout: NodeJS.Timeout
+    peerId: string
+    url: string
+    title: string
+}>()
+
 /**
  * Initialize the P2P LAN module
  */
 export function initP2PLan(): void {
-    localPeerId = crypto.randomBytes(8).toString("hex")
-    console.log("[P2P-LAN] Initialized with peerId:", localPeerId)
+    // Load existing peer ID or generate a new one
+    let savedPeerId = getStoredP2PPeerId()
+    if (!savedPeerId) {
+        savedPeerId = crypto.randomBytes(8).toString("hex")
+        setStoredP2PPeerId(savedPeerId)
+        console.log("[P2P-LAN] Generated new persistent peerId:", savedPeerId)
+    } else {
+        console.log("[P2P-LAN] Loaded existing peerId:", savedPeerId)
+    }
+    localPeerId = savedPeerId
     
     // Auto-rejoin saved room after a short delay (allow app to fully initialize)
     setTimeout(() => {
@@ -127,6 +157,9 @@ export async function joinRoom(roomCode: string, displayName: string, saveToStor
         // Start broadcasting presence
         startBroadcasting()
         
+        // Start heartbeat to check peer connectivity
+        startHeartbeat()
+        
         return true
     } catch (err) {
         console.error("[P2P-LAN] Failed to join room:", err)
@@ -153,6 +186,9 @@ export async function leaveRoom(clearStore: boolean = true): Promise<void> {
         clearInterval(broadcastInterval)
         broadcastInterval = null
     }
+    
+    // Stop heartbeat
+    stopHeartbeat()
     
     // Close all TCP connections
     for (const [peerId, peer] of connectedPeers) {
@@ -221,13 +257,173 @@ export function sendToPeer(peerId: string, message: P2PMessage): boolean {
 }
 
 /**
+ * Send article link with delivery confirmation
+ * Returns promise that resolves when ACK received or rejects on timeout
+ */
+export function sendArticleLinkWithAck(
+    peerId: string,
+    title: string,
+    url: string,
+    feedName?: string
+): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+        const messageId = generateMessageId()
+        const message: P2PMessage = {
+            type: "article-link",
+            senderId: localPeerId,
+            roomCode: activeRoomCode || "",
+            displayName: localDisplayName,
+            title,
+            url,
+            feedName,
+            messageId,
+            timestamp: Date.now()
+        }
+        
+        const sent = sendToPeer(peerId, message)
+        if (!sent) {
+            reject(new Error("Failed to send message"))
+            return
+        }
+        
+        // Track pending ACK
+        pendingAcks.set(messageId, {
+            timestamp: Date.now(),
+            peerId,
+            message,
+            onSuccess: () => resolve(true),
+            onFailure: () => reject(new Error("ACK timeout"))
+        })
+        
+        // Set timeout for ACK
+        setTimeout(() => {
+            const pending = pendingAcks.get(messageId)
+            if (pending) {
+                pendingAcks.delete(messageId)
+                console.log(`[P2P-LAN] ACK timeout for message ${messageId}`)
+                pending.onFailure?.()
+            }
+        }, ACK_TIMEOUT)
+    })
+}
+
+/**
+ * Send article link to all peers with acknowledgement tracking
+ * Returns results for each peer
+ */
+export async function broadcastArticleLinkWithAck(
+    title: string,
+    url: string,
+    feedName?: string
+): Promise<Map<string, { success: boolean, error?: string }>> {
+    const results = new Map<string, { success: boolean, error?: string }>()
+    
+    console.log(`[P2P-LAN] broadcastArticleLinkWithAck called, connectedPeers.size: ${connectedPeers.size}`)
+    for (const [peerId, peer] of connectedPeers) {
+        console.log(`[P2P-LAN]   - Peer: ${peer.displayName} (${peerId})`)
+    }
+    
+    const promises = Array.from(connectedPeers.keys()).map(async (peerId) => {
+        try {
+            await sendArticleLinkWithAck(peerId, title, url, feedName)
+            results.set(peerId, { success: true })
+        } catch (err) {
+            results.set(peerId, { 
+                success: false, 
+                error: err instanceof Error ? err.message : "Unknown error" 
+            })
+        }
+    })
+    
+    await Promise.all(promises)
+    console.log(`[P2P-LAN] broadcastArticleLinkWithAck results:`, Array.from(results.entries()))
+    return results
+}
+
+/**
+ * Start heartbeat interval to check peer connectivity
+ */
+function startHeartbeat(): void {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval)
+    }
+    
+    heartbeatInterval = setInterval(() => {
+        if (!activeRoomCode) return
+        
+        const now = Date.now()
+        const disconnectedPeers: string[] = []
+        
+        // Send heartbeat to all connected peers and check for timeouts
+        for (const [peerId, peer] of connectedPeers) {
+            // Check if peer timed out
+            if (now - peer.lastSeen > HEARTBEAT_TIMEOUT) {
+                console.log(`[P2P-LAN] Peer ${peer.displayName} timed out (last seen ${Math.round((now - peer.lastSeen) / 1000)}s ago)`)
+                disconnectedPeers.push(peerId)
+                continue
+            }
+            
+            // Send heartbeat
+            try {
+                const message: P2PMessage = {
+                    type: "heartbeat",
+                    senderId: localPeerId,
+                    roomCode: activeRoomCode,
+                    displayName: localDisplayName
+                }
+                peer.socket.write(JSON.stringify(message) + "\n")
+            } catch (err) {
+                console.error(`[P2P-LAN] Failed to send heartbeat to ${peerId}:`, err)
+                disconnectedPeers.push(peerId)
+            }
+        }
+        
+        // Remove timed out peers
+        for (const peerId of disconnectedPeers) {
+            const peer = connectedPeers.get(peerId)
+            if (peer) {
+                console.log(`[P2P-LAN] Removing timed out peer: ${peer.displayName}`)
+                notifyPeerDisconnected(peerId, peer.displayName, "Timeout - no response")
+                try {
+                    peer.socket.destroy()
+                } catch (e) {}
+                connectedPeers.delete(peerId)
+            }
+        }
+        
+        if (disconnectedPeers.length > 0) {
+            notifyPeersChanged()
+        }
+    }, HEARTBEAT_INTERVAL)
+}
+
+/**
+ * Stop heartbeat interval
+ */
+function stopHeartbeat(): void {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval)
+        heartbeatInterval = null
+    }
+    
+    // Clear pending ACKs
+    for (const [messageId, pending] of pendingAcks) {
+        pending.onFailure?.()
+    }
+    pendingAcks.clear()
+}
+
+/**
  * Get list of connected peers
  */
 export function getConnectedPeers(): Array<{ peerId: string, displayName: string, connected: boolean }> {
     const peers: Array<{ peerId: string, displayName: string, connected: boolean }> = []
     
+    console.log(`[P2P-LAN] getConnectedPeers called - connectedPeers.size: ${connectedPeers.size}, discoveredPeers.size: ${discoveredPeers.size}`)
+    
     // Add connected peers
     for (const [peerId, peer] of connectedPeers) {
+        console.log(`[P2P-LAN]   - Connected: ${peer.displayName} (${peerId})`)
         peers.push({
             peerId,
             displayName: peer.displayName,
@@ -238,6 +434,7 @@ export function getConnectedPeers(): Array<{ peerId: string, displayName: string
     // Add discovered but not connected peers
     for (const [peerId, peer] of discoveredPeers) {
         if (!connectedPeers.has(peerId)) {
+            console.log(`[P2P-LAN]   - Discovered (not connected): ${peer.displayName} (${peerId})`)
             peers.push({
                 peerId,
                 displayName: peer.displayName,
@@ -549,13 +746,53 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
     
     peer.lastSeen = Date.now()
     
-    console.log(`[P2P-LAN] Received ${msg.type} from ${peer.displayName}`)
+    // Don't log heartbeats to reduce noise
+    if (msg.type !== "heartbeat" && msg.type !== "heartbeat-ack") {
+        console.log(`[P2P-LAN] Received ${msg.type} from ${peer.displayName}`)
+    }
     
     switch (msg.type) {
         case "article-link":
             if (msg.url && msg.title) {
                 notifyArticleReceived(peerId, peer.displayName, msg.url, msg.title, msg.timestamp)
+                
+                // Send ACK back to sender
+                if (msg.messageId) {
+                    sendToPeer(peerId, {
+                        type: "article-link-ack",
+                        senderId: localPeerId,
+                        roomCode: activeRoomCode || "",
+                        displayName: localDisplayName,
+                        ackId: msg.messageId
+                    })
+                }
             }
+            break
+            
+        case "article-link-ack":
+            // Handle ACK for sent article
+            if (msg.ackId) {
+                const pending = pendingAcks.get(msg.ackId)
+                if (pending) {
+                    console.log(`[P2P-LAN] Received ACK for message ${msg.ackId} from ${peer.displayName}`)
+                    pendingAcks.delete(msg.ackId)
+                    pending.onSuccess?.()
+                }
+            }
+            break
+            
+        case "heartbeat":
+            // Respond with heartbeat-ack
+            sendToPeer(peerId, {
+                type: "heartbeat-ack",
+                senderId: localPeerId,
+                roomCode: activeRoomCode || "",
+                displayName: localDisplayName
+            })
+            break
+            
+        case "heartbeat-ack":
+            // Just update lastSeen (already done above)
             break
             
         case "echo-request":
@@ -590,6 +827,22 @@ function notifyConnectionState(): void {
         inRoom: isInRoom(),
         roomCode: activeRoomCode,
         peers
+    })
+}
+
+function notifyPeersChanged(): void {
+    // Reuse notifyConnectionState since it sends all peer info
+    notifyConnectionState()
+}
+
+function notifyPeerDisconnected(peerId: string, displayName: string, reason: string): void {
+    const mainWindow = getMainWindow()
+    if (!mainWindow) return
+    
+    mainWindow.webContents.send("p2p:peerDisconnected", {
+        peerId,
+        displayName,
+        reason
     })
 }
 
@@ -645,6 +898,28 @@ export function registerP2PLanIpcHandlers(): void {
     
     ipcMain.handle("p2p-lan:sendToPeer", (_, peerId: string, message: P2PMessage) => {
         return sendToPeer(peerId, message)
+    })
+    
+    ipcMain.handle("p2p-lan:sendArticleLinkWithAck", async (_, peerId: string, title: string, url: string, feedName?: string) => {
+        try {
+            await sendArticleLinkWithAck(peerId, title, url, feedName)
+            return { success: true }
+        } catch (err) {
+            return { 
+                success: false, 
+                error: err instanceof Error ? err.message : "Unknown error" 
+            }
+        }
+    })
+    
+    ipcMain.handle("p2p-lan:broadcastArticleLinkWithAck", async (_, title: string, url: string, feedName?: string) => {
+        const results = await broadcastArticleLinkWithAck(title, url, feedName)
+        // Convert Map to object for IPC
+        const resultObj: Record<string, { success: boolean, error?: string }> = {}
+        for (const [peerId, result] of results) {
+            resultObj[peerId] = result
+        }
+        return resultObj
     })
     
     ipcMain.handle("p2p-lan:sendEcho", (_, peerId: string) => {

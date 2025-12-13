@@ -16,7 +16,17 @@ import {
     MessageBar,
     MessageBarType,
     Link,
+    useTheme,
 } from "@fluentui/react"
+
+/**
+ * Decode HTML entities in a string (e.g., &#x2019; -> ')
+ */
+function decodeHtmlEntities(text: string): string {
+    const textarea = document.createElement("textarea")
+    textarea.innerHTML = text
+    return textarea.value
+}
 
 interface IncomingArticle {
     peerId: string
@@ -126,9 +136,12 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
         handleDismiss()
     }, [incomingArticle, addToLog, handleDismiss])
 
+    const theme = useTheme()
+
     if (!incomingArticle) return null
 
     const timeAgo = getTimeAgo(incomingArticle.timestamp)
+    const decodedTitle = decodeHtmlEntities(incomingArticle.title)
 
     return (
         <Dialog
@@ -151,13 +164,13 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
                 
                 <Stack tokens={{ childrenGap: 4 }}>
                     <Text variant="large" styles={{ root: { fontWeight: 600 } }}>
-                        {incomingArticle.title}
+                        {decodedTitle}
                     </Text>
                     <Text 
                         variant="small"
                         styles={{
                             root: {
-                                color: "#666",
+                                color: theme.palette.neutralSecondary,
                                 wordBreak: "break-all",
                             },
                         }}
@@ -183,9 +196,19 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
     )
 }
 
-function getTimeAgo(timestamp: number): string {
+function getTimeAgo(timestamp: number | undefined): string {
+    // Handle missing or invalid timestamp
+    if (!timestamp || isNaN(timestamp)) {
+        return "just now"
+    }
+    
     const now = Date.now()
     const diff = now - timestamp
+    
+    // Handle future timestamps or very old timestamps
+    if (diff < 0 || diff > 86400000 * 30) {
+        return "just now"
+    }
     
     if (diff < 60000) return "just now"
     if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`
