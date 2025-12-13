@@ -15,7 +15,7 @@ import path from "path"
 let db: Database.Database | null = null
 
 // Schema version for migrations
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 3
 
 // Types matching the Lovefield models
 export interface SourceRow {
@@ -148,6 +148,27 @@ function createTables(): void {
         CREATE INDEX IF NOT EXISTS idx_items_hasRead ON items(hasRead);
         CREATE INDEX IF NOT EXISTS idx_items_starred ON items(starred);
     `)
+
+    // P2P Pending Shares Queue table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS p2p_pending_shares (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peerId TEXT NOT NULL,
+            peerName TEXT NOT NULL,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            feedName TEXT,
+            feedUrl TEXT,
+            feedIconUrl TEXT,
+            createdAt TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            lastAttempt TEXT
+        )
+    `)
+
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_pending_shares_peerId ON p2p_pending_shares(peerId);
+    `)
 }
 
 /**
@@ -162,8 +183,41 @@ function runMigrations(): void {
     if (currentVersion < SCHEMA_VERSION) {
         console.log(`[db-sqlite] Migrating from version ${currentVersion} to ${SCHEMA_VERSION}`)
         
-        // Future migrations go here
-        // if (currentVersion < 2) { ... }
+        // Migration to v2: Add p2p_pending_shares table
+        if (currentVersion < 2) {
+            console.log("[db-sqlite] Migration v2: Adding p2p_pending_shares table")
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS p2p_pending_shares (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    peerId TEXT NOT NULL,
+                    peerName TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    feedName TEXT,
+                    createdAt TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    lastAttempt TEXT
+                )
+            `)
+            db.exec(`
+                CREATE INDEX IF NOT EXISTS idx_pending_shares_peerId ON p2p_pending_shares(peerId);
+            `)
+        }
+        
+        // Migration to v3: Add feedUrl and feedIconUrl to p2p_pending_shares
+        if (currentVersion < 3) {
+            console.log("[db-sqlite] Migration v3: Adding feedUrl and feedIconUrl to p2p_pending_shares")
+            // Check if columns exist before adding (safe migration)
+            const tableInfo = db.prepare("PRAGMA table_info(p2p_pending_shares)").all() as Array<{ name: string }>
+            const columnNames = tableInfo.map(c => c.name)
+            
+            if (!columnNames.includes("feedUrl")) {
+                db.exec(`ALTER TABLE p2p_pending_shares ADD COLUMN feedUrl TEXT`)
+            }
+            if (!columnNames.includes("feedIconUrl")) {
+                db.exec(`ALTER TABLE p2p_pending_shares ADD COLUMN feedIconUrl TEXT`)
+            }
+        }
 
         // Update schema version
         if (currentVersion === 0) {
@@ -509,6 +563,130 @@ export function queryItems(options: ItemQueryOptions = {}): ItemRow[] {
 }
 
 // ============================================
+// P2P PENDING SHARES OPERATIONS
+// ============================================
+
+export interface PendingShareRow {
+    id: number
+    peerId: string
+    peerName: string
+    url: string
+    title: string
+    feedName: string | null
+    feedUrl: string | null
+    feedIconUrl: string | null
+    createdAt: string
+    attempts: number
+    lastAttempt: string | null
+}
+
+/**
+ * Add a pending share to the queue
+ */
+export function addPendingShare(
+    peerId: string,
+    peerName: string,
+    url: string,
+    title: string,
+    feedName?: string,
+    feedUrl?: string,
+    feedIconUrl?: string
+): number {
+    if (!db) throw new Error("Database not initialized")
+    
+    const stmt = db.prepare(`
+        INSERT INTO p2p_pending_shares (peerId, peerName, url, title, feedName, feedUrl, feedIconUrl, createdAt, attempts)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `)
+    
+    const result = stmt.run(peerId, peerName, url, title, feedName ?? null, feedUrl ?? null, feedIconUrl ?? null, new Date().toISOString())
+    console.log(`[db-sqlite] Added pending share: ${title} for peer ${peerName}`)
+    return result.lastInsertRowid as number
+}
+
+/**
+ * Get all pending shares for a specific peer
+ */
+export function getPendingSharesForPeer(peerId: string): PendingShareRow[] {
+    if (!db) throw new Error("Database not initialized")
+    return db.prepare("SELECT * FROM p2p_pending_shares WHERE peerId = ? ORDER BY createdAt ASC").all(peerId) as PendingShareRow[]
+}
+
+/**
+ * Get all pending shares grouped by peer
+ */
+export function getAllPendingShares(): PendingShareRow[] {
+    if (!db) throw new Error("Database not initialized")
+    return db.prepare("SELECT * FROM p2p_pending_shares ORDER BY createdAt ASC").all() as PendingShareRow[]
+}
+
+/**
+ * Get pending share counts per peer
+ */
+export function getPendingShareCounts(): Record<string, { count: number, peerName: string }> {
+    if (!db) throw new Error("Database not initialized")
+    
+    const rows = db.prepare(`
+        SELECT peerId, peerName, COUNT(*) as count 
+        FROM p2p_pending_shares 
+        GROUP BY peerId
+    `).all() as Array<{ peerId: string, peerName: string, count: number }>
+    
+    const counts: Record<string, { count: number, peerName: string }> = {}
+    for (const row of rows) {
+        counts[row.peerId] = { count: row.count, peerName: row.peerName }
+    }
+    return counts
+}
+
+/**
+ * Remove a pending share (after successful delivery or manual removal)
+ */
+export function removePendingShare(id: number): void {
+    if (!db) throw new Error("Database not initialized")
+    db.prepare("DELETE FROM p2p_pending_shares WHERE id = ?").run(id)
+    console.log(`[db-sqlite] Removed pending share id: ${id}`)
+}
+
+/**
+ * Remove all pending shares for a peer
+ */
+export function removePendingSharesForPeer(peerId: string): number {
+    if (!db) throw new Error("Database not initialized")
+    const result = db.prepare("DELETE FROM p2p_pending_shares WHERE peerId = ?").run(peerId)
+    console.log(`[db-sqlite] Removed ${result.changes} pending shares for peer ${peerId}`)
+    return result.changes
+}
+
+/**
+ * Increment attempt count for a pending share
+ */
+export function incrementPendingShareAttempts(id: number): void {
+    if (!db) throw new Error("Database not initialized")
+    db.prepare(`
+        UPDATE p2p_pending_shares 
+        SET attempts = attempts + 1, lastAttempt = ? 
+        WHERE id = ?
+    `).run(new Date().toISOString(), id)
+}
+
+/**
+ * Remove old pending shares (older than X days)
+ */
+export function removeOldPendingShares(maxAgeDays: number = 7): number {
+    if (!db) throw new Error("Database not initialized")
+    
+    const cutoffDate = new Date()
+    cutoffDate.setDate(cutoffDate.getDate() - maxAgeDays)
+    
+    const result = db.prepare("DELETE FROM p2p_pending_shares WHERE createdAt < ?").run(cutoffDate.toISOString())
+    if (result.changes > 0) {
+        console.log(`[db-sqlite] Removed ${result.changes} old pending shares (older than ${maxAgeDays} days)`)
+    }
+    return result.changes
+}
+
+// ============================================
 // UTILITY OPERATIONS
 // ============================================
 
@@ -615,6 +793,17 @@ export function setupDatabaseIPC(): void {
     ipcMain.handle("db:getUnreadCounts", () => getUnreadCounts())
     ipcMain.handle("db:vacuum", () => vacuum())
     ipcMain.handle("db:getStats", () => getStats())
+
+    // P2P Pending Shares operations
+    ipcMain.handle("db:pendingShares:add", (_, peerId: string, peerName: string, url: string, title: string, feedName?: string) => 
+        addPendingShare(peerId, peerName, url, title, feedName))
+    ipcMain.handle("db:pendingShares:getForPeer", (_, peerId: string) => getPendingSharesForPeer(peerId))
+    ipcMain.handle("db:pendingShares:getAll", () => getAllPendingShares())
+    ipcMain.handle("db:pendingShares:getCounts", () => getPendingShareCounts())
+    ipcMain.handle("db:pendingShares:remove", (_, id: number) => removePendingShare(id))
+    ipcMain.handle("db:pendingShares:removeForPeer", (_, peerId: string) => removePendingSharesForPeer(peerId))
+    ipcMain.handle("db:pendingShares:incrementAttempts", (_, id: number) => incrementPendingShareAttempts(id))
+    ipcMain.handle("db:pendingShares:removeOld", (_, maxAgeDays?: number) => removeOldPendingShares(maxAgeDays))
 
     console.log("[db-sqlite] IPC handlers registered")
 }

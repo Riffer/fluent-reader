@@ -10,6 +10,16 @@ import * as net from "net"
 import * as crypto from "crypto"
 import { getKnownPeers, addPeer, updatePeerLastSeen, KnownPeer, generatePeerHash } from "./p2p-share"
 import { getStoredP2PRoom, setStoredP2PRoom, clearStoredP2PRoom, getStoredP2PPeerId, setStoredP2PPeerId } from "./settings"
+import { 
+    addPendingShare, 
+    getPendingSharesForPeer, 
+    removePendingShare, 
+    incrementPendingShareAttempts,
+    getPendingShareCounts,
+    getAllPendingShares,
+    removeOldPendingShares,
+    PendingShareRow
+} from "./db-sqlite"
 
 // Constants
 const DISCOVERY_PORT = 41899  // UDP port for broadcast
@@ -39,12 +49,23 @@ interface DiscoveryMessage {
 }
 
 interface P2PMessage {
-    type: "article-link" | "article-ack" | "heartbeat" | "heartbeat-ack" | "echo-request" | "echo-response"
+    type: "article-link-batch" | "article-ack" | "heartbeat" | "heartbeat-ack" | "echo-request" | "echo-response"
     messageId?: string
     senderName: string
     timestamp: number
     url?: string
     title?: string
+    feedName?: string
+    feedUrl?: string
+    feedIconUrl?: string
+    // For batch messages (always used now)
+    articles?: Array<{
+        url: string
+        title: string
+        feedName?: string
+        feedUrl?: string
+        feedIconUrl?: string
+    }>
     echoData?: any
 }
 
@@ -76,11 +97,17 @@ const discoveredPeers = new Map<string, {
 
 // Pending ACKs for article delivery confirmation
 const pendingAcks = new Map<string, {
-    resolve: (delivered: boolean) => void
-    timeout: NodeJS.Timeout
+    timestamp: number
     peerId: string
+    peerName: string
     url: string
     title: string
+    feedName?: string
+    feedUrl?: string
+    feedIconUrl?: string
+    message: P2PMessage
+    onSuccess?: () => void
+    onFailure?: () => void
 }>()
 
 /**
@@ -257,39 +284,72 @@ export function sendToPeer(peerId: string, message: P2PMessage): boolean {
 }
 
 /**
- * Send article link with delivery confirmation
+ * Send articles with delivery confirmation (always uses batch format)
+ * Single article is simply an array with one element.
  * Returns promise that resolves when ACK received or rejects on timeout
+ * @param queueOnFailure If true, adds to pending queue on failure (default: false)
  */
-export function sendArticleLinkWithAck(
+export function sendArticlesWithAck(
     peerId: string,
-    title: string,
-    url: string,
-    feedName?: string
+    articles: Array<{
+        url: string
+        title: string
+        feedName?: string
+        feedUrl?: string
+        feedIconUrl?: string
+    }>,
+    queueOnFailure: boolean = false
 ): Promise<boolean> {
     return new Promise((resolve, reject) => {
+        const peer = connectedPeers.get(peerId)
+        const peerName = peer?.displayName || "Unknown"
+        
+        if (articles.length === 0) {
+            reject(new Error("No articles to send"))
+            return
+        }
+        
         const messageId = generateMessageId()
         const message: P2PMessage = {
-            type: "article-link",
+            type: "article-link-batch",
             senderId: localPeerId,
             roomCode: activeRoomCode || "",
             displayName: localDisplayName,
-            title,
-            url,
-            feedName,
+            articles,
             messageId,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            senderName: localDisplayName
         }
         
         const sent = sendToPeer(peerId, message)
         if (!sent) {
-            reject(new Error("Failed to send message"))
+            // Peer not connected - queue if requested
+            if (queueOnFailure) {
+                for (const article of articles) {
+                    try {
+                        addPendingShare(peerId, peerName, article.url, article.title, article.feedName, article.feedUrl, article.feedIconUrl)
+                        console.log(`[P2P-LAN] Queued share for offline peer ${peerName}: ${article.title}`)
+                    } catch (err) {
+                        console.error(`[P2P-LAN] Failed to queue share:`, err)
+                    }
+                }
+                notifyPendingSharesChanged()
+            }
+            reject(new Error("Peer not connected"))
             return
         }
         
         // Track pending ACK
+        const firstArticle = articles[0]
         pendingAcks.set(messageId, {
             timestamp: Date.now(),
             peerId,
+            peerName,
+            url: firstArticle.url,
+            title: articles.length === 1 ? firstArticle.title : `Batch of ${articles.length} articles`,
+            feedName: firstArticle.feedName,
+            feedUrl: firstArticle.feedUrl,
+            feedIconUrl: firstArticle.feedIconUrl,
             message,
             onSuccess: () => resolve(true),
             onFailure: () => reject(new Error("ACK timeout"))
@@ -301,6 +361,20 @@ export function sendArticleLinkWithAck(
             if (pending) {
                 pendingAcks.delete(messageId)
                 console.log(`[P2P-LAN] ACK timeout for message ${messageId}`)
+                
+                // Queue the failed articles if requested
+                if (queueOnFailure) {
+                    for (const article of articles) {
+                        try {
+                            addPendingShare(peerId, pending.peerName, article.url, article.title, article.feedName, article.feedUrl, article.feedIconUrl)
+                            console.log(`[P2P-LAN] Queued share after timeout: ${article.title}`)
+                        } catch (err) {
+                            console.error(`[P2P-LAN] Failed to queue share:`, err)
+                        }
+                    }
+                    notifyPendingSharesChanged()
+                }
+                
                 pending.onFailure?.()
             }
         }, ACK_TIMEOUT)
@@ -308,24 +382,53 @@ export function sendArticleLinkWithAck(
 }
 
 /**
+ * Send article link and queue on failure
+ * Convenience wrapper that always queues on failure
+ */
+export async function sendArticleLinkWithQueue(
+    peerId: string,
+    title: string,
+    url: string,
+    feedName?: string,
+    feedUrl?: string,
+    feedIconUrl?: string
+): Promise<{ success: boolean, queued: boolean, error?: string }> {
+    try {
+        await sendArticlesWithAck(peerId, [{ url, title, feedName, feedUrl, feedIconUrl }], true)
+        return { success: true, queued: false }
+    } catch (err) {
+        // Message was queued on failure
+        return { 
+            success: false, 
+            queued: true,
+            error: err instanceof Error ? err.message : "Unknown error" 
+        }
+    }
+}
+
+/**
  * Send article link to all peers with acknowledgement tracking
  * Returns results for each peer
  */
-export async function broadcastArticleLinkWithAck(
-    title: string,
-    url: string,
-    feedName?: string
+export async function broadcastArticlesWithAck(
+    articles: Array<{
+        url: string
+        title: string
+        feedName?: string
+        feedUrl?: string
+        feedIconUrl?: string
+    }>
 ): Promise<Map<string, { success: boolean, error?: string }>> {
     const results = new Map<string, { success: boolean, error?: string }>()
     
-    console.log(`[P2P-LAN] broadcastArticleLinkWithAck called, connectedPeers.size: ${connectedPeers.size}`)
+    console.log(`[P2P-LAN] broadcastArticlesWithAck called, connectedPeers.size: ${connectedPeers.size}`)
     for (const [peerId, peer] of connectedPeers) {
         console.log(`[P2P-LAN]   - Peer: ${peer.displayName} (${peerId})`)
     }
     
     const promises = Array.from(connectedPeers.keys()).map(async (peerId) => {
         try {
-            await sendArticleLinkWithAck(peerId, title, url, feedName)
+            await sendArticlesWithAck(peerId, articles)
             results.set(peerId, { success: true })
         } catch (err) {
             results.set(peerId, { 
@@ -336,8 +439,75 @@ export async function broadcastArticleLinkWithAck(
     })
     
     await Promise.all(promises)
-    console.log(`[P2P-LAN] broadcastArticleLinkWithAck results:`, Array.from(results.entries()))
+    console.log(`[P2P-LAN] broadcastArticlesWithAck results:`, Array.from(results.entries()))
     return results
+}
+
+/**
+ * Process pending shares queue for a specific peer
+ * Called when peer reconnects
+ * 
+ * Sends all pending shares as a single batch message.
+ * The receiver will see them as a batch (multiple articles → notification bell).
+ */
+async function processPendingSharesForPeer(peerId: string, peerName: string): Promise<void> {
+    try {
+        const pendingShares = getPendingSharesForPeer(peerId)
+        if (pendingShares.length === 0) return
+        
+        console.log(`[P2P-LAN] Processing ${pendingShares.length} pending shares for ${peerName}`)
+        
+        // Build articles array for batch send
+        const articles = pendingShares.map(share => ({
+            url: share.url,
+            title: share.title,
+            feedName: share.feedName || undefined,
+            feedUrl: share.feedUrl || undefined,
+            feedIconUrl: share.feedIconUrl || undefined
+        }))
+        
+        try {
+            // Send all articles (uses the unified sendArticlesWithAck)
+            await sendArticlesWithAck(peerId, articles)
+            
+            // Success - remove all from queue
+            for (const share of pendingShares) {
+                removePendingShare(share.id)
+            }
+            console.log(`[P2P-LAN] Successfully sent batch of ${articles.length} queued shares to ${peerName}`)
+        } catch (err) {
+            // Batch failed - increment attempts for all
+            for (const share of pendingShares) {
+                incrementPendingShareAttempts(share.id)
+                
+                // If too many attempts, give up
+                if (share.attempts >= 5) {
+                    console.log(`[P2P-LAN] Giving up on share after ${share.attempts + 1} attempts: ${share.title}`)
+                    removePendingShare(share.id)
+                }
+            }
+            console.log(`[P2P-LAN] Failed to send batch to ${peerName}:`, err)
+        }
+        
+        notifyPendingSharesChanged()
+    } catch (err) {
+        console.error(`[P2P-LAN] Error processing pending shares:`, err)
+    }
+}
+
+/**
+ * Notify renderer about pending shares changes
+ */
+function notifyPendingSharesChanged(): void {
+    const mainWindow = getMainWindow()
+    if (!mainWindow) return
+    
+    try {
+        const counts = getPendingShareCounts()
+        mainWindow.webContents.send("p2p:pendingSharesChanged", counts)
+    } catch (err) {
+        console.error(`[P2P-LAN] Error notifying pending shares:`, err)
+    }
 }
 
 /**
@@ -647,6 +817,9 @@ function handleIncomingConnection(socket: net.Socket): void {
                     }) + "\n")
                     
                     notifyConnectionState()
+                    
+                    // Process any pending shares for this peer
+                    processPendingSharesForPeer(peerId, displayName)
                 } else if (peerId) {
                     handlePeerMessage(peerId, msg)
                 }
@@ -715,6 +888,9 @@ function connectToPeer(peerId: string, address: string, port: number, displayNam
                     
                     console.log(`[P2P-LAN] Handshake complete with ${displayName}`)
                     notifyConnectionState()
+                    
+                    // Process any pending shares for this peer
+                    processPendingSharesForPeer(peerId, displayName)
                 } else if (handshakeComplete) {
                     handlePeerMessage(peerId, msg)
                 }
@@ -752,9 +928,39 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
     }
     
     switch (msg.type) {
-        case "article-link":
-            if (msg.url && msg.title) {
-                notifyArticleReceived(peerId, peer.displayName, msg.url, msg.title, msg.timestamp)
+        case "article-link-batch":
+            // Unified handler for all article shares (1 or more)
+            if (msg.articles && msg.articles.length > 0) {
+                console.log(`[P2P-LAN] Received ${msg.articles.length} article(s) from ${peer.displayName}`)
+                
+                if (msg.articles.length === 1) {
+                    // Single article - show dialog
+                    const a = msg.articles[0]
+                    notifyArticleReceived(
+                        peerId,
+                        peer.displayName,
+                        a.url,
+                        a.title,
+                        msg.timestamp,
+                        a.feedName,
+                        a.feedUrl,
+                        a.feedIconUrl
+                    )
+                } else {
+                    // Multiple articles - send to batch handler (goes to bell, no dialogs)
+                    notifyArticlesReceivedBatch(
+                        peerId,
+                        peer.displayName,
+                        msg.articles.map(a => ({
+                            url: a.url,
+                            title: a.title,
+                            timestamp: msg.timestamp,
+                            feedName: a.feedName,
+                            feedUrl: a.feedUrl,
+                            feedIconUrl: a.feedIconUrl
+                        }))
+                    )
+                }
                 
                 // Send ACK back to sender
                 if (msg.messageId) {
@@ -763,7 +969,9 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
                         senderId: localPeerId,
                         roomCode: activeRoomCode || "",
                         displayName: localDisplayName,
-                        ackId: msg.messageId
+                        ackId: msg.messageId,
+                        senderName: localDisplayName,
+                        timestamp: Date.now()
                     })
                 }
             }
@@ -846,7 +1054,16 @@ function notifyPeerDisconnected(peerId: string, displayName: string, reason: str
     })
 }
 
-function notifyArticleReceived(peerId: string, peerName: string, url: string, title: string, timestamp: number): void {
+function notifyArticleReceived(
+    peerId: string, 
+    peerName: string, 
+    url: string, 
+    title: string, 
+    timestamp: number,
+    feedName?: string,
+    feedUrl?: string,
+    feedIconUrl?: string
+): void {
     const mainWindow = getMainWindow()
     if (!mainWindow) return
     
@@ -855,7 +1072,38 @@ function notifyArticleReceived(peerId: string, peerName: string, url: string, ti
         peerName,
         url,
         title,
-        timestamp
+        timestamp,
+        feedName,
+        feedUrl,
+        feedIconUrl
+    })
+}
+
+/**
+ * Notify renderer about multiple articles received at once (e.g., from pending queue)
+ * This should go directly to notification bell without showing individual dialogs
+ */
+function notifyArticlesReceivedBatch(
+    peerId: string,
+    peerName: string,
+    articles: Array<{
+        url: string
+        title: string
+        timestamp: number
+        feedName?: string
+        feedUrl?: string
+        feedIconUrl?: string
+    }>
+): void {
+    const mainWindow = getMainWindow()
+    if (!mainWindow) return
+    
+    console.log(`[P2P-LAN] Sending batch of ${articles.length} articles from ${peerName}`)
+    mainWindow.webContents.send("p2p:articlesReceivedBatch", {
+        peerId,
+        peerName,
+        articles,
+        count: articles.length
     })
 }
 
@@ -900,9 +1148,9 @@ export function registerP2PLanIpcHandlers(): void {
         return sendToPeer(peerId, message)
     })
     
-    ipcMain.handle("p2p-lan:sendArticleLinkWithAck", async (_, peerId: string, title: string, url: string, feedName?: string) => {
+    ipcMain.handle("p2p-lan:sendArticlesWithAck", async (_, peerId: string, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>) => {
         try {
-            await sendArticleLinkWithAck(peerId, title, url, feedName)
+            await sendArticlesWithAck(peerId, articles)
             return { success: true }
         } catch (err) {
             return { 
@@ -912,8 +1160,12 @@ export function registerP2PLanIpcHandlers(): void {
         }
     })
     
-    ipcMain.handle("p2p-lan:broadcastArticleLinkWithAck", async (_, title: string, url: string, feedName?: string) => {
-        const results = await broadcastArticleLinkWithAck(title, url, feedName)
+    ipcMain.handle("p2p-lan:sendArticleLinkWithQueue", async (_, peerId: string, title: string, url: string, feedName?: string, feedUrl?: string, feedIconUrl?: string) => {
+        return await sendArticleLinkWithQueue(peerId, title, url, feedName, feedUrl, feedIconUrl)
+    })
+    
+    ipcMain.handle("p2p-lan:broadcastArticlesWithAck", async (_, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>) => {
+        const results = await broadcastArticlesWithAck(articles)
         // Convert Map to object for IPC
         const resultObj: Record<string, { success: boolean, error?: string }> = {}
         for (const [peerId, result] of results) {
@@ -928,6 +1180,45 @@ export function registerP2PLanIpcHandlers(): void {
             senderName: localDisplayName,
             timestamp: Date.now()
         })
+    })
+    
+    // Pending shares queue handlers
+    ipcMain.handle("p2p-lan:getPendingShareCounts", () => {
+        try {
+            return getPendingShareCounts()
+        } catch (err) {
+            console.error("[P2P-LAN] Error getting pending share counts:", err)
+            return {}
+        }
+    })
+    
+    ipcMain.handle("p2p-lan:getAllPendingShares", () => {
+        try {
+            return getAllPendingShares()
+        } catch (err) {
+            console.error("[P2P-LAN] Error getting all pending shares:", err)
+            return []
+        }
+    })
+    
+    ipcMain.handle("p2p-lan:removePendingShare", (_, id: number) => {
+        try {
+            removePendingShare(id)
+            notifyPendingSharesChanged()
+            return { success: true }
+        } catch (err) {
+            return { success: false, error: err instanceof Error ? err.message : "Unknown error" }
+        }
+    })
+    
+    ipcMain.handle("p2p-lan:clearOldPendingShares", (_, maxAgeDays?: number) => {
+        try {
+            const removed = removeOldPendingShares(maxAgeDays)
+            notifyPendingSharesChanged()
+            return { success: true, removed }
+        } catch (err) {
+            return { success: false, error: err instanceof Error ? err.message : "Unknown error" }
+        }
     })
     
     console.log("[P2P-LAN] IPC handlers registered")

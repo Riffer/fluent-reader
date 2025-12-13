@@ -20,6 +20,48 @@ import {
 } from "@fluentui/react"
 
 /**
+ * Play a subtle notification sound when articles are added to the bell
+ */
+function playNotificationSound(): void {
+    try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+        
+        // Create a pleasant two-tone "ding" sound
+        const oscillator1 = audioContext.createOscillator()
+        const oscillator2 = audioContext.createOscillator()
+        const gainNode = audioContext.createGain()
+        
+        oscillator1.connect(gainNode)
+        oscillator2.connect(gainNode)
+        gainNode.connect(audioContext.destination)
+        
+        // First tone: E5 (659 Hz)
+        oscillator1.frequency.setValueAtTime(659, audioContext.currentTime)
+        oscillator1.type = "sine"
+        
+        // Second tone: G5 (784 Hz) - slightly delayed
+        oscillator2.frequency.setValueAtTime(784, audioContext.currentTime + 0.1)
+        oscillator2.type = "sine"
+        
+        // Fade in and out
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime)
+        gainNode.gain.linearRampToValueAtTime(0.15, audioContext.currentTime + 0.05)
+        gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.3)
+        
+        oscillator1.start(audioContext.currentTime)
+        oscillator1.stop(audioContext.currentTime + 0.15)
+        
+        oscillator2.start(audioContext.currentTime + 0.1)
+        oscillator2.stop(audioContext.currentTime + 0.3)
+        
+        // Clean up
+        setTimeout(() => audioContext.close(), 500)
+    } catch (err) {
+        console.log("[P2P Notification] Could not play notification sound:", err)
+    }
+}
+
+/**
  * Decode HTML entities in a string (e.g., &#x2019; -> ')
  */
 function decodeHtmlEntities(text: string): string {
@@ -72,6 +114,7 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
                 // Add to log instead of showing dialog
                 console.log("[P2P Notification] Collecting link in log")
                 addToLog(article.title, article.url, article.peerName)
+                playNotificationSound()
                 return
             }
             
@@ -87,9 +130,27 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
             })
         })
         
+        // Register batch listener - batch articles always go directly to log
+        const unsubscribeBatch = window.p2pLan.onArticlesReceivedBatch((data) => {
+            console.log(`[P2P Notification] Batch received: ${data.count} articles from ${data.peerName}`)
+            
+            // Add all articles to log
+            for (const article of data.articles) {
+                addToLog(article.title, article.url, data.peerName)
+            }
+            
+            // Play notification sound for batch
+            playNotificationSound()
+            
+            // Show a brief notification that multiple articles were received
+            // (could be a toast notification in the future)
+            console.log(`[P2P Notification] Added ${data.count} articles from ${data.peerName} to notification bell`)
+        })
+        
         return () => {
-            console.log("[P2P Notification] Unregistering article listener")
+            console.log("[P2P Notification] Unregistering article listeners")
             unsubscribe()
+            unsubscribeBatch()
             listenerRegistered.current = false
         }
     }, [addToLog]) // addToLog is stable from mapDispatchToProps

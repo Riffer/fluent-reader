@@ -301,6 +301,51 @@ Die Entfernung sollte erst nach mehreren Releases und ausreichend Nutzer-Feedbac
 
 ---
 
+## SQLite Migration robuster gestalten
+
+**Status:** Idee
+
+**Problem:**
+Die aktuelle Migration stützt sich ausschließlich auf das `useLovefield` Flag in der Config. Das kann zu Problemen führen wenn:
+- Das Flag manuell geändert wurde
+- Die Config beschädigt/gelöscht wurde
+- Ein Nutzer die App auf einem neuen Rechner startet aber die SQLite-DB bereits kopiert hat
+
+**Anforderung:**
+Zusätzlich zur Flag-Prüfung sollte auch geprüft werden, ob die SQLite-Datenbank bereits Daten enthält.
+
+**Mögliche Umsetzung:**
+```typescript
+// Vor Migration prüfen:
+// 1. useLovefield Flag in Config
+// 2. SQLite-DB existiert UND hat Daten (sources.count > 0)
+
+function shouldMigrate(): boolean {
+    const useLovefield = settings.getUseLovefield()
+    
+    // Wenn Flag false, nutze SQLite (keine Migration nötig)
+    if (!useLovefield) return false
+    
+    // Wenn SQLite-DB bereits Daten hat, überspringe Migration
+    const sqliteHasData = db.getSourceCount() > 0
+    if (sqliteHasData) {
+        console.log("[Migration] SQLite already has data, skipping migration")
+        settings.setUseLovefield(false)
+        return false
+    }
+    
+    // Flag ist true und SQLite ist leer → Migration durchführen
+    return true
+}
+```
+
+**Vorteile:**
+- Robuster gegen Config-Probleme
+- Verhindert versehentliche Doppel-Migration
+- Unterstützt Szenarien wie DB-Kopie zwischen Rechnern
+
+---
+
 ## Persistente Cookie-Speicherung pro Feed
 
 **Status:** ✅ Implementiert (v1.1.7)

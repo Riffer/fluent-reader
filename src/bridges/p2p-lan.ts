@@ -32,16 +32,41 @@ export interface P2PStatus {
 
 // Internal callback storage (contextBridge can't pass functions directly)
 type ConnectionCallback = (status: P2PStatus) => void
-type ArticleCallback = (data: { peerId: string; peerName: string; url: string; title: string; timestamp: number }) => void
+type ArticleCallback = (data: { 
+    peerId: string
+    peerName: string
+    url: string
+    title: string
+    timestamp: number
+    feedName?: string
+    feedUrl?: string
+    feedIconUrl?: string
+}) => void
+type ArticleBatchCallback = (data: {
+    peerId: string
+    peerName: string
+    count: number
+    articles: Array<{
+        url: string
+        title: string
+        timestamp: number
+        feedName?: string
+        feedUrl?: string
+        feedIconUrl?: string
+    }>
+}) => void
 type EchoCallback = (data: { peerId: string; originalTimestamp: number; returnedAt: number; roundTripMs: number }) => void
 type PeerDisconnectedCallback = (data: { peerId: string; displayName: string; reason: string }) => void
+type PendingSharesCallback = (counts: Record<string, { count: number; peerName: string }>) => void
 
 // Use Maps with unique IDs so components can unsubscribe individually
 let nextCallbackId = 0
 const connectionCallbacks = new Map<number, ConnectionCallback>()
 const articleCallbacks = new Map<number, ArticleCallback>()
+const articleBatchCallbacks = new Map<number, ArticleBatchCallback>()
 const echoCallbacks = new Map<number, EchoCallback>()
 const peerDisconnectedCallbacks = new Map<number, PeerDisconnectedCallback>()
+const pendingSharesCallbacks = new Map<number, PendingSharesCallback>()
 
 // Register IPC listeners once at module load
 ipcRenderer.on("p2p:connectionStateChanged", (_, status: P2PStatus) => {
@@ -68,6 +93,20 @@ ipcRenderer.on("p2p:echoResponse", (_, data) => {
 ipcRenderer.on("p2p:peerDisconnected", (_, data) => {
     console.log("[P2P-LAN Bridge] Peer disconnected:", data, "callbacks:", peerDisconnectedCallbacks.size)
     peerDisconnectedCallbacks.forEach((cb, id) => {
+        try { cb(data) } catch (e) { console.error("[P2P-LAN Bridge] Callback error:", e) }
+    })
+})
+
+ipcRenderer.on("p2p:pendingSharesChanged", (_, counts) => {
+    console.log("[P2P-LAN Bridge] Pending shares changed:", counts, "callbacks:", pendingSharesCallbacks.size)
+    pendingSharesCallbacks.forEach((cb, id) => {
+        try { cb(counts) } catch (e) { console.error("[P2P-LAN Bridge] Callback error:", e) }
+    })
+})
+
+ipcRenderer.on("p2p:articlesReceivedBatch", (_, data) => {
+    console.log("[P2P-LAN Bridge] Articles batch received:", data, "callbacks:", articleBatchCallbacks.size)
+    articleBatchCallbacks.forEach((cb, id) => {
         try { cb(data) } catch (e) { console.error("[P2P-LAN Bridge] Callback error:", e) }
     })
 })
@@ -105,22 +144,67 @@ export const p2pLanBridge = {
         ipcRenderer.invoke("p2p-lan:sendToPeer", peerId, message),
     
     /**
-     * Send an article link with delivery acknowledgement to a specific peer
+     * Send articles with delivery acknowledgement to a specific peer
+     * Always uses array format - single article is just an array with 1 element
      */
-    sendArticleLinkWithAck: (peerId: string, title: string, url: string, feedName?: string): Promise<{ success: boolean, error?: string }> =>
-        ipcRenderer.invoke("p2p-lan:sendArticleLinkWithAck", peerId, title, url, feedName),
+    sendArticlesWithAck: (peerId: string, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>): Promise<{ success: boolean, error?: string }> =>
+        ipcRenderer.invoke("p2p-lan:sendArticlesWithAck", peerId, articles),
     
     /**
-     * Broadcast an article link to all peers with delivery acknowledgement
+     * Broadcast articles to all peers with delivery acknowledgement
      */
-    broadcastArticleLinkWithAck: (title: string, url: string, feedName?: string): Promise<Record<string, { success: boolean, error?: string }>> =>
-        ipcRenderer.invoke("p2p-lan:broadcastArticleLinkWithAck", title, url, feedName),
+    broadcastArticlesWithAck: (articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>): Promise<Record<string, { success: boolean, error?: string }>> =>
+        ipcRenderer.invoke("p2p-lan:broadcastArticlesWithAck", articles),
+    
+    /**
+     * Send an article link with automatic queueing if delivery fails
+     */
+    sendArticleLinkWithQueue: (peerId: string, title: string, url: string, feedName?: string, feedUrl?: string, feedIconUrl?: string): Promise<{ success: boolean, queued: boolean, error?: string }> =>
+        ipcRenderer.invoke("p2p-lan:sendArticleLinkWithQueue", peerId, title, url, feedName, feedUrl, feedIconUrl),
     
     /**
      * Send an echo request to test connection latency
      */
     sendEcho: (peerId: string): Promise<boolean> =>
         ipcRenderer.invoke("p2p-lan:sendEcho", peerId),
+    
+    // =========================================================================
+    // Pending Shares Queue
+    // =========================================================================
+    
+    /**
+     * Get pending share counts per peer
+     */
+    getPendingShareCounts: (): Promise<Record<string, { count: number; peerName: string }>> =>
+        ipcRenderer.invoke("p2p-lan:getPendingShareCounts"),
+    
+    /**
+     * Get all pending shares
+     */
+    getAllPendingShares: (): Promise<Array<{
+        id: number
+        peerId: string
+        peerName: string
+        url: string
+        title: string
+        feedName: string | null
+        createdAt: string
+        attempts: number
+        lastAttempt: string | null
+    }>> =>
+        ipcRenderer.invoke("p2p-lan:getAllPendingShares"),
+    
+    /**
+     * Remove a pending share from the queue
+     */
+    removePendingShare: (id: number): Promise<{ success: boolean; error?: string }> =>
+        ipcRenderer.invoke("p2p-lan:removePendingShare", id),
+    
+    /**
+     * Clear old pending shares (older than maxAgeDays, default 7)
+     */
+    clearOldPendingShares: (maxAgeDays?: number): Promise<{ success: boolean; removed?: number; error?: string }> =>
+        ipcRenderer.invoke("p2p-lan:clearOldPendingShares", maxAgeDays),
     
     /**
      * Share an article link with all connected peers
@@ -167,6 +251,21 @@ export const p2pLanBridge = {
     },
     
     /**
+     * Called when multiple articles are received at once (e.g., from pending queue)
+     * These should go directly to notification bell without showing individual dialogs
+     * Returns an unsubscribe function
+     */
+    onArticlesReceivedBatch: (callback: ArticleBatchCallback): (() => void) => {
+        const id = nextCallbackId++
+        articleBatchCallbacks.set(id, callback)
+        console.log("[P2P-LAN Bridge] Article batch callback registered, id:", id, "total:", articleBatchCallbacks.size)
+        return () => {
+            articleBatchCallbacks.delete(id)
+            console.log("[P2P-LAN Bridge] Article batch callback removed, id:", id, "total:", articleBatchCallbacks.size)
+        }
+    },
+    
+    /**
      * Called when an echo response is received
      * Returns an unsubscribe function
      */
@@ -195,13 +294,29 @@ export const p2pLanBridge = {
     },
     
     /**
+     * Called when pending shares queue changes (share queued, sent, or removed)
+     * Returns an unsubscribe function
+     */
+    onPendingSharesChanged: (callback: PendingSharesCallback): (() => void) => {
+        const id = nextCallbackId++
+        pendingSharesCallbacks.set(id, callback)
+        console.log("[P2P-LAN Bridge] Pending shares callback registered, id:", id, "total:", pendingSharesCallbacks.size)
+        return () => {
+            pendingSharesCallbacks.delete(id)
+            console.log("[P2P-LAN Bridge] Pending shares callback removed, id:", id, "total:", pendingSharesCallbacks.size)
+        }
+    },
+    
+    /**
      * Remove all event callbacks (use sparingly - prefer individual unsubscribe)
      */
     removeAllListeners: () => {
         connectionCallbacks.clear()
         articleCallbacks.clear()
+        articleBatchCallbacks.clear()
         echoCallbacks.clear()
         peerDisconnectedCallbacks.clear()
+        pendingSharesCallbacks.clear()
         console.log("[P2P-LAN Bridge] All callbacks removed")
     }
 }
