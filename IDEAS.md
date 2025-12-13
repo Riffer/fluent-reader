@@ -109,6 +109,30 @@ Aktuell wird nur der Artikel-Link und Titel übermittelt, aber nicht der Anzeige
 - [ ] Empfänger-UI: "Öffnen im empfohlenen Modus" vs. "Standard-Modus verwenden"
 - [ ] Fallback wenn Modus nicht unterstützt wird
 
+#### 6. System-Events nutzen (Sleep/Resume)
+
+**Problem:**
+Wenn das System in Sleep/Hibernate geht, erfahren die Peers davon erst durch den 30s Heartbeat-Timeout. Beim Aufwachen dauert es bis zu 10s bis der nächste Heartbeat gesendet wird.
+
+**Anforderung:**
+- Bei `suspend`: Goodbye an Peers senden (sofortige Offline-Erkennung)
+- Bei `resume`: Sofort wieder aktiv werden (Discovery, Heartbeat, Pending Shares)
+- **Bonus**: Beim Aufwachen auch Feed-Aktualisierung triggern (je nach Einstellung)
+
+**Umsetzung:**
+- [ ] `powerMonitor.on("suspend")` → `shutdownP2P()` aufrufen (Goodbye senden)
+- [ ] `powerMonitor.on("resume")` → Sofort UDP-Discovery und Heartbeat senden
+- [ ] `powerMonitor.on("resume")` → Pending Shares für wieder erreichbare Peers verarbeiten
+- [ ] Optional: Feed-Refresh bei Resume (wenn Auto-Refresh aktiviert ist)
+- [ ] Beachten: Bei `suspend` ist die Zeit sehr knapp (wenige ms)
+
+**Electron API:**
+```typescript
+import { powerMonitor } from "electron"
+powerMonitor.on("suspend", () => { /* System geht schlafen */ })
+powerMonitor.on("resume", () => { /* System ist aufgewacht */ })
+```
+
 ---
 
 ## Upstream-Contribution Strategie
