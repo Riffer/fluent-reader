@@ -49,7 +49,7 @@ interface DiscoveryMessage {
 }
 
 interface P2PMessage {
-    type: "article-link-batch" | "article-ack" | "heartbeat" | "heartbeat-ack" | "echo-request" | "echo-response"
+    type: "article-link-batch" | "article-ack" | "heartbeat" | "heartbeat-ack" | "echo-request" | "echo-response" | "goodbye"
     messageId?: string
     senderName: string
     timestamp: number
@@ -198,9 +198,24 @@ export async function joinRoom(roomCode: string, displayName: string, saveToStor
 /**
  * Leave the current room
  * @param clearStore - Whether to clear the stored room (default: true)
+ * @param sendGoodbye - Whether to send goodbye message to peers (default: true)
  */
-export async function leaveRoom(clearStore: boolean = true): Promise<void> {
+export async function leaveRoom(clearStore: boolean = true, sendGoodbye: boolean = true): Promise<void> {
     console.log("[P2P-LAN] Leaving room")
+    
+    // Send goodbye to all connected peers before closing connections
+    if (sendGoodbye && connectedPeers.size > 0) {
+        const goodbyeMsg: P2PMessage = {
+            type: "goodbye",
+            senderName: localDisplayName,
+            timestamp: Date.now()
+        }
+        broadcast(goodbyeMsg)
+        console.log(`[P2P-LAN] Sent goodbye to ${connectedPeers.size} peer(s)`)
+        
+        // Small delay to ensure message is sent before closing sockets
+        await new Promise(resolve => setTimeout(resolve, 100))
+    }
     
     // Clear stored room if requested
     if (clearStore) {
@@ -240,6 +255,16 @@ export async function leaveRoom(clearStore: boolean = true): Promise<void> {
     
     activeRoomCode = null
     notifyConnectionState()
+}
+
+/**
+ * Shutdown P2P gracefully when app is closing
+ * Sends goodbye to peers but keeps the room stored for next startup
+ */
+export async function shutdownP2P(): Promise<void> {
+    console.log("[P2P-LAN] Shutting down P2P (app closing)")
+    // Don't clear stored room (false), but do send goodbye (true)
+    await leaveRoom(false, true)
 }
 
 /**
@@ -1018,6 +1043,15 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
             
         case "echo-response":
             notifyEchoResponse(peerId, msg.echoData?.originalTimestamp, msg.timestamp)
+            break
+            
+        case "goodbye":
+            // Peer is leaving gracefully - remove from connected peers
+            console.log(`[P2P-LAN] Received goodbye from ${peer.displayName}`)
+            connectedPeers.delete(peerId)
+            discoveredPeers.delete(peerId)
+            notifyPeerDisconnected(peerId, peer.displayName, "Peer left the room")
+            notifyPeersChanged()
             break
     }
 }

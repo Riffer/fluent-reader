@@ -4,7 +4,7 @@ import { store } from "./main/settings"
 import performUpdate from "./main/update-scripts"
 import { WindowManager } from "./main/window"
 import { initP2P, registerP2PIpcHandlers } from "./main/p2p-share"
-import { initP2PLan, registerP2PLanIpcHandlers } from "./main/p2p-lan"
+import { initP2PLan, registerP2PLanIpcHandlers, shutdownP2P } from "./main/p2p-lan"
 
 if (!process.mas) {
     const locked = app.requestSingleInstanceLock()
@@ -129,6 +129,13 @@ if (process.platform === "win32") {
 app.commandLine.appendSwitch("touch-events", "enabled");
 
 console.debug("GPU disabled - using software rendering for stability");
+
+// Gracefully shutdown P2P when app is quitting
+app.on("before-quit", async (event) => {
+    // Send goodbye to P2P peers before quitting
+    // This happens synchronously enough for the message to be sent
+    await shutdownP2P()
+})
 
 app.on("window-all-closed", () => {
     if (winManager.hasWindow()) {
