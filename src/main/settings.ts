@@ -326,15 +326,15 @@ export function addSourceToP2PGroup(sid: number): SourceGroup[] {
     let groupIndex = findP2PGroupIndex()
     
     if (groupIndex === -1) {
-        // Create new P2P group
-        console.log(`[settings] Creating new P2P group: "${P2P_GROUP_NAME}"`)
+        // Create new P2P group at the beginning
+        console.log(`[settings] Creating new P2P group: "${P2P_GROUP_NAME}" (at start)`)
         const newGroup: SourceGroup = {
             isMultiple: true,
             sids: [sid],
             name: P2P_GROUP_NAME,
             expanded: true
         }
-        groups.push(newGroup)
+        groups.unshift(newGroup) // Insert at beginning instead of end
     } else {
         // Add to existing group if not already present
         const group = groups[groupIndex]

@@ -20,7 +20,8 @@ import {
 } from "./item"
 import { saveSettings } from "./app"
 import { SourceRule } from "./rule"
-import { fixBrokenGroups } from "./group"
+import { fixBrokenGroups, setGroupsFromP2P } from "./group"
+import { SourceGroup } from "../../schema-types"
 
 export enum SourceOpenTarget {
     Local,
@@ -613,6 +614,21 @@ export function handleP2PFeedsChanged(
                 itemState: itemState,
             })
             console.log(`[P2P] Added ${itemsToAdd.length} new articles to Redux state`)
+        }
+        
+        // Update groups from P2P sync if provided
+        if (groupsUpdated && groups && groups.length > 0) {
+            // Convert plain objects to SourceGroup instances
+            // Important: Preserve isMultiple from original data, don't rely on constructor
+            const sourceGroups: SourceGroup[] = groups.map(g => {
+                const sg = new SourceGroup(g.sids, g.name)
+                sg.isMultiple = g.isMultiple  // Preserve original isMultiple flag
+                sg.expanded = g.expanded ?? true
+                if (g.name) sg.name = g.name  // Ensure name is preserved for single-item groups
+                return sg
+            })
+            dispatch(setGroupsFromP2P(sourceGroups))
+            console.log(`[P2P] Updated groups from P2P sync: ${sourceGroups.length} groups`)
         }
         
         // Update unread counts for affected sources
