@@ -71,6 +71,8 @@ const mapStateToProps = createSelector(
                     type: context.type,
                     event: context.event,
                     sids: context.target,
+                    sources: sources,
+                    groups: groups,
                 }
             case ContextMenuType.Image:
                 return {

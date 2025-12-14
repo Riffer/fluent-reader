@@ -251,39 +251,7 @@ export class ContextMenu extends React.Component<ContextMenuProps, ContextMenuSt
         
         // Check if this is a P2P feed (has the special serviceRef)
         if (source.serviceRef === P2P_SHARED_SERVICE_REF) {
-            // Convert the existing P2P feed to an active feed
-            try {
-                // 1. Convert to active feed in DB (remove serviceRef)
-                await window.db.p2pFeeds.convertToActive(sid)
-                
-                // 2. Update Redux sources state (remove serviceRef from the source object)
-                if (this.props.updateSourceState) {
-                    const updatedSource: RSSSource = {
-                        ...source,
-                        serviceRef: undefined, // Remove P2P serviceRef
-                    }
-                    this.props.updateSourceState(updatedSource)
-                }
-                
-                // 3. Remove from P2P group via Redux (this updates both UI and config.json)
-                const P2P_GROUP_NAME = "P2P Geteilt"
-                if (groups && this.props.removeFromGroup) {
-                    const p2pGroupIndex = groups.findIndex(
-                        g => g.isMultiple && g.name === P2P_GROUP_NAME
-                    )
-                    if (p2pGroupIndex !== -1) {
-                        const p2pGroup = groups[p2pGroupIndex]
-                        if (p2pGroup.sids.includes(sid)) {
-                            this.props.removeFromGroup(p2pGroupIndex, [sid])
-                        }
-                    }
-                }
-                
-                // Update local state to reflect the change
-                this.setState({ feedSubscribed: true })
-            } catch (err) {
-                console.error("[ContextMenu] Failed to convert P2P feed:", err)
-            }
+            await this.convertP2PFeedToActive(source, groups)
         } else {
             // Regular feed subscription via Redux
             if (this.props.subscribeFeed) {
@@ -292,6 +260,65 @@ export class ContextMenu extends React.Component<ContextMenuProps, ContextMenuSt
         }
         
         this.props.close()
+    }
+    
+    // Handler for subscribing from Group context menu (works with sids prop)
+    handleSubscribeFeedFromGroup = async (sid: number) => {
+        if (!this.props.sources) return
+        
+        const source = this.props.sources[sid]
+        if (!source) return
+        
+        // Capture values before async
+        const sourceCopy = { ...source }
+        const groups = this.props.groups ? [...this.props.groups] : undefined
+        
+        if (sourceCopy.serviceRef === P2P_SHARED_SERVICE_REF) {
+            await this.convertP2PFeedToActive(sourceCopy, groups)
+        }
+        
+        this.props.close()
+    }
+    
+    // Shared logic for converting a P2P feed to an active feed
+    convertP2PFeedToActive = async (source: RSSSource, groups: SourceGroup[] | undefined) => {
+        const sid = source.sid
+        
+        try {
+            // 1. Convert to active feed in DB (remove serviceRef)
+            await window.db.p2pFeeds.convertToActive(sid)
+            
+            // 2. Update Redux sources state (remove serviceRef from the source object)
+            if (this.props.updateSourceState) {
+                const updatedSource: RSSSource = {
+                    ...source,
+                    serviceRef: undefined, // Remove P2P serviceRef
+                }
+                this.props.updateSourceState(updatedSource)
+            }
+            
+            // 3. Remove from P2P group via Redux (this updates both UI and config.json)
+            const P2P_GROUP_NAME = "P2P Geteilt"
+            if (groups && this.props.removeFromGroup) {
+                const p2pGroupIndex = groups.findIndex(
+                    g => g.isMultiple && g.name === P2P_GROUP_NAME
+                )
+                if (p2pGroupIndex !== -1) {
+                    const p2pGroup = groups[p2pGroupIndex]
+                    if (p2pGroup.sids.includes(sid)) {
+                        this.props.removeFromGroup(p2pGroupIndex, [sid])
+                    }
+                }
+            }
+            
+            // 4. Fetch items to refresh the feed with new articles
+            this.props.fetchItems([sid])
+            
+            // Update local state to reflect the change
+            this.setState({ feedSubscribed: true })
+        } catch (err) {
+            console.error("[ContextMenu] Failed to convert P2P feed:", err)
+        }
     }
 
     getShareSubmenuItems = (): IContextualMenuItem[] => {
@@ -463,41 +490,13 @@ export class ContextMenu extends React.Component<ContextMenuProps, ContextMenuSt
                             navigator.clipboard.writeText(this.props.item.link)
                         },
                     },
-                    {
+                    {   
                         key: "copyTitle",
                         text: intl.get("context.copyTitle"),
                         onClick: () => {
                             window.utils.writeClipboard(this.props.item.title)
                         },
                     },
-                    // Subscribe feed option for P2P articles
-                    ...(this.state.feedSubscribed === false
-                        ? [
-                              {
-                                  key: "divider_subscribe",
-                                  itemType: ContextualMenuItemType.Divider,
-                              },
-                              {
-                                  key: "subscribeFeed",
-                                  text: intl.get("context.subscribeFeed"),
-                                  iconProps: { iconName: "Add" },
-                                  onClick: () => this.handleSubscribeFeed(),
-                              },
-                          ]
-                        : this.state.feedSubscribed === true
-                        ? [
-                              {
-                                  key: "divider_subscribe",
-                                  itemType: ContextualMenuItemType.Divider,
-                              },
-                              {
-                                  key: "feedSubscribed",
-                                  text: intl.get("context.feedSubscribed"),
-                                  iconProps: { iconName: "Accept" },
-                                  disabled: true,
-                              },
-                          ]
-                        : []),
                     ...(this.props.viewConfigs !== undefined
                         ? [
                               {
@@ -831,7 +830,25 @@ export class ContextMenu extends React.Component<ContextMenuProps, ContextMenuSt
                     },
                 ]
             case ContextMenuType.Group:
+                // Check if this is a single P2P feed
+                const isP2PFeed = this.props.sids?.length === 1 && 
+                    this.props.sources && 
+                    this.props.sources[this.props.sids[0]]?.serviceRef === P2P_SHARED_SERVICE_REF
+                
                 return [
+                    // Subscribe option for P2P feeds
+                    ...(isP2PFeed ? [
+                        {
+                            key: "subscribeFeed",
+                            text: intl.get("context.subscribeFeed"),
+                            iconProps: { iconName: "Add" },
+                            onClick: () => this.handleSubscribeFeedFromGroup(this.props.sids[0]),
+                        },
+                        {
+                            key: "divider_subscribe",
+                            itemType: ContextualMenuItemType.Divider,
+                        },
+                    ] : []),
                     {
                         key: "markAllRead",
                         text: intl.get("nav.markAllRead"),
