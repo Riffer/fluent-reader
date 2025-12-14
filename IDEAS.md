@@ -303,6 +303,58 @@ Aktuell kann man Artikel nur über das Artikel-Menü (geöffneter Artikel) via P
 - Konsistent mit anderen Share-Optionen
 - Batch-Sharing möglich (mehrere Artikel auswählen)
 
+#### 8. Feed abonnieren aus P2P-Artikel
+
+**Status:** Idee
+
+**Problem:**
+Wenn ein Artikel via P2P empfangen wird, landet er in der P2P-Gruppe. Der Empfänger hat möglicherweise Interesse, den ursprünglichen Feed zu abonnieren, muss aber derzeit die Feed-URL manuell herausfinden und eingeben.
+
+**Anforderung:**
+- Benutzer soll aus einem P2P-Artikel heraus den Original-Feed abonnieren können
+- Feed-URL ist bereits im P2P-Artikel gespeichert (`feedUrl`)
+- Prüfung ob Feed bereits abonniert ist
+
+**Mögliche Workflows:**
+
+| Option | Beschreibung | Empfehlung |
+|--------|--------------|------------|
+| **A: Im Empfangs-Dialog** | Button "Feed abonnieren" beim Artikel-Empfang | Unterbricht Flow, User will erstmal lesen |
+| **B: Kontext-Menü auf Artikel** ⭐ | Rechtsklick → "Feed abonnieren" | Natürlicher Zeitpunkt nach dem Lesen |
+| **C: P2P-Feed-Übersicht** | Rechtsklick auf P2P-Feed → "Als echten Feed abonnieren" | Nicht artikel-spezifisch |
+| **D: Automatisch** | Vorschlag nach X Artikeln vom gleichen Feed | Kann nerven |
+
+**Empfohlene Umsetzung: Option B + A (klein)**
+
+1. **Kontext-Menü (Hauptweg):**
+   - Im Artikel-Reader: Menü → "Feed abonnieren"
+   - In Artikel-Liste: Rechtsklick → "Feed abonnieren"
+   - Nur sichtbar wenn `feedUrl` vorhanden und Feed nicht bereits abonniert
+
+2. **Empfangs-Dialog (optional, dezent):**
+   - Kleiner Link/Button "Feed abonnieren" unter dem Artikel-Titel
+   - Nicht prominent, da User erstmal lesen will
+
+**Technisch benötigt:**
+- [x] `feedUrl` ist bereits im P2P-Artikel gespeichert ✓
+- [ ] Funktion `isSourceSubscribed(feedUrl)` zur Prüfung
+- [ ] Kontext-Menü erweitern: "Feed abonnieren" (nur für P2P-Artikel mit `feedUrl`)
+- [ ] Bestehende `addSource(feedUrl)` Funktion nutzen
+- [ ] Nach Abo: Optional Artikel in neuen Feed verschieben oder belassen
+
+**UI-Flow:**
+```
+User klickt "Feed abonnieren"
+  → Prüfung: Feed bereits abonniert?
+    → Ja: Hinweis "Du hast diesen Feed bereits abonniert"
+    → Nein: Feed hinzufügen → Erfolgs-Toast "Feed [Name] wurde abonniert"
+```
+
+**Offene Fragen:**
+- Soll der P2P-Artikel nach dem Abo in den "echten" Feed verschoben werden?
+- Oder als Duplikat in beiden Feeds existieren?
+- Empfehlung: Artikel bleibt wo er ist, neue Artikel kommen in den abonnierten Feed
+
 ---
 
 ## Upstream-Contribution Strategie

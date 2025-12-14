@@ -244,11 +244,6 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
                 isBlocking: false,
                 styles: { main: { minWidth: 520, maxWidth: 600 } },
             }}
-            // Prevent focus trap issues when dialog is dismissed during navigation
-            focusTrapZoneProps={{
-                forceFocusInsideTrap: false,
-                isClickableOutsideFocusTrap: true,
-            }}
             minWidth={520}
             maxWidth={600}
         >

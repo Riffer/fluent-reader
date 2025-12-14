@@ -137,6 +137,12 @@ const dbBridge = {
             ipcRenderer.invoke("db:items:query", options || {}),
     },
 
+    // P2P Feed operations
+    p2pFeeds: {
+        convertToActive: (sid: number): Promise<void> =>
+            ipcRenderer.invoke("db:p2pFeeds:convertToActive", sid),
+    },
+
     // Utility operations
     getUnreadCounts: (): Promise<Record<number, number>> => 
         ipcRenderer.invoke("db:getUnreadCounts"),

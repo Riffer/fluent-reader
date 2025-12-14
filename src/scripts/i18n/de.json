@@ -92,7 +92,9 @@
         "caseSensitive": "Groß-/Kleinschreibung beachten",
         "showCover": "Cover anzeigen",
         "showSnippet": "Ausschnitt anzeigen",
-        "fadeRead": "Gelesene Artikel ausblenden"
+        "fadeRead": "Gelesene Artikel ausblenden",
+        "subscribeFeed": "Feed abonnieren",
+        "feedSubscribed": "Feed bereits abonniert"
     },
     "searchEngine": {
         "name": "Suchmaschine",

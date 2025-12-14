@@ -360,3 +360,38 @@ export function isSourceInP2PGroup(sid: number): boolean {
     const groups = getSourceGroups()
     return groups[groupIndex].sids.includes(sid)
 }
+
+/**
+ * Remove a source from the P2P group.
+ * Returns the updated groups array, or null if source wasn't in P2P group.
+ * 
+ * @param sid - Source ID to remove from the P2P group
+ * @returns Updated groups array or null
+ */
+export function removeSourceFromP2PGroup(sid: number): SourceGroup[] | null {
+    const groups = getSourceGroups()
+    const groupIndex = findP2PGroupIndex()
+    
+    if (groupIndex === -1) {
+        console.log(`[settings] P2P group not found, nothing to remove`)
+        return null
+    }
+    
+    const group = groups[groupIndex]
+    const sidIndex = group.sids.indexOf(sid)
+    
+    if (sidIndex === -1) {
+        console.log(`[settings] Source ${sid} not in P2P group`)
+        return null
+    }
+    
+    // Remove the source from the group
+    group.sids.splice(sidIndex, 1)
+    console.log(`[settings] Removed source ${sid} from P2P group`)
+    
+    // If group is now empty, optionally remove the group itself
+    // For now, keep empty groups as they may be used again
+    
+    saveSourceGroups(groups)
+    return groups
+}

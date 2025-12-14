@@ -15,15 +15,25 @@ import {
 } from "office-ui-fabric-react/lib/ContextualMenu"
 import { ContextMenuType } from "../scripts/models/app"
 import { RSSItem } from "../scripts/models/item"
+import { RSSSource } from "../scripts/models/source"
 import { ContextReduxProps } from "../containers/context-menu-container"
-import { ViewType, ImageCallbackTypes, ViewConfigs } from "../schema-types"
+import { ViewType, ImageCallbackTypes, ViewConfigs, SourceGroup } from "../schema-types"
 import { FilterType } from "../scripts/models/feed"
+
+// ServiceRef for P2P shared feeds
+const P2P_SHARED_SERVICE_REF = "p2p-shared"
+
+// SourceState type for sources prop
+type SourceState = { [sid: number]: RSSSource }
 
 export type ContextMenuProps = ContextReduxProps & {
     type: ContextMenuType
     event?: MouseEvent | string
     position?: [number, number]
     item?: RSSItem
+    source?: RSSSource
+    sources?: SourceState
+    groups?: SourceGroup[]
     feedId?: string
     text?: string
     url?: string
@@ -43,6 +53,9 @@ export type ContextMenuProps = ContextReduxProps & {
     markAllRead: (sids?: number[], date?: Date, before?: boolean) => void
     fetchItems: (sids: number[]) => void
     settings: (sids: number[]) => void
+    subscribeFeed: (url: string, name?: string) => void
+    removeFromGroup: (groupIndex: number, sids: number[]) => void
+    updateSourceState: (source: RSSSource) => void
     close: () => void
 }
 
@@ -59,6 +72,20 @@ const QRCodeMenuItem = (props: { url: string }) => (
     </div>
 )
 
+// Exported function for rendering QR code in menu items (used by lite-exporter)
+export const renderShareQR = (item: IContextualMenuItem): JSX.Element => (
+    <div style={{ padding: "12px", textAlign: "center" }}>
+        <QRCode
+            value={item.url || ""}
+            size={150}
+            renderAs="svg"
+            level="H"
+            includeMargin={true}
+        />
+    </div>
+)
+
+// Basic share submenu (QR only) - used as fallback
 export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
     {
         key: "divider",
@@ -69,6 +96,13 @@ export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
         onRender: () => <QRCodeMenuItem url={item.link} />,
     },
 ]
+
+// P2P Peer info for share menu
+interface P2PPeerInfo {
+    peerId: string
+    displayName: string
+    connected: boolean
+}
 
 function getSearchItem(text: string): IContextualMenuItem {
     const engine = window.settings.getSearchEngine()
@@ -83,7 +117,229 @@ function getSearchItem(text: string): IContextualMenuItem {
     }
 }
 
-export class ContextMenu extends React.Component<ContextMenuProps> {
+interface ContextMenuState {
+    p2pPeers: P2PPeerInfo[]
+    p2pConnected: boolean
+    feedSubscribed: boolean | null  // null = unknown, checking
+}
+
+export class ContextMenu extends React.Component<ContextMenuProps, ContextMenuState> {
+    state: ContextMenuState = {
+        p2pPeers: [],
+        p2pConnected: false,
+        feedSubscribed: null,
+    }
+
+    componentDidMount() {
+        this.loadP2PStatus()
+        this.checkFeedSubscription()
+    }
+
+    componentDidUpdate(prevProps: ContextMenuProps) {
+        // Reload when menu opens or item changes
+        if (prevProps.type !== this.props.type || prevProps.item?._id !== this.props.item?._id) {
+            this.loadP2PStatus()
+            this.checkFeedSubscription()
+        }
+    }
+
+    loadP2PStatus = async () => {
+        try {
+            const status = await window.p2pLan.getStatus()
+            if (status) {
+                const peers: P2PPeerInfo[] = status.peers.map(p => ({
+                    peerId: p.peerId,
+                    displayName: p.displayName,
+                    connected: p.connected,
+                }))
+                this.setState({
+                    p2pPeers: peers,
+                    p2pConnected: status.inRoom,
+                })
+            }
+        } catch (err) {
+            console.log("[ContextMenu] P2P status not available")
+        }
+    }
+
+    checkFeedSubscription = async () => {
+        // Check if this is a P2P feed that could be subscribed as a regular feed
+        if (!this.props.source) {
+            this.setState({ feedSubscribed: null })
+            return
+        }
+
+        // P2P feeds have serviceRef = "p2p-shared" and store the real feed URL in source.url
+        const isP2PFeed = this.props.source.serviceRef === P2P_SHARED_SERVICE_REF
+        
+        if (!isP2PFeed) {
+            // Not a P2P feed - no subscription option needed
+            this.setState({ feedSubscribed: null })
+            return
+        }
+
+        // Check if the feed URL is a valid RSS/Atom feed URL (not the generic p2p:// URL)
+        const feedUrl = this.props.source.url
+        if (feedUrl.startsWith("p2p://")) {
+            // Generic P2P shared feed without real URL - can't subscribe
+            this.setState({ feedSubscribed: null })
+            return
+        }
+
+        // Check if this feed URL is already subscribed as a non-P2P feed
+        // We look in Redux state for a source with the same URL but different serviceRef
+        const sources = this.props.sources
+        if (sources) {
+            const alreadySubscribed = Object.values(sources).some(
+                s => s.url === feedUrl && s.serviceRef !== P2P_SHARED_SERVICE_REF
+            )
+            this.setState({ feedSubscribed: alreadySubscribed })
+        } else {
+            this.setState({ feedSubscribed: false })
+        }
+    }
+
+    handleP2PShare = async (peerId: string, displayName: string) => {
+        if (!this.props.item || !this.props.source) return
+        
+        try {
+            const article = {
+                url: this.props.item.link,
+                title: this.props.item.title,
+                feedUrl: this.props.source.url,
+                feedName: this.props.source.name,
+                feedIconUrl: this.props.source.iconurl,
+                openTarget: this.props.source.openTarget,
+                defaultZoom: this.props.source.defaultZoom,
+            }
+            
+            // Try to send with ACK, fall back to queue
+            const result = await window.p2pLan.sendArticlesWithAck(peerId, [article])
+            if (result.success) {
+                console.log(`[ContextMenu] Shared article with ${displayName}`)
+            } else {
+                // Queue for later
+                await window.p2pLan.sendArticleLinkWithQueue(
+                    peerId, 
+                    article.title, 
+                    article.url, 
+                    article.feedName, 
+                    article.feedUrl, 
+                    article.feedIconUrl
+                )
+                console.log(`[ContextMenu] Queued article for ${displayName}`)
+            }
+        } catch (err) {
+            console.error("[ContextMenu] P2P share failed:", err)
+        }
+    }
+
+    handleSubscribeFeed = async () => {
+        if (!this.props.source) return
+        
+        // Capture all needed values at start - props may change after await
+        const source = { ...this.props.source } // Deep copy to avoid stale props
+        const feedUrl = source.url
+        const feedName = source.name
+        const sid = source.sid
+        const groups = this.props.groups ? [...this.props.groups] : undefined
+        
+        // Don't subscribe generic P2P URLs
+        if (feedUrl.startsWith("p2p://")) {
+            return
+        }
+        
+        // Check if this is a P2P feed (has the special serviceRef)
+        if (source.serviceRef === P2P_SHARED_SERVICE_REF) {
+            // Convert the existing P2P feed to an active feed
+            try {
+                // 1. Convert to active feed in DB (remove serviceRef)
+                await window.db.p2pFeeds.convertToActive(sid)
+                
+                // 2. Update Redux sources state (remove serviceRef from the source object)
+                if (this.props.updateSourceState) {
+                    const updatedSource: RSSSource = {
+                        ...source,
+                        serviceRef: undefined, // Remove P2P serviceRef
+                    }
+                    this.props.updateSourceState(updatedSource)
+                }
+                
+                // 3. Remove from P2P group via Redux (this updates both UI and config.json)
+                const P2P_GROUP_NAME = "P2P Geteilt"
+                if (groups && this.props.removeFromGroup) {
+                    const p2pGroupIndex = groups.findIndex(
+                        g => g.isMultiple && g.name === P2P_GROUP_NAME
+                    )
+                    if (p2pGroupIndex !== -1) {
+                        const p2pGroup = groups[p2pGroupIndex]
+                        if (p2pGroup.sids.includes(sid)) {
+                            this.props.removeFromGroup(p2pGroupIndex, [sid])
+                        }
+                    }
+                }
+                
+                // Update local state to reflect the change
+                this.setState({ feedSubscribed: true })
+            } catch (err) {
+                console.error("[ContextMenu] Failed to convert P2P feed:", err)
+            }
+        } else {
+            // Regular feed subscription via Redux
+            if (this.props.subscribeFeed) {
+                this.props.subscribeFeed(feedUrl, feedName)
+            }
+        }
+        
+        this.props.close()
+    }
+
+    getShareSubmenuItems = (): IContextualMenuItem[] => {
+        const items: IContextualMenuItem[] = []
+        
+        // P2P sharing section
+        if (this.state.p2pConnected && this.state.p2pPeers.length > 0) {
+            const connectedPeers = this.state.p2pPeers.filter(p => p.connected)
+            
+            if (connectedPeers.length > 0) {
+                items.push({
+                    key: "p2p-header",
+                    text: "P2P Teilen",
+                    itemType: ContextualMenuItemType.Header,
+                })
+                
+                connectedPeers.forEach(peer => {
+                    items.push({
+                        key: `p2p-${peer.peerId}`,
+                        text: peer.displayName,
+                        iconProps: { iconName: "Contact" },
+                        onClick: () => {
+                            this.handleP2PShare(peer.peerId, peer.displayName)
+                        },
+                    })
+                })
+                
+                items.push({
+                    key: "p2p-divider",
+                    itemType: ContextualMenuItemType.Divider,
+                })
+            }
+        }
+        
+        // QR Code
+        items.push({
+            key: "qr-header",
+            text: "QR Code",
+            itemType: ContextualMenuItemType.Header,
+        })
+        items.push({
+            key: "qr",
+            onRender: () => <QRCodeMenuItem url={this.props.item?.link || ""} />,
+        })
+        
+        return items
+    }
+
     getItems = (): IContextualMenuItem[] => {
         switch (this.props.type) {
             case ContextMenuType.Item:
@@ -196,7 +452,7 @@ export class ContextMenu extends React.Component<ContextMenuProps> {
                         text: intl.get("context.share"),
                         iconProps: { iconName: "Share" },
                         subMenuProps: {
-                            items: shareSubmenu(this.props.item),
+                            items: this.getShareSubmenuItems(),
                         },
                     },
                     {
@@ -214,6 +470,34 @@ export class ContextMenu extends React.Component<ContextMenuProps> {
                             window.utils.writeClipboard(this.props.item.title)
                         },
                     },
+                    // Subscribe feed option for P2P articles
+                    ...(this.state.feedSubscribed === false
+                        ? [
+                              {
+                                  key: "divider_subscribe",
+                                  itemType: ContextualMenuItemType.Divider,
+                              },
+                              {
+                                  key: "subscribeFeed",
+                                  text: intl.get("context.subscribeFeed"),
+                                  iconProps: { iconName: "Add" },
+                                  onClick: () => this.handleSubscribeFeed(),
+                              },
+                          ]
+                        : this.state.feedSubscribed === true
+                        ? [
+                              {
+                                  key: "divider_subscribe",
+                                  itemType: ContextualMenuItemType.Divider,
+                              },
+                              {
+                                  key: "feedSubscribed",
+                                  text: intl.get("context.feedSubscribed"),
+                                  iconProps: { iconName: "Accept" },
+                                  disabled: true,
+                              },
+                          ]
+                        : []),
                     ...(this.props.viewConfigs !== undefined
                         ? [
                               {
