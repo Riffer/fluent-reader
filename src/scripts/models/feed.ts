@@ -1,5 +1,6 @@
 import * as db from "../db"
 import lf from "lovefield"
+import { ItemQueryOptions, ItemRow } from "../../bridges/db"
 import {
     SourceActionTypes,
     INIT_SOURCES,
@@ -47,6 +48,34 @@ export class FeedFilter {
         this.search = search
     }
 
+    // Convert FeedFilter to SQLite ItemQueryOptions
+    static toQueryOptions(filter: FeedFilter, sids: number[]): ItemQueryOptions {
+        let type = filter.type
+        const options: ItemQueryOptions = {
+            sourceIds: sids,
+            orderBy: "date",
+            orderDir: "DESC"
+        }
+        
+        if (!(type & FilterType.ShowRead)) {
+            options.unreadOnly = true
+        }
+        if (!(type & FilterType.ShowNotStarred)) {
+            options.starredOnly = true
+        }
+        if (!(type & FilterType.ShowHidden)) {
+            options.hiddenOnly = false
+        }
+        if (filter.search !== "") {
+            // Note: SQLite search is case-insensitive by default
+            // Full search includes snippet, title-only is just title
+            options.searchTerm = filter.search
+        }
+        
+        return options
+    }
+
+    // Legacy: Convert FeedFilter to Lovefield predicates (kept for compatibility)
     static toPredicates(filter: FeedFilter) {
         let type = filter.type
         const predicates = new Array<lf.Predicate>()
@@ -100,6 +129,27 @@ export const SOURCE = "SOURCE"
 
 const LOAD_QUANTITY = 50
 
+// Helper function to convert SQLite ItemRow to RSSItem
+function rowToItem(row: ItemRow): RSSItem {
+    return {
+        _id: row._id,
+        source: row.source,
+        title: row.title,
+        link: row.link,
+        date: new Date(row.date),
+        fetchedDate: new Date(row.fetchedDate),
+        thumb: row.thumb ?? undefined,
+        content: row.content,
+        snippet: row.snippet,
+        creator: row.creator ?? undefined,
+        hasRead: row.hasRead === 1,
+        starred: row.starred === 1,
+        hidden: row.hidden === 1,
+        notify: row.notify === 1,
+        serviceRef: row.serviceRef ?? undefined
+    } as RSSItem
+}
+
 export class RSSFeed {
     _id: string
     loaded: boolean
@@ -119,16 +169,23 @@ export class RSSFeed {
     }
 
     static async loadFeed(feed: RSSFeed, skip = 0): Promise<RSSItem[]> {
-        const predicates = FeedFilter.toPredicates(feed.filter)
-        predicates.push(db.items.source.in(feed.sids))
-        return (await db.itemsDB
-            .select()
-            .from(db.items)
-            .where(lf.op.and.apply(null, predicates))
-            .orderBy(db.items.date, lf.Order.DESC)
-            .skip(skip)
-            .limit(LOAD_QUANTITY)
-            .exec()) as RSSItem[]
+        // Use SQLite for feed loading via window.db bridge
+        const options = FeedFilter.toQueryOptions(feed.filter, feed.sids)
+        options.limit = LOAD_QUANTITY
+        options.offset = skip
+        
+        const rows = await window.db.items.query(options)
+        
+        // Apply additional filtering for regex search if needed
+        // SQLite LIKE doesn't support regex, so we filter in memory for complex searches
+        let items = rows.map(rowToItem)
+        
+        // Apply regex filter if search has special characters
+        if (feed.filter.search !== "" && /[.*+?^${}()|[\]\\]/.test(feed.filter.search)) {
+            items = items.filter(item => FeedFilter.testItem(feed.filter, item))
+        }
+        
+        return items
     }
 }
 

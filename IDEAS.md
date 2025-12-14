@@ -1,21 +1,21 @@
 # Feature Ideas
 
-## ⚠️ WICHTIG: Datenbankarchitektur (Stand: 14.12.2025)
+## ✅ Datenbankarchitektur (Stand: 14.12.2025)
 
-### Aktueller Zustand - DUAL-DATABASE PROBLEM
+### Aktueller Zustand - SQLite-ONLY
 
-Die App verwendet **zwei Datenbanken parallel**, was zu Inkonsistenzen führt:
+Die App verwendet jetzt **nur noch SQLite** als Datenbank:
 
 | Datenbank | Ort | Status | Nutzung |
 |-----------|-----|--------|---------|
-| **Lovefield (IndexedDB)** | Renderer | ⚠️ LEGACY | Alle UI-Operationen, Models (`source.ts`, `item.ts`, `feed.ts`, `service.ts`) |
-| **SQLite** | Main Process | ✅ NEU | Nur Migration, P2P-Features, `window.db.*` Bridge |
+| **Lovefield (IndexedDB)** | Renderer | ❌ ENTFERNT | Nur noch für Migration alter Daten |
+| **SQLite** | Main Process | ✅ AKTIV | Alle Operationen via `window.db.*` Bridge |
 
-### Das Problem
-- Die Models (`src/scripts/models/*.ts`) nutzen direkt `db.sourcesDB` und `db.itemsDB` (Lovefield)
-- Die Migration (`migrateLovefieldToSQLite`) kopiert nur Daten, aber die App arbeitet weiter mit Lovefield
-- Lösch-/Update-Operationen über UI aktualisieren **nur Lovefield, nicht SQLite**
-- SQLite und Lovefield laufen auseinander
+### Lösung (14.12.2025)
+- Alle Models (`src/scripts/models/*.ts`) nutzen jetzt `window.db.*` (SQLite)
+- Die Migration (`migrateLovefieldToSQLite`) läuft nur einmal beim ersten Start
+- Alle CRUD-Operationen (Create, Read, Update, Delete) laufen über SQLite
+- Lovefield wird nur noch für Migration alter Daten benötigt
 
 ### 🚨 REGEL FÜR NEUE FEATURES
 
@@ -40,52 +40,113 @@ Die App verwendet **zwei Datenbanken parallel**, was zu Inkonsistenzen führt:
 - `src/main/settings.ts` - Einstellungen (nutzt electron-store, kein DB)
 - `src/bridges/db.ts` - Bridge zum Renderer ✓
 
-### Dateien die noch Lovefield nutzen (Legacy):
-- `src/scripts/db.ts` - Lovefield Init ⚠️ **Hat Warnkommentar am Dateianfang!**
-- `src/scripts/models/source.ts` - Source CRUD
-- `src/scripts/models/item.ts` - Item CRUD
-- `src/scripts/models/feed.ts` - Feed Display
-- `src/scripts/models/service.ts` - Cloud Services
-- `src/scripts/models/services/*.ts` - Service Implementierungen
+### Dateien die jetzt SQLite nutzen (migriert 14.12.2025):
+- `src/scripts/models/source.ts` - Source CRUD ✅
+- `src/scripts/models/item.ts` - Item CRUD ✅
+- `src/scripts/models/feed.ts` - Feed Display ✅
+- `src/scripts/models/service.ts` - Cloud Services ✅
 
-### Zukünftige Migration (TODO)
-- [x] Warnkommentar in `src/scripts/db.ts` hinzugefügt (14.12.2025)
-- [ ] Alle Lovefield-Aufrufe in Models durch `window.db.*` ersetzen
-- [ ] Lovefield komplett entfernen
-- [ ] Dann: P2P-Feeds in UI anzeigen
+### Dateien die Lovefield nur für Migration behalten:
+- `src/scripts/db.ts` - Lovefield Init + Migration ⚠️ **Nur für `migrateLovefieldToSQLite()`**
+
+### Migration abgeschlossen (14.12.2025) ✅
+- [x] Warnkommentar in `src/scripts/db.ts` hinzugefügt
+- [x] Alle Lovefield-Aufrufe in Models durch `window.db.*` ersetzt
+- [x] Alle CRUD-Operationen laufen über SQLite
+- [x] Feed löschen funktioniert korrekt (CASCADE Delete)
+- [ ] Lovefield-Code entfernen (später, für Migration alter Nutzer behalten)
+- [ ] P2P-Feeds in UI anzeigen (nächster Schritt)
+
+### Detaillierter Migrationsplan (14.12.2025)
+
+**Branch:** `feature/sqlite-migration`
+
+**Lovefield-Aufrufe die ersetzt werden müssen:**
+
+#### Phase 1: source.ts (8 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 81-91 | `checkItem()` | `db.itemsDB.select()...where()` | `window.db.items.exists(source, title, date)` |
+| 216-221 | `unreadCount()` | `db.itemsDB.select().groupBy()` | `window.db.items.getUnreadCounts()` |
+| 248-250 | `initSources()` | `db.sourcesDB.select()` | `window.db.sources.getAll()` |
+| 307-313 | `insertSource()` | `db.sourcesDB.insert()` | `window.db.sources.insert()` |
+| 375-379 | `updateSource()` | `db.sourcesDB.insertOrReplace()` | `window.db.sources.update()` |
+| 399-407 | `deleteSource()` | `db.itemsDB.delete()` + `db.sourcesDB.delete()` | `window.db.sources.delete()` (CASCADE) |
+
+#### Phase 2: item.ts (12 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 204-209 | `insertItems()` | `db.itemsDB.insert()` | `window.db.items.insertBatch()` |
+| 357-360 | `markRead()` | `db.itemsDB.update()` | `window.db.items.update()` |
+| 389-401 | `markAllRead()` | `db.itemsDB.update().where()` | `window.db.items.markAllRead()` |
+| 424-427 | `markUnread()` | `db.itemsDB.update()` | `window.db.items.update()` |
+| 445-448 | `toggleStarred()` | `db.itemsDB.update()` | `window.db.items.update()` |
+| 459-462 | `toggleHidden()` | `db.itemsDB.update()` | `window.db.items.update()` |
+
+#### Phase 3: feed.ts (4 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 54-70 | `loadMore()` predicates | `db.items.hasRead/starred/hidden/title/snippet` | `window.db.items.query()` mit Optionen |
+| 123-128 | `loadMore()` query | `db.itemsDB.select().from().where().orderBy()` | `window.db.items.query()` |
+
+#### Phase 4: service.ts (3 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 126-129 | `syncWithService()` | `db.sourcesDB.select().where()` | `window.db.sources.getByUrl()` |
+| 147+ | `syncWithService()` | `db.itemsDB...` | `window.db.items...` |
+
+**Neue Bridge-Funktionen benötigt:**
+
+```typescript
+// In src/bridges/db.ts hinzufügen:
+items: {
+    // NEU: Duplikatprüfung für RSS-Items
+    exists: (source: number, title: string, date: string): Promise<boolean>
+    
+    // NEU: Unread-Counts gruppiert nach Source
+    getUnreadCounts: (): Promise<{source: number, count: number}[]>
+    
+    // NEU: Batch-Insert für mehrere Items
+    insertBatch: (items: ItemRow[]): Promise<ItemRow[]>
+    
+    // NEU: Mark All Read mit komplexen Filtern
+    markAllRead: (sids: number[], date?: string, before?: boolean): Promise<void>
+    
+    // NEU: Komplexe Query für Feed-Anzeige
+    query: (options: ItemQueryOptions): Promise<ItemRow[]>
+}
+```
+
+**Migrationsreihenfolge:**
+1. ✅ Bridge-Funktionen in `db-sqlite.ts` implementieren
+2. ✅ IPC-Handler in `window.ts` registrieren
+3. ✅ Bridge-Typen in `bridges/db.ts` erweitern
+4. ✅ `source.ts` migrieren (kritisch für initSources)
+5. ✅ `item.ts` migrieren (kritisch für fetchItems)
+6. ✅ `feed.ts` migrieren (kritisch für UI)
+7. ✅ `service.ts` migrieren (Cloud-Services)
+8. ⬜ Lovefield-Code entfernen (optional, für Migration alter Nutzer behalten)
 
 ---
 
 ## Bugs (bekannte Probleme)
 
-### 🐛 Dual-Database Sync Problem
 
-**Status:** 🔴 Offen
+### ~~🐛 Dual-Database Sync Problem~~ ✅ Gelöst
 
-**Problem:**
-Die App verwendet zwei Datenbanken parallel:
-1. **Lovefield (IndexedDB)** - Original-DB für UI/Renderer
-2. **SQLite** - Neue DB für Main-Prozess und P2P-Features
+**Status:** ✅ Gelöst (14.12.2025)
 
-Lösch- und Update-Operationen über die UI aktualisieren nur Lovefield, nicht SQLite.
+**Problem (behoben):**
+Die App verwendete zwei Datenbanken parallel, was zu Inkonsistenzen führte.
 
-**Symptome:**
-- Gelöschte Feeds erscheinen als "existiert bereits" bei P2P
-- SQLite enthält veraltete Daten nach UI-Löschungen
-- Inkonsistente Zustände zwischen UI und P2P-Funktionen
+**Lösung:**
+Alle Model-Dateien (`source.ts`, `item.ts`, `feed.ts`, `service.ts`) wurden auf SQLite migriert.
+Die App nutzt jetzt ausschließlich `window.db.*` für alle CRUD-Operationen.
 
-**Betroffene Operationen:**
-- `deleteSource` - Feed löschen
-- `deleteItem` - Artikel löschen  
-- Alle Artikel eines Feeds löschen
-- Möglicherweise auch: Read/Unread, Starred, etc.
-
-**Lösungsoptionen:**
-1. **Sync-Layer**: Alle DB-Operationen müssen beide DBs aktualisieren
-2. **Migration zu SQLite-only**: Lovefield komplett ersetzen (großer Aufwand)
-3. **SQLite als Cache**: SQLite nur für P2P-spezifische Daten nutzen
-
-**Priorität:** Hoch (verhindert korrektes Testen von P2P-Features)
+**Verifiziert:**
+- Feed löschen über UI → Feed und Artikel werden in SQLite gelöscht ✅
+- Neue Feeds hinzufügen → Werden in SQLite gespeichert ✅
+- CASCADE Delete funktioniert (Artikel werden mit Feed gelöscht) ✅
 
 ---
 

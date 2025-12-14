@@ -2,6 +2,7 @@ import * as db from "../db"
 import lf from "lovefield"
 import intl from "react-intl-universal"
 import type { MyParserItem } from "../utils"
+import { ItemRow } from "../../bridges/db"
 import {
     domParser,
     htmlDecode,
@@ -195,18 +196,66 @@ export function fetchItemsIntermediate(): ItemActionTypes {
     }
 }
 
+// Helper function to convert RSSItem to SQLite ItemRow
+function itemToRow(item: RSSItem): Omit<ItemRow, "_id"> {
+    return {
+        source: item.source,
+        title: item.title,
+        link: item.link,
+        date: item.date.toISOString(),
+        fetchedDate: item.fetchedDate.toISOString(),
+        thumb: item.thumb ?? null,
+        content: item.content,
+        snippet: item.snippet,
+        creator: item.creator ?? null,
+        hasRead: item.hasRead ? 1 : 0,
+        starred: item.starred ? 1 : 0,
+        hidden: item.hidden ? 1 : 0,
+        notify: item.notify ? 1 : 0,
+        serviceRef: item.serviceRef ?? null
+    }
+}
+
+// Helper function to convert SQLite ItemRow to RSSItem
+function rowToItem(row: ItemRow): RSSItem {
+    return {
+        _id: row._id,
+        source: row.source,
+        title: row.title,
+        link: row.link,
+        date: new Date(row.date),
+        fetchedDate: new Date(row.fetchedDate),
+        thumb: row.thumb ?? undefined,
+        content: row.content,
+        snippet: row.snippet,
+        creator: row.creator ?? undefined,
+        hasRead: row.hasRead === 1,
+        starred: row.starred === 1,
+        hidden: row.hidden === 1,
+        notify: row.notify === 1,
+        serviceRef: row.serviceRef ?? undefined
+    } as RSSItem
+}
+
 export async function insertItems(items: RSSItem[]): Promise<RSSItem[]> {
     console.log(`[insertItems] Attempting to insert ${items.length} items`)
     if (items.length > 0) {
         console.log(`[insertItems] First item: "${items[0].title?.substring(0, 50)}..." (date=${items[0].date?.toISOString()})`)
     }
+    if (items.length === 0) return []
+    
     items.sort((a, b) => a.date.getTime() - b.date.getTime())
-    const rows = items.map(item => db.items.createRow(item))
-    const inserted = (await db.itemsDB
-        .insert()
-        .into(db.items)
-        .values(rows)
-        .exec()) as RSSItem[]
+    
+    // Use SQLite for insert via window.db bridge
+    const rows = items.map(itemToRow)
+    const insertedIds = await window.db.items.insertMany(rows)
+    
+    // Update items with their new IDs
+    const inserted = items.map((item, index) => ({
+        ...item,
+        _id: insertedIds[index]
+    }))
+    
     console.log(`[insertItems] Successfully inserted ${inserted.length} items`)
     return inserted
 }
@@ -354,11 +403,8 @@ export function markRead(item: RSSItem): AppThunk<Promise<void>> {
     return async (dispatch, getState) => {
         item = getState().items[item._id]
         if (!item.hasRead) {
-            await db.itemsDB
-                .update(db.items)
-                .where(db.items._id.eq(item._id))
-                .set(db.items.hasRead, true)
-                .exec()
+            // Use SQLite for update via window.db bridge
+            await window.db.items.markRead(item._id, true)
             dispatch(markReadDone(item))
             if (item.serviceRef) {
                 dispatch(dispatch(getServiceHooks()).markRead?.(item))
@@ -385,21 +431,27 @@ export function markAllRead(
             before
         )
         if (action) await dispatch(action)
-        const predicates: lf.Predicate[] = [
-            db.items.source.in(sids),
-            db.items.hasRead.eq(false),
-        ]
-        if (date) {
-            predicates.push(
-                before ? db.items.date.lte(date) : db.items.date.gte(date)
-            )
+        
+        // Use SQLite for mark all read via window.db bridge
+        // Note: SQLite markAllRead currently only supports beforeDate, not afterDate
+        // For now, we handle both cases
+        if (date && !before) {
+            // "Mark all after" - need to handle differently
+            // Query items after date and mark each one
+            const items = await window.db.items.query({
+                sourceIds: sids,
+                unreadOnly: true
+            })
+            for (const row of items) {
+                if (new Date(row.date) >= date) {
+                    await window.db.items.markRead(row._id, true)
+                }
+            }
+        } else {
+            // "Mark all" or "Mark all before"
+            await window.db.items.markAllRead(sids, date?.toISOString())
         }
-        const query = lf.op.and.apply(null, predicates)
-        await db.itemsDB
-            .update(db.items)
-            .set(db.items.hasRead, true)
-            .where(query)
-            .exec()
+        
         if (date) {
             dispatch({
                 type: MARK_ALL_READ,
@@ -421,11 +473,8 @@ export function markUnread(item: RSSItem): AppThunk<Promise<void>> {
     return async (dispatch, getState) => {
         item = getState().items[item._id]
         if (item.hasRead) {
-            await db.itemsDB
-                .update(db.items)
-                .where(db.items._id.eq(item._id))
-                .set(db.items.hasRead, false)
-                .exec()
+            // Use SQLite for update via window.db bridge
+            await window.db.items.markRead(item._id, false)
             dispatch(markUnreadDone(item))
             if (item.serviceRef) {
                 dispatch(dispatch(getServiceHooks()).markUnread?.(item))
@@ -442,11 +491,8 @@ const toggleStarredDone = (item: RSSItem): ItemActionTypes => ({
 
 export function toggleStarred(item: RSSItem): AppThunk {
     return dispatch => {
-        db.itemsDB
-            .update(db.items)
-            .where(db.items._id.eq(item._id))
-            .set(db.items.starred, !item.starred)
-            .exec()
+        // Use SQLite for update via window.db bridge
+        window.db.items.toggleStarred(item._id)
         dispatch(toggleStarredDone(item))
         if (item.serviceRef) {
             const hooks = dispatch(getServiceHooks())
@@ -463,11 +509,8 @@ const toggleHiddenDone = (item: RSSItem): ItemActionTypes => ({
 
 export function toggleHidden(item: RSSItem): AppThunk {
     return dispatch => {
-        db.itemsDB
-            .update(db.items)
-            .where(db.items._id.eq(item._id))
-            .set(db.items.hidden, !item.hidden)
-            .exec()
+        // Use SQLite for update via window.db bridge
+        window.db.items.toggleHidden(item._id)
         dispatch(toggleHiddenDone(item))
     }
 }
