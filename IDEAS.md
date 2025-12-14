@@ -1,5 +1,155 @@
 # Feature Ideas
 
+## ✅ Datenbankarchitektur (Stand: 14.12.2025)
+
+### Aktueller Zustand - SQLite-ONLY
+
+Die App verwendet jetzt **nur noch SQLite** als Datenbank:
+
+| Datenbank | Ort | Status | Nutzung |
+|-----------|-----|--------|---------|
+| **Lovefield (IndexedDB)** | Renderer | ❌ ENTFERNT | Nur noch für Migration alter Daten |
+| **SQLite** | Main Process | ✅ AKTIV | Alle Operationen via `window.db.*` Bridge |
+
+### Lösung (14.12.2025)
+- Alle Models (`src/scripts/models/*.ts`) nutzen jetzt `window.db.*` (SQLite)
+- Die Migration (`migrateLovefieldToSQLite`) läuft nur einmal beim ersten Start
+- Alle CRUD-Operationen (Create, Read, Update, Delete) laufen über SQLite
+- Lovefield wird nur noch für Migration alter Daten benötigt
+
+### 🚨 REGEL FÜR NEUE FEATURES
+
+1. **KEINE Änderungen an Lovefield-Code:**
+   - `src/scripts/db.ts` (Lovefield Schema/Init)
+   - `db.sourcesDB`, `db.itemsDB` Aufrufe in Models
+   - Keine neuen Funktionen die Lovefield nutzen
+
+2. **Neue Features nur über SQLite:**
+   - `src/main/db-sqlite.ts` (Main Process)
+   - `window.db.*` Bridge für Renderer-Zugriff
+   - `src/bridges/db.ts` für Type-Definitionen
+
+3. **P2P Shared Feeds - Korrekter Ansatz:**
+   - Feeds/Artikel nur in SQLite speichern (Main Process) ✓
+   - **NICHT** versuchen, in Lovefield zu synchronisieren
+   - UI-Anzeige der P2P-Feeds kommt erst nach vollständiger SQLite-Migration
+
+### Dateien die NUR SQLite nutzen sollten:
+- `src/main/db-sqlite.ts` - SQLite Implementierung ✓
+- `src/main/p2p-lan.ts` - P2P Features ✓
+- `src/main/settings.ts` - Einstellungen (nutzt electron-store, kein DB)
+- `src/bridges/db.ts` - Bridge zum Renderer ✓
+
+### Dateien die jetzt SQLite nutzen (migriert 14.12.2025):
+- `src/scripts/models/source.ts` - Source CRUD ✅
+- `src/scripts/models/item.ts` - Item CRUD ✅
+- `src/scripts/models/feed.ts` - Feed Display ✅
+- `src/scripts/models/service.ts` - Cloud Services ✅
+
+### Dateien die Lovefield nur für Migration behalten:
+- `src/scripts/db.ts` - Lovefield Init + Migration ⚠️ **Nur für `migrateLovefieldToSQLite()`**
+
+### Migration abgeschlossen (14.12.2025) ✅
+- [x] Warnkommentar in `src/scripts/db.ts` hinzugefügt
+- [x] Alle Lovefield-Aufrufe in Models durch `window.db.*` ersetzt
+- [x] Alle CRUD-Operationen laufen über SQLite
+- [x] Feed löschen funktioniert korrekt (CASCADE Delete)
+- [ ] Lovefield-Code entfernen (später, für Migration alter Nutzer behalten)
+- [ ] P2P-Feeds in UI anzeigen (nächster Schritt)
+
+### Detaillierter Migrationsplan (14.12.2025)
+
+**Branch:** `feature/sqlite-migration`
+
+**Lovefield-Aufrufe die ersetzt werden müssen:**
+
+#### Phase 1: source.ts (8 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 81-91 | `checkItem()` | `db.itemsDB.select()...where()` | `window.db.items.exists(source, title, date)` |
+| 216-221 | `unreadCount()` | `db.itemsDB.select().groupBy()` | `window.db.items.getUnreadCounts()` |
+| 248-250 | `initSources()` | `db.sourcesDB.select()` | `window.db.sources.getAll()` |
+| 307-313 | `insertSource()` | `db.sourcesDB.insert()` | `window.db.sources.insert()` |
+| 375-379 | `updateSource()` | `db.sourcesDB.insertOrReplace()` | `window.db.sources.update()` |
+| 399-407 | `deleteSource()` | `db.itemsDB.delete()` + `db.sourcesDB.delete()` | `window.db.sources.delete()` (CASCADE) |
+
+#### Phase 2: item.ts (12 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 204-209 | `insertItems()` | `db.itemsDB.insert()` | `window.db.items.insertBatch()` |
+| 357-360 | `markRead()` | `db.itemsDB.update()` | `window.db.items.update()` |
+| 389-401 | `markAllRead()` | `db.itemsDB.update().where()` | `window.db.items.markAllRead()` |
+| 424-427 | `markUnread()` | `db.itemsDB.update()` | `window.db.items.update()` |
+| 445-448 | `toggleStarred()` | `db.itemsDB.update()` | `window.db.items.update()` |
+| 459-462 | `toggleHidden()` | `db.itemsDB.update()` | `window.db.items.update()` |
+
+#### Phase 3: feed.ts (4 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 54-70 | `loadMore()` predicates | `db.items.hasRead/starred/hidden/title/snippet` | `window.db.items.query()` mit Optionen |
+| 123-128 | `loadMore()` query | `db.itemsDB.select().from().where().orderBy()` | `window.db.items.query()` |
+
+#### Phase 4: service.ts (3 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 126-129 | `syncWithService()` | `db.sourcesDB.select().where()` | `window.db.sources.getByUrl()` |
+| 147+ | `syncWithService()` | `db.itemsDB...` | `window.db.items...` |
+
+**Neue Bridge-Funktionen benötigt:**
+
+```typescript
+// In src/bridges/db.ts hinzufügen:
+items: {
+    // NEU: Duplikatprüfung für RSS-Items
+    exists: (source: number, title: string, date: string): Promise<boolean>
+    
+    // NEU: Unread-Counts gruppiert nach Source
+    getUnreadCounts: (): Promise<{source: number, count: number}[]>
+    
+    // NEU: Batch-Insert für mehrere Items
+    insertBatch: (items: ItemRow[]): Promise<ItemRow[]>
+    
+    // NEU: Mark All Read mit komplexen Filtern
+    markAllRead: (sids: number[], date?: string, before?: boolean): Promise<void>
+    
+    // NEU: Komplexe Query für Feed-Anzeige
+    query: (options: ItemQueryOptions): Promise<ItemRow[]>
+}
+```
+
+**Migrationsreihenfolge:**
+1. ✅ Bridge-Funktionen in `db-sqlite.ts` implementieren
+2. ✅ IPC-Handler in `window.ts` registrieren
+3. ✅ Bridge-Typen in `bridges/db.ts` erweitern
+4. ✅ `source.ts` migrieren (kritisch für initSources)
+5. ✅ `item.ts` migrieren (kritisch für fetchItems)
+6. ✅ `feed.ts` migrieren (kritisch für UI)
+7. ✅ `service.ts` migrieren (Cloud-Services)
+8. ⬜ Lovefield-Code entfernen (optional, für Migration alter Nutzer behalten)
+
+---
+
+## Bugs (bekannte Probleme)
+
+
+### ~~🐛 Dual-Database Sync Problem~~ ✅ Gelöst
+
+**Status:** ✅ Gelöst (14.12.2025)
+
+**Problem (behoben):**
+Die App verwendete zwei Datenbanken parallel, was zu Inkonsistenzen führte.
+
+**Lösung:**
+Alle Model-Dateien (`source.ts`, `item.ts`, `feed.ts`, `service.ts`) wurden auf SQLite migriert.
+Die App nutzt jetzt ausschließlich `window.db.*` für alle CRUD-Operationen.
+
+**Verifiziert:**
+- Feed löschen über UI → Feed und Artikel werden in SQLite gelöscht ✅
+- Neue Feeds hinzufügen → Werden in SQLite gespeichert ✅
+- CASCADE Delete funktioniert (Artikel werden mit Feed gelöscht) ✅
+
+---
+
 
 ## P2P LAN Artikel-Sharing
 
@@ -93,21 +243,86 @@ Geteilte Artikel sind nach App-Neustart nicht mehr verfügbar (nur in der Notifi
 - [ ] Gruppierung: Ein Feed "P2P Geteilt" oder pro Peer "Von [Name]"
 - [ ] Items werden in SQLite gespeichert wie normale Artikel
 
-#### 5. Artikel-Modus beim Teilen mitgeben
+#### ~~5. Artikel-Modus beim Teilen mitgeben~~ ✅ Erledigt
+
+**Status:** ✅ Implementiert (v1.1.10)
+
+**Implementiert:**
+- ✅ `openTarget` (Anzeigemodus: Lokal/Extern) wird mit übertragen
+- ✅ `defaultZoom` (Zoom-Level) wird mit übertragen
+- ✅ Werte werden beim Erstellen neuer P2P-Feeds verwendet
+
+**Verhalten:**
+- Neuer P2P-Feed erhält die Anzeigeeinstellungen vom Sender
+- Bestehende Feeds behalten ihre eigenen Einstellungen
+
+#### 6. System-Events nutzen (Sleep/Resume)
 
 **Problem:**
-Aktuell wird nur der Artikel-Link und Titel übermittelt, aber nicht der Anzeigemodus (RSS/Webpage/FullContent) und andere Einstellungen.
+Wenn das System in Sleep/Hibernate geht, erfahren die Peers davon erst durch den 30s Heartbeat-Timeout. Beim Aufwachen dauert es bis zu 10s bis der nächste Heartbeat gesendet wird.
 
 **Anforderung:**
-- Der aktuell verwendete Modus soll mit übertragen werden
-- Empfänger kann Artikel direkt im gleichen Modus öffnen wie der Sender
-- Weitere relevante Einstellungen könnten mitgesendet werden (z.B. Zoom-Level)
+- Bei `suspend`: Goodbye an Peers senden (sofortige Offline-Erkennung)
+- Bei `resume`: Sofort wieder aktiv werden (Discovery, Heartbeat, Pending Shares)
+- **Bonus**: Beim Aufwachen auch Feed-Aktualisierung triggern (je nach Einstellung)
 
 **Umsetzung:**
-- [ ] `article-link-batch` Message erweitern um `viewMode` (0=RSS, 1=Webpage, 2=FullContent)
-- [ ] Optional: `zoomLevel`, `mobileMode` mitschicken
-- [ ] Empfänger-UI: "Öffnen im empfohlenen Modus" vs. "Standard-Modus verwenden"
-- [ ] Fallback wenn Modus nicht unterstützt wird
+- [ ] `powerMonitor.on("suspend")` → `shutdownP2P()` aufrufen (Goodbye senden)
+- [ ] `powerMonitor.on("resume")` → Sofort UDP-Discovery und Heartbeat senden
+- [ ] `powerMonitor.on("resume")` → Pending Shares für wieder erreichbare Peers verarbeiten
+- [ ] Optional: Feed-Refresh bei Resume (wenn Auto-Refresh aktiviert ist)
+- [ ] Beachten: Bei `suspend` ist die Zeit sehr knapp (wenige ms)
+
+**Electron API:**
+```typescript
+import { powerMonitor } from "electron"
+powerMonitor.on("suspend", () => { /* System geht schlafen */ })
+powerMonitor.on("resume", () => { /* System ist aufgewacht */ })
+```
+
+#### 7. P2P-Teilen im Artikel-Kontextmenü
+
+**Status:** ✅ Implementiert (14.12.2025)
+
+**Implementiert:**
+- ✅ P2P-Peers werden im "Teilen"-Untermenü des Artikel-Kontextmenüs angezeigt
+- ✅ Schnelles Teilen ohne Artikel öffnen zu müssen
+- ✅ Peers werden nur angezeigt wenn P2P verbunden und Peers verfügbar
+- ✅ QR-Code zum Teilen wird im gleichen Menü angezeigt
+
+**Technische Umsetzung:**
+- `context-menu.tsx`: `getShareSubmenuItems()` Methode für P2P-Peers
+- IPC-Kommunikation via `window.p2p.getPeers()` und `window.p2p.shareToPeer()`
+- State-Management für P2P-Verbindungsstatus im Kontextmenü
+
+#### 8. Feed abonnieren aus P2P-Artikel
+
+**Status:** ✅ Implementiert (14.12.2025)
+
+**Implementiert:**
+- ✅ "Feed abonnieren" Option im Feed-Listen-Kontextmenü (Rechtsklick auf P2P-Feed in Sidebar)
+- ✅ Konvertiert P2P-Feed zu aktivem Feed (entfernt `serviceRef: "p2p-shared"`)
+- ✅ Feed wird automatisch aus P2P-Gruppe entfernt
+- ✅ Artikel werden sofort aktualisiert nach dem Abonnieren (`fetchItems`)
+- ✅ Übersetzungen für DE und EN-US
+
+**Technische Umsetzung:**
+- `context-menu.tsx`: `handleSubscribeFeedFromGroup()` Handler für Feed-Listen-Kontextmenü
+- `context-menu.tsx`: `convertP2PFeedToActive()` für die gemeinsame Konvertierungslogik
+- `context-menu-container.tsx`: `sources` und `groups` werden an `ContextMenuType.Group` weitergegeben
+- `bridges/db.ts`: `window.db.p2pFeeds.convertToActive(sid)` Bridge-Funktion
+- SQLite: `UPDATE sources SET serviceRef = NULL WHERE sid = ?`
+
+**Design-Entscheidungen:**
+- **Option C gewählt:** Flag und Gruppe getrennt halten
+  - Das `serviceRef`-Flag ist die **einzige Wahrheit** über den P2P-Status
+  - Die Gruppenzugehörigkeit ist nur organisatorisch
+  - Manuelles Verschieben aus der Gruppe ändert das Flag NICHT
+- Menüpunkt nur für einzelne P2P-Feeds sichtbar (nicht für Gruppen)
+- Nach Konvertierung: Feed bleibt wo er ist, neue Artikel kommen vom Original-Feed
+
+**Bekanntes Verhalten:**
+- React async pattern: Props werden am Funktionsanfang kopiert um Stale-Props nach await zu vermeiden
 
 ---
 

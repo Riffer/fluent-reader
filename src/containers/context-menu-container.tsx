@@ -25,23 +25,32 @@ import {
 } from "../scripts/models/page"
 import { ViewType, ViewConfigs } from "../schema-types"
 import { FilterType } from "../scripts/models/feed"
+import { addSource, updateSourceDone, RSSSource } from "../scripts/models/source"
+import { removeSourceFromGroup } from "../scripts/models/group"
 
 const getContext = (state: RootState) => state.app.contextMenu
 const getViewType = (state: RootState) => state.page.viewType
 const getFilter = (state: RootState) => state.page.filter
 const getViewConfigs = (state: RootState) => state.page.viewConfigs
+const getSources = (state: RootState) => state.sources
+const getGroups = (state: RootState) => state.groups
 
 const mapStateToProps = createSelector(
-    [getContext, getViewType, getFilter, getViewConfigs],
-    (context, viewType, filter, viewConfigs) => {
+    [getContext, getViewType, getFilter, getViewConfigs, getSources, getGroups],
+    (context, viewType, filter, viewConfigs, sources, groups) => {
         switch (context.type) {
             case ContextMenuType.Item:
+                const item = context.target[0] as RSSItem
+                const source = item ? sources[item.source] : undefined
                 return {
                     type: context.type,
                     event: context.event,
                     viewConfigs: viewConfigs,
-                    item: context.target[0],
+                    item: item,
                     feedId: context.target[1],
+                    source: source,
+                    sources: sources,
+                    groups: groups,
                 }
             case ContextMenuType.Text:
                 return {
@@ -62,6 +71,8 @@ const mapStateToProps = createSelector(
                     type: context.type,
                     event: context.event,
                     sids: context.target,
+                    sources: sources,
+                    groups: groups,
                 }
             case ContextMenuType.Image:
                 return {
@@ -107,6 +118,9 @@ const mapDispatchToProps = dispatch => {
         fetchItems: (sids: number[]) => dispatch(fetchItems(false, sids)),
         settings: (sids: number[]) => dispatch(toggleSettings(true, sids)),
         close: () => dispatch(closeContextMenu()),
+        subscribeFeed: (url: string, name?: string) => dispatch(addSource(url, name)),
+        removeFromGroup: (groupIndex: number, sids: number[]) => dispatch(removeSourceFromGroup(groupIndex, sids)),
+        updateSourceState: (source: RSSSource) => dispatch(updateSourceDone(source)),
     }
 }
 

@@ -1,6 +1,7 @@
 import { connect } from "react-redux"
 import { RootState } from "../scripts/reducer"
 import { pushP2PLink } from "../scripts/models/app"
+import { navigateToP2PArticle } from "../scripts/models/page"
 import P2PIncomingNotification from "../components/p2p-incoming-notification"
 
 const mapStateToProps = (state: RootState) => ({
@@ -10,6 +11,8 @@ const mapStateToProps = (state: RootState) => ({
 const mapDispatchToProps = (dispatch: any) => ({
     addToLog: (title: string, url: string, peerName: string) => 
         dispatch(pushP2PLink(title, url, peerName)),
+    navigateToArticle: (sourceId: number, articleId: number, feedName: string) =>
+        dispatch(navigateToP2PArticle(sourceId, articleId, feedName)),
 })
 
 const P2PIncomingNotificationContainer = connect(

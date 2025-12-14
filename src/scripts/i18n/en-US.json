@@ -98,7 +98,9 @@
         "caseSensitive": "Case sensitive",
         "showCover": "Show cover",
         "showSnippet": "Show snippet",
-        "fadeRead": "Fade read articles"
+        "fadeRead": "Fade read articles",
+        "subscribeFeed": "Subscribe to feed",
+        "feedSubscribed": "Feed already subscribed"
     },
     "searchEngine": {
         "name": "Search engine",

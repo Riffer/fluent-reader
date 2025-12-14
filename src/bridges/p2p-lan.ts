@@ -41,6 +41,9 @@ type ArticleCallback = (data: {
     feedName?: string
     feedUrl?: string
     feedIconUrl?: string
+    storedInFeed?: boolean
+    articleId?: number
+    sourceId?: number
 }) => void
 type ArticleBatchCallback = (data: {
     peerId: string
@@ -59,6 +62,47 @@ type EchoCallback = (data: { peerId: string; originalTimestamp: number; returned
 type PeerDisconnectedCallback = (data: { peerId: string; displayName: string; reason: string }) => void
 type PendingSharesCallback = (counts: Record<string, { count: number; peerName: string }>) => void
 
+// P2P Feeds Changed callback - called when new feeds/articles are stored in SQLite
+export interface P2PFeedsChangedData {
+    newFeedIds: number[]
+    newFeeds: Array<{
+        sid: number
+        url: string
+        iconurl: string | null
+        name: string
+        openTarget: number
+        defaultZoom: number
+        lastFetched: string
+        serviceRef: string | null
+        fetchFrequency: number
+        rules: string | null
+        textDir: number
+        hidden: number
+        mobileMode: number
+        persistCookies: number
+    }>
+    newArticles: Array<{
+        _id: number
+        source: number
+        title: string
+        link: string
+        date: string
+        fetchedDate: string
+        thumb: string | null
+        content: string
+        snippet: string
+        creator: string
+        hasRead: boolean
+        starred: boolean
+        hidden: boolean
+        notify: boolean
+        serviceRef: string | null
+    }>
+    groupsUpdated: boolean
+    groups: any[] | null  // SourceGroup[] from settings
+}
+type FeedsChangedCallback = (data: P2PFeedsChangedData) => void
+
 // Use Maps with unique IDs so components can unsubscribe individually
 let nextCallbackId = 0
 const connectionCallbacks = new Map<number, ConnectionCallback>()
@@ -67,6 +111,7 @@ const articleBatchCallbacks = new Map<number, ArticleBatchCallback>()
 const echoCallbacks = new Map<number, EchoCallback>()
 const peerDisconnectedCallbacks = new Map<number, PeerDisconnectedCallback>()
 const pendingSharesCallbacks = new Map<number, PendingSharesCallback>()
+const feedsChangedCallbacks = new Map<number, FeedsChangedCallback>()
 
 // Register IPC listeners once at module load
 ipcRenderer.on("p2p:connectionStateChanged", (_, status: P2PStatus) => {
@@ -111,6 +156,13 @@ ipcRenderer.on("p2p:articlesReceivedBatch", (_, data) => {
     })
 })
 
+ipcRenderer.on("p2p:feedsChanged", (_, data: P2PFeedsChangedData) => {
+    console.log("[P2P-LAN Bridge] P2P feeds changed:", data.newFeedIds.length, "feeds,", data.newArticles.length, "articles, callbacks:", feedsChangedCallbacks.size)
+    feedsChangedCallbacks.forEach((cb, id) => {
+        try { cb(data) } catch (e) { console.error("[P2P-LAN Bridge] Callback error:", e) }
+    })
+})
+
 export const p2pLanBridge = {
     /**
      * Join a room with the given code and display name
@@ -147,13 +199,13 @@ export const p2pLanBridge = {
      * Send articles with delivery acknowledgement to a specific peer
      * Always uses array format - single article is just an array with 1 element
      */
-    sendArticlesWithAck: (peerId: string, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>): Promise<{ success: boolean, error?: string }> =>
+    sendArticlesWithAck: (peerId: string, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string, openTarget?: number, defaultZoom?: number }>): Promise<{ success: boolean, error?: string }> =>
         ipcRenderer.invoke("p2p-lan:sendArticlesWithAck", peerId, articles),
     
     /**
      * Broadcast articles to all peers with delivery acknowledgement
      */
-    broadcastArticlesWithAck: (articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>): Promise<Record<string, { success: boolean, error?: string }>> =>
+    broadcastArticlesWithAck: (articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string, openTarget?: number, defaultZoom?: number }>): Promise<Record<string, { success: boolean, error?: string }>> =>
         ipcRenderer.invoke("p2p-lan:broadcastArticlesWithAck", articles),
     
     /**
@@ -308,6 +360,21 @@ export const p2pLanBridge = {
     },
     
     /**
+     * Called when P2P feeds/articles are stored in SQLite database.
+     * This is the signal to update Redux state with new sources and items.
+     * Returns an unsubscribe function
+     */
+    onFeedsChanged: (callback: FeedsChangedCallback): (() => void) => {
+        const id = nextCallbackId++
+        feedsChangedCallbacks.set(id, callback)
+        console.log("[P2P-LAN Bridge] Feeds changed callback registered, id:", id, "total:", feedsChangedCallbacks.size)
+        return () => {
+            feedsChangedCallbacks.delete(id)
+            console.log("[P2P-LAN Bridge] Feeds changed callback removed, id:", id, "total:", feedsChangedCallbacks.size)
+        }
+    },
+    
+    /**
      * Remove all event callbacks (use sparingly - prefer individual unsubscribe)
      */
     removeAllListeners: () => {
@@ -317,6 +384,7 @@ export const p2pLanBridge = {
         echoCallbacks.clear()
         peerDisconnectedCallbacks.clear()
         pendingSharesCallbacks.clear()
+        feedsChangedCallbacks.clear()
         console.log("[P2P-LAN Bridge] All callbacks removed")
     }
 }

@@ -9,6 +9,7 @@ import Root from "./components/root"
 import { AppDispatch } from "./scripts/utils"
 import { applyThemeSettings } from "./scripts/settings"
 import { initApp, openTextMenu } from "./scripts/models/app"
+import { handleP2PFeedsChanged } from "./scripts/models/source"
 
 window.settings.setProxy()
 
@@ -25,6 +26,20 @@ store.dispatch(initApp())
 window.utils.addMainContextListener((pos, text) => {
     store.dispatch(openTextMenu(pos, text))
 })
+
+// P2P Feeds Changed Listener - syncs SQLite P2P articles to Redux state
+if (window.p2pLan) {
+    window.p2pLan.onFeedsChanged((data) => {
+        console.log("[P2P] Feeds changed event received:", data.newFeedIds.length, "feeds,", data.newArticles.length, "articles")
+        store.dispatch(handleP2PFeedsChanged(
+            data.newFeeds,
+            data.newArticles,
+            data.groupsUpdated,
+            data.groups
+        ))
+    })
+    console.log("[P2P] Feeds changed listener registered")
+}
 
 window.fontList = [""]
 window.utils.initFontList().then(fonts => {

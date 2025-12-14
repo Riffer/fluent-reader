@@ -1,3 +1,34 @@
+/**
+ * ============================================================================
+ * ⚠️  LEGACY DATABASE - DO NOT MODIFY FOR NEW FEATURES  ⚠️
+ * ============================================================================
+ * 
+ * This file contains Lovefield (IndexedDB) database operations.
+ * It is LEGACY code and should NOT be extended for new features.
+ * 
+ * CURRENT ARCHITECTURE (Dual-Database Problem):
+ * - Lovefield (this file): Used by ALL UI operations via Models
+ * - SQLite (src/main/db-sqlite.ts): New DB for P2P features, accessed via window.db.*
+ * 
+ * WHY NOT MODIFY THIS FILE:
+ * - Lovefield will be completely replaced by SQLite in the future
+ * - Any new Lovefield code will need to be removed during migration
+ * - New features should only use SQLite via window.db.* Bridge
+ * 
+ * FOR NEW FEATURES:
+ * - Use src/main/db-sqlite.ts (Main Process)
+ * - Access via window.db.* Bridge from Renderer
+ * - See src/bridges/db.ts for type definitions
+ * 
+ * MIGRATION TODO:
+ * - Replace all Lovefield calls in Models with window.db.*
+ * - Remove Lovefield completely
+ * - Then: P2P feeds can be shown in UI
+ * 
+ * See IDEAS.md "⚠️ WICHTIG: Datenbankarchitektur" for full documentation.
+ * ============================================================================
+ */
+
 import intl from "react-intl-universal"
 import Datastore from "@seald-io/nedb"
 import lf from "lovefield"

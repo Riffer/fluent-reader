@@ -4,12 +4,20 @@
  * Handles peer discovery via UDP broadcast and direct TCP connections
  * for article link sharing within a local network.
  */
-import { ipcMain, BrowserWindow } from "electron"
+import { ipcMain, BrowserWindow, powerMonitor } from "electron"
 import * as dgram from "dgram"
 import * as net from "net"
 import * as crypto from "crypto"
 import { getKnownPeers, addPeer, updatePeerLastSeen, KnownPeer, generatePeerHash } from "./p2p-share"
-import { getStoredP2PRoom, setStoredP2PRoom, clearStoredP2PRoom, getStoredP2PPeerId, setStoredP2PPeerId } from "./settings"
+import { 
+    getStoredP2PRoom, 
+    setStoredP2PRoom, 
+    clearStoredP2PRoom, 
+    getStoredP2PPeerId, 
+    setStoredP2PPeerId,
+    addSourceToP2PGroup,
+    getSourceGroups
+} from "./settings"
 import { 
     addPendingShare, 
     getPendingSharesForPeer, 
@@ -18,7 +26,13 @@ import {
     getPendingShareCounts,
     getAllPendingShares,
     removeOldPendingShares,
-    PendingShareRow
+    PendingShareRow,
+    getOrCreateP2PFeed,
+    insertItem,
+    getSourceByUrl,
+    getSourceById,
+    ItemRow,
+    findArticleByLink
 } from "./db-sqlite"
 
 // Constants
@@ -49,7 +63,7 @@ interface DiscoveryMessage {
 }
 
 interface P2PMessage {
-    type: "article-link-batch" | "article-ack" | "heartbeat" | "heartbeat-ack" | "echo-request" | "echo-response"
+    type: "article-link-batch" | "article-ack" | "heartbeat" | "heartbeat-ack" | "echo-request" | "echo-response" | "goodbye"
     messageId?: string
     senderName: string
     timestamp: number
@@ -65,6 +79,8 @@ interface P2PMessage {
         feedName?: string
         feedUrl?: string
         feedIconUrl?: string
+        openTarget?: number  // SourceOpenTarget: 0=Local, 1=Webpage, 2=External, 3=FullContent
+        defaultZoom?: number
     }>
     echoData?: any
 }
@@ -198,9 +214,24 @@ export async function joinRoom(roomCode: string, displayName: string, saveToStor
 /**
  * Leave the current room
  * @param clearStore - Whether to clear the stored room (default: true)
+ * @param sendGoodbye - Whether to send goodbye message to peers (default: true)
  */
-export async function leaveRoom(clearStore: boolean = true): Promise<void> {
+export async function leaveRoom(clearStore: boolean = true, sendGoodbye: boolean = true): Promise<void> {
     console.log("[P2P-LAN] Leaving room")
+    
+    // Send goodbye to all connected peers before closing connections
+    if (sendGoodbye && connectedPeers.size > 0) {
+        const goodbyeMsg: P2PMessage = {
+            type: "goodbye",
+            senderName: localDisplayName,
+            timestamp: Date.now()
+        }
+        broadcast(goodbyeMsg)
+        console.log(`[P2P-LAN] Sent goodbye to ${connectedPeers.size} peer(s)`)
+        
+        // Small delay to ensure message is sent before closing sockets
+        await new Promise(resolve => setTimeout(resolve, 100))
+    }
     
     // Clear stored room if requested
     if (clearStore) {
@@ -240,6 +271,110 @@ export async function leaveRoom(clearStore: boolean = true): Promise<void> {
     
     activeRoomCode = null
     notifyConnectionState()
+}
+
+/**
+ * Shutdown P2P gracefully when app is closing
+ * Sends goodbye to peers but keeps the room stored for next startup
+ */
+export async function shutdownP2P(): Promise<void> {
+    console.log("[P2P-LAN] Shutting down P2P (app closing)")
+    // Don't clear stored room (false), but do send goodbye (true)
+    await leaveRoom(false, true)
+}
+
+/**
+ * Handle system suspend (sleep/hibernate)
+ * Send goodbye to peers so they know we're going offline
+ */
+export async function onSystemSuspend(): Promise<void> {
+    if (!activeRoomCode) return
+    
+    console.log("[P2P-LAN] System suspending - sending goodbye to peers")
+    
+    // Send goodbye but don't clear stored room or close connections fully
+    // (they'll be dead anyway after resume)
+    const goodbyeMsg: P2PMessage = {
+        type: "goodbye",
+        senderName: localDisplayName,
+        timestamp: Date.now()
+    }
+    broadcast(goodbyeMsg)
+}
+
+/**
+ * Handle system resume (wake from sleep/hibernate)
+ * Immediately re-announce presence and check peer connectivity
+ */
+export async function onSystemResume(): Promise<void> {
+    if (!activeRoomCode) return
+    
+    console.log("[P2P-LAN] System resumed - re-announcing presence")
+    
+    // Reset lastSeen for all peers (we don't know their state after resume)
+    const now = Date.now()
+    for (const [peerId, peer] of connectedPeers) {
+        // Give peers a grace period - they might also be resuming
+        peer.lastSeen = now
+    }
+    
+    // Immediately send UDP discovery to find/re-announce to peers
+    sendImmediateDiscovery()
+    
+    // Send heartbeat to all connected peers to verify connectivity
+    sendImmediateHeartbeat()
+    
+    // Process any pending shares for peers that are now online
+    setTimeout(() => {
+        for (const [peerId, peer] of connectedPeers) {
+            processPendingSharesForPeer(peerId, peer.displayName)
+        }
+    }, 1000) // Small delay to let connections stabilize
+}
+
+/**
+ * Send immediate UDP discovery broadcast
+ */
+function sendImmediateDiscovery(): void {
+    if (!udpSocket || !activeRoomCode) return
+    
+    const message: DiscoveryMessage = {
+        type: "discovery",
+        roomCode: activeRoomCode,
+        peerId: localPeerId,
+        displayName: localDisplayName,
+        tcpPort: tcpPort,
+        timestamp: Date.now()
+    }
+    
+    const data = Buffer.from(JSON.stringify(message))
+    
+    udpSocket.send(data, DISCOVERY_PORT, "255.255.255.255", (err) => {
+        if (err) console.error("[P2P-LAN] Immediate discovery broadcast error:", err)
+        else console.log("[P2P-LAN] Sent immediate discovery broadcast after resume")
+    })
+}
+
+/**
+ * Send immediate heartbeat to all connected peers
+ */
+function sendImmediateHeartbeat(): void {
+    if (!activeRoomCode) return
+    
+    for (const [peerId, peer] of connectedPeers) {
+        try {
+            const message: P2PMessage = {
+                type: "heartbeat",
+                senderId: localPeerId,
+                roomCode: activeRoomCode,
+                displayName: localDisplayName
+            }
+            peer.socket.write(JSON.stringify(message) + "\n")
+        } catch (err) {
+            console.error(`[P2P-LAN] Failed to send immediate heartbeat to ${peerId}:`, err)
+        }
+    }
+    console.log(`[P2P-LAN] Sent immediate heartbeat to ${connectedPeers.size} peers after resume`)
 }
 
 /**
@@ -297,6 +432,8 @@ export function sendArticlesWithAck(
         feedName?: string
         feedUrl?: string
         feedIconUrl?: string
+        openTarget?: number
+        defaultZoom?: number
     }>,
     queueOnFailure: boolean = false
 ): Promise<boolean> {
@@ -417,6 +554,8 @@ export async function broadcastArticlesWithAck(
         feedName?: string
         feedUrl?: string
         feedIconUrl?: string
+        openTarget?: number
+        defaultZoom?: number
     }>
 ): Promise<Map<string, { success: boolean, error?: string }>> {
     const results = new Map<string, { success: boolean, error?: string }>()
@@ -670,7 +809,8 @@ function handleDiscoveryMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
         // Ignore messages from other rooms
         if (data.roomCode !== activeRoomCode) return
         
-        console.log(`[P2P-LAN] Discovery from ${data.displayName} (${rinfo.address}:${data.tcpPort})`)
+        const msgType = data.type === "discovery" ? "Discovery" : "Discovery-Response"
+        console.log(`[P2P-LAN] ${msgType} from ${data.displayName} (${rinfo.address}:${data.tcpPort})`)
         
         // Update discovered peers
         discoveredPeers.set(data.peerId, {
@@ -934,8 +1074,34 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
                 console.log(`[P2P-LAN] Received ${msg.articles.length} article(s) from ${peer.displayName}`)
                 
                 if (msg.articles.length === 1) {
-                    // Single article - show dialog
+                    // Single article - store and show dialog
                     const a = msg.articles[0]
+                    
+                    // Store the article (will return existing articleId if duplicate)
+                    const singleResult = storeP2PArticle({
+                        url: a.url,
+                        title: a.title,
+                        feedUrl: a.feedUrl,
+                        feedName: a.feedName,
+                        feedIconUrl: a.feedIconUrl,
+                        openTarget: a.openTarget,
+                        defaultZoom: a.defaultZoom,
+                        timestamp: msg.timestamp,
+                        peerName: peer.displayName
+                    })
+                    
+                    // Notify about state changes (new feed, groups, or article)
+                    if (singleResult.groupsUpdated || singleResult.feedCreated || singleResult.articleData) {
+                        notifyP2PFeedsChanged(
+                            singleResult.feedCreated && singleResult.sourceId ? [singleResult.sourceId] : [], 
+                            singleResult.groupsUpdated, 
+                            singleResult.articleData ? [singleResult.articleData] : []
+                        )
+                    }
+                    
+                    // Article is in feed if stored OR if duplicate (both have sourceId/articleId)
+                    const isInFeed = singleResult.sourceId !== null && singleResult.articleId !== null
+                    
                     notifyArticleReceived(
                         peerId,
                         peer.displayName,
@@ -944,10 +1110,33 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
                         msg.timestamp,
                         a.feedName,
                         a.feedUrl,
-                        a.feedIconUrl
+                        a.feedIconUrl,
+                        isInFeed,
+                        singleResult.articleId ?? undefined,
+                        singleResult.sourceId ?? undefined
                     )
                 } else {
-                    // Multiple articles - send to batch handler (goes to bell, no dialogs)
+                    // Multiple articles - batch store and send to bell (no dialogs)
+                    const articlesToStore: P2PArticleData[] = msg.articles.map(a => ({
+                        url: a.url,
+                        title: a.title,
+                        feedUrl: a.feedUrl,
+                        feedName: a.feedName,
+                        feedIconUrl: a.feedIconUrl,
+                        openTarget: a.openTarget,
+                        defaultZoom: a.defaultZoom,
+                        timestamp: msg.timestamp,
+                        peerName: peer.displayName
+                    }))
+                    
+                    const storeResult = storeP2PArticles(articlesToStore)
+                    
+                    // Notify renderer about state changes
+                    if (storeResult.groupsUpdated || storeResult.newFeeds.length > 0 || storeResult.newArticles.length > 0) {
+                        notifyP2PFeedsChanged(storeResult.newFeeds, storeResult.groupsUpdated, storeResult.newArticles)
+                    }
+                    
+                    // Send to batch handler (goes to bell, no dialogs)
                     notifyArticlesReceivedBatch(
                         peerId,
                         peer.displayName,
@@ -958,7 +1147,8 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
                             feedName: a.feedName,
                             feedUrl: a.feedUrl,
                             feedIconUrl: a.feedIconUrl
-                        }))
+                        })),
+                        storeResult.stored
                     )
                 }
                 
@@ -1019,7 +1209,217 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
         case "echo-response":
             notifyEchoResponse(peerId, msg.echoData?.originalTimestamp, msg.timestamp)
             break
+            
+        case "goodbye":
+            // Peer is leaving gracefully - remove from connected peers
+            console.log(`[P2P-LAN] Received goodbye from ${peer.displayName}`)
+            connectedPeers.delete(peerId)
+            discoveredPeers.delete(peerId)
+            notifyPeerDisconnected(peerId, peer.displayName, "Peer left the room")
+            notifyPeersChanged()
+            break
     }
+}
+
+// ============================================================================
+// P2P Article Storage
+// ============================================================================
+
+interface P2PArticleData {
+    url: string
+    title: string
+    feedUrl?: string
+    feedName?: string
+    feedIconUrl?: string
+    openTarget?: number
+    defaultZoom?: number
+    timestamp: number
+    peerName: string
+}
+
+/**
+ * P2P article data for Renderer sync (matches Lovefield schema)
+ */
+export interface P2PArticleForRenderer {
+    _id: number
+    source: number
+    title: string
+    link: string
+    date: string  // ISO string
+    fetchedDate: string  // ISO string
+    thumb: string | null
+    content: string
+    snippet: string
+    creator: string
+    hasRead: boolean
+    starred: boolean
+    hidden: boolean
+    notify: boolean
+    serviceRef: string | null
+}
+
+/**
+ * Store a P2P received article in the database.
+ * 
+ * Logic:
+ * 1. Search globally for article by link - if found, return existing IDs (no duplicate)
+ * 2. If not found, check if the feed exists - if yes, insert article into that feed
+ * 3. If neither article nor feed exist, create P2P feed and insert article there
+ * 
+ * @returns Object with sourceId, articleId, articleData, groupsUpdated flag
+ */
+function storeP2PArticle(article: P2PArticleData): { 
+    sourceId: number | null
+    articleId: number | null
+    articleData: P2PArticleForRenderer | null
+    feedCreated: boolean
+    groupsUpdated: boolean
+    error?: string
+} {
+    try {
+        // Step 1: Search globally for article by link
+        const existingArticle = findArticleByLink(article.url)
+        if (existingArticle) {
+            console.log(`[P2P-LAN] Article already exists globally: "${article.title}" (id=${existingArticle.articleId}, source=${existingArticle.sourceId})`)
+            return { 
+                sourceId: existingArticle.sourceId, 
+                articleId: existingArticle.articleId, 
+                articleData: null, 
+                feedCreated: false, 
+                groupsUpdated: false, 
+                error: "duplicate" 
+            }
+        }
+        
+        // Step 2: Check if the feed exists (by URL)
+        let sid: number | null = null
+        let feedCreated = false
+        let groupsUpdated = false
+        
+        if (article.feedUrl) {
+            const existingSource = getSourceByUrl(article.feedUrl)
+            if (existingSource) {
+                // Feed exists - use it
+                sid = existingSource.sid
+                console.log(`[P2P-LAN] Using existing feed: "${existingSource.name}" (sid=${sid})`)
+            } else {
+                // Step 3: Create new P2P feed
+                const feedName = article.feedName || new URL(article.feedUrl).hostname
+                const result = getOrCreateP2PFeed(article.feedUrl, feedName, article.feedIconUrl, article.openTarget, article.defaultZoom)
+                sid = result.sid
+                feedCreated = result.created
+                
+                if (feedCreated) {
+                    console.log(`[P2P-LAN] New P2P feed created (sid=${sid}), adding to P2P group`)
+                    addSourceToP2PGroup(sid)
+                    groupsUpdated = true
+                }
+            }
+        } else {
+            // No feedUrl - create a generic P2P feed
+            console.log(`[P2P-LAN] Article "${article.title}" has no feedUrl - creating generic P2P feed`)
+            const genericUrl = "p2p://shared-articles"
+            const result = getOrCreateP2PFeed(genericUrl, "P2P Shared Articles", undefined, undefined, undefined)
+            sid = result.sid
+            feedCreated = result.created
+            
+            if (feedCreated) {
+                addSourceToP2PGroup(sid)
+                groupsUpdated = true
+            }
+        }
+        
+        // Insert the article into the feed
+        const now = new Date().toISOString()
+        const articleDate = new Date(article.timestamp).toISOString()
+        
+        const itemRow: Omit<ItemRow, "_id"> = {
+            source: sid,
+            title: article.title,
+            link: article.url,
+            date: articleDate,
+            fetchedDate: now,
+            thumb: null,
+            content: `<p>Dieser Artikel wurde von <strong>${article.peerName}</strong> via P2P geteilt.</p><p><a href="${article.url}" target="_blank">${article.url}</a></p>`,
+            snippet: `Geteilt von ${article.peerName}`,
+            creator: article.peerName,
+            hasRead: 0,
+            starred: 0,
+            hidden: 0,
+            notify: 1, // Mark for notification
+            serviceRef: null
+        }
+        
+        const articleId = insertItem(itemRow)
+        console.log(`[P2P-LAN] Stored P2P article "${article.title}" (id=${articleId}) in feed ${sid}`)
+        
+        // Create article data for Renderer (with proper boolean types for Lovefield)
+        const articleData: P2PArticleForRenderer = {
+            _id: articleId,
+            source: sid,
+            title: article.title,
+            link: article.url,
+            date: articleDate,
+            fetchedDate: now,
+            thumb: null,
+            content: itemRow.content,
+            snippet: itemRow.snippet,
+            creator: article.peerName,
+            hasRead: false,
+            starred: false,
+            hidden: false,
+            notify: true,
+            serviceRef: null
+        }
+        
+        return { sourceId: sid, articleId, articleData, feedCreated, groupsUpdated }
+        
+    } catch (err) {
+        // Handle any other errors
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        console.error(`[P2P-LAN] Error storing P2P article:`, err)
+        return { sourceId: null, articleId: null, articleData: null, feedCreated: false, groupsUpdated: false, error: errorMsg }
+    }
+}
+
+/**
+ * Store multiple P2P articles at once
+ */
+function storeP2PArticles(articles: P2PArticleData[]): {
+    stored: number
+    duplicates: number
+    errors: number
+    groupsUpdated: boolean
+    newFeeds: number[]
+    newArticles: P2PArticleForRenderer[]
+} {
+    let stored = 0
+    let duplicates = 0
+    let errors = 0
+    let groupsUpdated = false
+    const newFeeds: number[] = []
+    const newArticles: P2PArticleForRenderer[] = []
+    
+    for (const article of articles) {
+        const result = storeP2PArticle(article)
+        if (result.articleId && result.articleData) {
+            stored++
+            newArticles.push(result.articleData)
+            if (result.feedCreated && result.sourceId) {
+                newFeeds.push(result.sourceId)
+            }
+            if (result.groupsUpdated) {
+                groupsUpdated = true
+            }
+        } else if (result.error === "duplicate") {
+            duplicates++
+        } else if (result.error) {
+            errors++
+        }
+    }
+    
+    console.log(`[P2P-LAN] Batch store result: ${stored} stored, ${duplicates} duplicates, ${errors} errors`)
+    return { stored, duplicates, errors, groupsUpdated, newFeeds, newArticles }
 }
 
 // ============================================================================
@@ -1062,7 +1462,10 @@ function notifyArticleReceived(
     timestamp: number,
     feedName?: string,
     feedUrl?: string,
-    feedIconUrl?: string
+    feedIconUrl?: string,
+    storedInFeed?: boolean,
+    articleId?: number,
+    sourceId?: number
 ): void {
     const mainWindow = getMainWindow()
     if (!mainWindow) return
@@ -1075,7 +1478,10 @@ function notifyArticleReceived(
         timestamp,
         feedName,
         feedUrl,
-        feedIconUrl
+        feedIconUrl,
+        storedInFeed: storedInFeed ?? false,
+        articleId,
+        sourceId
     })
 }
 
@@ -1093,17 +1499,45 @@ function notifyArticlesReceivedBatch(
         feedName?: string
         feedUrl?: string
         feedIconUrl?: string
-    }>
+    }>,
+    storedCount?: number
 ): void {
     const mainWindow = getMainWindow()
     if (!mainWindow) return
     
-    console.log(`[P2P-LAN] Sending batch of ${articles.length} articles from ${peerName}`)
+    console.log(`[P2P-LAN] Sending batch of ${articles.length} articles from ${peerName} (${storedCount ?? 0} stored)`)
     mainWindow.webContents.send("p2p:articlesReceivedBatch", {
         peerId,
         peerName,
         articles,
-        count: articles.length
+        count: articles.length,
+        storedCount: storedCount ?? 0
+    })
+}
+
+/**
+ * Notify renderer that P2P feeds/groups have changed
+ * This tells the renderer to reload sources and groups.
+ * Sends complete feed data so renderer can insert into Lovefield.
+ */
+function notifyP2PFeedsChanged(
+    newFeedIds: number[], 
+    groupsUpdated: boolean, 
+    newArticles?: P2PArticleForRenderer[]
+): void {
+    const mainWindow = getMainWindow()
+    if (!mainWindow) return
+    
+    // Get complete feed data for new feeds
+    const newFeeds = newFeedIds.map(sid => getSourceById(sid)).filter(Boolean)
+    
+    console.log(`[P2P-LAN] Notifying feeds changed: ${newFeedIds.length} new feeds, ${newArticles?.length ?? 0} articles, groups updated: ${groupsUpdated}`)
+    mainWindow.webContents.send("p2p:feedsChanged", {
+        newFeedIds,
+        newFeeds, // Complete feed data for Lovefield insertion
+        newArticles: newArticles ?? [], // Article data for Lovefield insertion
+        groupsUpdated,
+        groups: groupsUpdated ? getSourceGroups() : null
     })
 }
 
@@ -1148,7 +1582,7 @@ export function registerP2PLanIpcHandlers(): void {
         return sendToPeer(peerId, message)
     })
     
-    ipcMain.handle("p2p-lan:sendArticlesWithAck", async (_, peerId: string, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>) => {
+    ipcMain.handle("p2p-lan:sendArticlesWithAck", async (_, peerId: string, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string, openTarget?: number, defaultZoom?: number }>) => {
         try {
             await sendArticlesWithAck(peerId, articles)
             return { success: true }
@@ -1164,7 +1598,7 @@ export function registerP2PLanIpcHandlers(): void {
         return await sendArticleLinkWithQueue(peerId, title, url, feedName, feedUrl, feedIconUrl)
     })
     
-    ipcMain.handle("p2p-lan:broadcastArticlesWithAck", async (_, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>) => {
+    ipcMain.handle("p2p-lan:broadcastArticlesWithAck", async (_, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string, openTarget?: number, defaultZoom?: number }>) => {
         const results = await broadcastArticlesWithAck(articles)
         // Convert Map to object for IPC
         const resultObj: Record<string, { success: boolean, error?: string }> = {}

@@ -1,6 +1,7 @@
 import intl from "react-intl-universal"
 import * as db from "../db"
 import lf from "lovefield"
+import { SourceRow, ItemRow } from "../../bridges/db"
 import {
     fetchFavicon,
     ActionStatus,
@@ -19,7 +20,8 @@ import {
 } from "./item"
 import { saveSettings } from "./app"
 import { SourceRule } from "./rule"
-import { fixBrokenGroups } from "./group"
+import { fixBrokenGroups, setGroupsFromP2P } from "./group"
+import { SourceGroup } from "../../schema-types"
 
 export enum SourceOpenTarget {
     Local,
@@ -78,20 +80,15 @@ export class RSSSource {
         item: MyParserItem
     ): Promise<RSSItem> {
         let i = new RSSItem(item, source)
-        const existingItems = (await db.itemsDB
-            .select()
-            .from(db.items)
-            .where(
-                lf.op.and(
-                    db.items.source.eq(i.source),
-                    db.items.title.eq(i.title),
-                    db.items.date.eq(i.date)
-                )
-            )
-            .limit(1)
-            .exec()) as RSSItem[]
         
-        if (existingItems.length === 0) {
+        // Use SQLite for duplicate check via window.db bridge
+        const exists = await window.db.items.exists(
+            i.source,
+            i.title,
+            i.date.toISOString()
+        )
+        
+        if (!exists) {
             RSSItem.parseContent(i, item)
             if (source.rules) SourceRule.applyAll(source.rules, i)
             return i
@@ -139,6 +136,7 @@ export type SourceState = {
 
 export const INIT_SOURCES = "INIT_SOURCES"
 export const ADD_SOURCE = "ADD_SOURCE"
+export const ADD_P2P_SOURCES = "ADD_P2P_SOURCES"
 export const UPDATE_SOURCE = "UPDATE_SOURCE"
 export const UPDATE_UNREAD_COUNTS = "UPDATE_UNREAD_COUNTS"
 export const DELETE_SOURCE = "DELETE_SOURCE"
@@ -181,9 +179,15 @@ interface ToggleSourceHiddenAction {
     source: RSSSource
 }
 
+interface AddP2PSourcesAction {
+    type: typeof ADD_P2P_SOURCES
+    sources: SourceState
+}
+
 export type SourceActionTypes =
     | InitSourcesAction
     | AddSourceAction
+    | AddP2PSourcesAction
     | UpdateSourceAction
     | UpdateUnreadCountsAction
     | DeleteSourceAction
@@ -213,14 +217,13 @@ export function initSourcesFailure(err): SourceActionTypes {
 }
 
 async function unreadCount(sources: SourceState): Promise<SourceState> {
-    const rows = await db.itemsDB
-        .select(db.items.source, lf.fn.count(db.items._id))
-        .from(db.items)
-        .where(db.items.hasRead.eq(false))
-        .groupBy(db.items.source)
-        .exec()
-    for (let row of rows) {
-        sources[row["source"]].unreadCount = row["COUNT(_id)"]
+    // Use SQLite for unread counts via window.db bridge
+    const counts = await window.db.getUnreadCounts()
+    for (const [sourceId, count] of Object.entries(counts)) {
+        const sid = parseInt(sourceId)
+        if (sources[sid]) {
+            sources[sid].unreadCount = count
+        }
     }
     return sources
 }
@@ -241,26 +244,36 @@ export function updateUnreadCounts(): AppThunk<Promise<void>> {
     }
 }
 
+// Helper function to convert SQLite SourceRow to RSSSource
+function rowToSource(row: SourceRow): RSSSource {
+    const source = new RSSSource(row.url, row.name)
+    source.sid = row.sid
+    source.iconurl = row.iconurl ?? undefined
+    source.openTarget = row.openTarget
+    source.defaultZoom = row.defaultZoom
+    source.lastFetched = new Date(row.lastFetched)
+    source.serviceRef = row.serviceRef ?? undefined
+    source.fetchFrequency = row.fetchFrequency
+    source.rules = row.rules ? JSON.parse(row.rules) : undefined
+    source.textDir = row.textDir
+    source.hidden = row.hidden === 1
+    source.mobileMode = row.mobileMode === 1
+    source.persistCookies = row.persistCookies === 1
+    source.unreadCount = 0
+    return source
+}
+
 export function initSources(): AppThunk<Promise<void>> {
     return async dispatch => {
         dispatch(initSourcesRequest())
+        // Initialize Lovefield for migration support (will be removed later)
         await db.init()
-        const sources = (await db.sourcesDB
-            .select()
-            .from(db.sources)
-            .exec()) as RSSSource[]
+        
+        // Use SQLite for source data via window.db bridge
+        const sourceRows = await window.db.sources.getAll()
         const state: SourceState = {}
-        for (let source of sources) {
-            source.unreadCount = 0
-            // Migration: Ensure mobileMode field exists (for older databases)
-            if (source.mobileMode === undefined) {
-                source.mobileMode = false
-            }
-            // Migration: Ensure persistCookies field exists (for older databases)
-            if (source.persistCookies === undefined) {
-                source.persistCookies = false
-            }
-            state[source.sid] = source
+        for (let row of sourceRows) {
+            state[row.sid] = rowToSource(row)
         }
         await unreadCount(state)
         dispatch(fixBrokenGroups(state))
@@ -297,6 +310,26 @@ export function addSourceFailure(err, batch: boolean): SourceActionTypes {
     }
 }
 
+// Helper function to convert RSSSource to SQLite SourceRow
+function sourceToRow(source: RSSSource): Omit<SourceRow, "sid"> & { sid?: number } {
+    return {
+        sid: source.sid,
+        url: source.url,
+        iconurl: source.iconurl ?? null,
+        name: source.name,
+        openTarget: source.openTarget,
+        defaultZoom: source.defaultZoom,
+        lastFetched: source.lastFetched.toISOString(),
+        serviceRef: source.serviceRef ?? null,
+        fetchFrequency: source.fetchFrequency,
+        rules: source.rules ? JSON.stringify(source.rules) : null,
+        textDir: source.textDir,
+        hidden: source.hidden ? 1 : 0,
+        mobileMode: source.mobileMode ? 1 : 0,
+        persistCookies: source.persistCookies ? 1 : 0
+    }
+}
+
 let insertPromises = Promise.resolve()
 export function insertSource(source: RSSSource): AppThunk<Promise<RSSSource>> {
     return (_, getState) => {
@@ -304,17 +337,18 @@ export function insertSource(source: RSSSource): AppThunk<Promise<RSSSource>> {
             insertPromises = insertPromises.then(async () => {
                 let sids = Object.values(getState().sources).map(s => s.sid)
                 source.sid = Math.max(...sids, -1) + 1
-                const row = db.sources.createRow(source)
                 try {
-                    const inserted = (await db.sourcesDB
-                        .insert()
-                        .into(db.sources)
-                        .values([row])
-                        .exec()) as RSSSource[]
-                    resolve(inserted[0])
+                    // Use SQLite for insert via window.db bridge
+                    const row = sourceToRow(source)
+                    await window.db.sources.insert(row)
+                    resolve(source)
                 } catch (err) {
-                    if (err.code === 201) reject(intl.get("sources.exist"))
-                    else reject(err)
+                    // SQLite UNIQUE constraint error
+                    if (err.message?.includes("UNIQUE constraint failed")) {
+                        reject(intl.get("sources.exist"))
+                    } else {
+                        reject(err)
+                    }
                 }
             })
         })
@@ -372,12 +406,9 @@ export function updateSource(source: RSSSource): AppThunk<Promise<void>> {
     return async dispatch => {
         let sourceCopy = { ...source }
         delete sourceCopy.unreadCount
-        const row = db.sources.createRow(sourceCopy)
-        await db.sourcesDB
-            .insertOrReplace()
-            .into(db.sources)
-            .values([row])
-            .exec()
+        // Use SQLite for update via window.db bridge
+        const row = sourceToRow(sourceCopy)
+        await window.db.sources.update(source.sid, row)
         dispatch(updateSourceDone(source))
     }
 }
@@ -396,16 +427,10 @@ export function deleteSource(
     return async (dispatch, getState) => {
         if (!batch) dispatch(saveSettings())
         try {
-            await db.itemsDB
-                .delete()
-                .from(db.items)
-                .where(db.items.source.eq(source.sid))
-                .exec()
-            await db.sourcesDB
-                .delete()
-                .from(db.sources)
-                .where(db.sources.sid.eq(source.sid))
-                .exec()
+            // Use SQLite for delete via window.db bridge
+            // Items are deleted automatically due to CASCADE foreign key
+            await window.db.items.deleteBySource(source.sid)
+            await window.db.sources.delete(source.sid)
             dispatch(deleteSourceDone(source))
             window.settings.saveGroups(getState().groups)
         } catch (err) {
@@ -469,6 +494,150 @@ export function updateFavicon(
     }
 }
 
+/**
+ * Action creator for adding P2P sources to the state
+ */
+export function addP2PSourcesDone(sources: SourceState): SourceActionTypes {
+    return {
+        type: ADD_P2P_SOURCES,
+        sources: sources,
+    }
+}
+
+/**
+ * Import from P2PFeedsChangedData interface in p2p-lan bridge
+ */
+interface P2PSourceData {
+    sid: number
+    url: string
+    iconurl: string | null
+    name: string
+    openTarget: number
+    defaultZoom: number
+    lastFetched: string
+    serviceRef: string | null
+    fetchFrequency: number
+    rules: string | null
+    textDir: number
+    hidden: number
+    mobileMode: number
+    persistCookies: number
+}
+
+interface P2PArticleData {
+    _id: number
+    source: number
+    title: string
+    link: string
+    date: string
+    fetchedDate: string
+    thumb: string | null
+    content: string
+    snippet: string
+    creator: string
+    hasRead: boolean
+    starred: boolean
+    hidden: boolean
+    notify: boolean
+    serviceRef: string | null
+}
+
+/**
+ * Handle P2P feeds changed event - adds new sources and items to Redux state.
+ * Called when the Main Process notifies that P2P articles have been stored in SQLite.
+ */
+export function handleP2PFeedsChanged(
+    newFeeds: P2PSourceData[],
+    newArticles: P2PArticleData[],
+    groupsUpdated: boolean,
+    groups: any[] | null
+): AppThunk<Promise<void>> {
+    return async (dispatch, getState) => {
+        console.log(`[P2P] Handling feeds changed: ${newFeeds.length} feeds, ${newArticles.length} articles`)
+        
+        // Convert and add new sources to state
+        if (newFeeds.length > 0) {
+            const sourcesToAdd: SourceState = {}
+            for (const feedData of newFeeds) {
+                const source = new RSSSource(feedData.url, feedData.name)
+                source.sid = feedData.sid
+                source.iconurl = feedData.iconurl ?? undefined
+                source.openTarget = feedData.openTarget
+                source.defaultZoom = feedData.defaultZoom
+                source.lastFetched = new Date(feedData.lastFetched)
+                source.serviceRef = feedData.serviceRef ?? undefined
+                source.fetchFrequency = feedData.fetchFrequency
+                source.rules = feedData.rules ? JSON.parse(feedData.rules) : undefined
+                source.textDir = feedData.textDir
+                source.hidden = feedData.hidden === 1
+                source.mobileMode = feedData.mobileMode === 1
+                source.persistCookies = feedData.persistCookies === 1
+                source.unreadCount = 0
+                
+                sourcesToAdd[source.sid] = source
+            }
+            dispatch(addP2PSourcesDone(sourcesToAdd))
+            console.log(`[P2P] Added ${Object.keys(sourcesToAdd).length} new sources to Redux state`)
+        }
+        
+        // Convert and add new articles to items state
+        if (newArticles.length > 0) {
+            const itemsToAdd: RSSItem[] = newArticles.map(articleData => ({
+                _id: articleData._id,
+                source: articleData.source,
+                title: articleData.title,
+                link: articleData.link,
+                date: new Date(articleData.date),
+                fetchedDate: new Date(articleData.fetchedDate),
+                thumb: articleData.thumb ?? undefined,
+                content: articleData.content,
+                snippet: articleData.snippet,
+                creator: articleData.creator ?? undefined,
+                hasRead: articleData.hasRead,
+                starred: articleData.starred,
+                hidden: articleData.hidden,
+                notify: articleData.notify,
+                serviceRef: articleData.serviceRef ?? undefined
+            } as RSSItem))
+            
+            // Create itemState map
+            const itemState: { [_id: number]: RSSItem } = {}
+            for (const item of itemsToAdd) {
+                itemState[item._id] = item
+            }
+            
+            // Dispatch FETCH_ITEMS with success to add items to state
+            dispatch({
+                type: FETCH_ITEMS,
+                status: ActionStatus.Success,
+                items: itemsToAdd,
+                itemState: itemState,
+            })
+            console.log(`[P2P] Added ${itemsToAdd.length} new articles to Redux state`)
+        }
+        
+        // Update groups from P2P sync if provided
+        if (groupsUpdated && groups && groups.length > 0) {
+            // Convert plain objects to SourceGroup instances
+            // Important: Preserve isMultiple from original data, don't rely on constructor
+            const sourceGroups: SourceGroup[] = groups.map(g => {
+                const sg = new SourceGroup(g.sids, g.name)
+                sg.isMultiple = g.isMultiple  // Preserve original isMultiple flag
+                sg.expanded = g.expanded ?? true
+                if (g.name) sg.name = g.name  // Ensure name is preserved for single-item groups
+                return sg
+            })
+            dispatch(setGroupsFromP2P(sourceGroups))
+            console.log(`[P2P] Updated groups from P2P sync: ${sourceGroups.length} groups`)
+        }
+        
+        // Update unread counts for affected sources
+        if (newFeeds.length > 0 || newArticles.length > 0) {
+            await dispatch(updateUnreadCounts())
+        }
+    }
+}
+
 export function sourceReducer(
     state: SourceState = {},
     action: SourceActionTypes | ItemActionTypes
@@ -492,6 +661,12 @@ export function sourceReducer(
                     }
                 default:
                     return state
+            }
+        case ADD_P2P_SOURCES:
+            // Merge new P2P sources into state
+            return {
+                ...state,
+                ...action.sources,
             }
         case UPDATE_SOURCE:
             return {

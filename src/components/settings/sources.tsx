@@ -26,6 +26,12 @@ import {
 import { urlTest } from "../../scripts/utils"
 import DangerButton from "../utils/danger-button"
 
+// P2P shared feeds have serviceRef but should be treated as local feeds
+const P2P_SHARED_SERVICE_REF = "p2p-shared"
+const isExternalService = (source: RSSSource): boolean => {
+    return !!source.serviceRef && source.serviceRef !== P2P_SHARED_SERVICE_REF
+}
+
 type SourcesTabProps = {
     sources: SourceState
     serviceOn: boolean
@@ -297,7 +303,7 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
 
             {this.state.selectedSource && (
                 <>
-                    {this.state.selectedSource.serviceRef && (
+                    {isExternalService(this.state.selectedSource) && (
                         <MessageBar messageBarType={MessageBarType.info}>
                             {intl.get("sources.serviceManaged")}
                         </MessageBar>
@@ -437,7 +443,7 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
                             />
                         </Stack.Item>
                     </Stack>
-                    {!this.state.selectedSource.serviceRef && (
+                    {!isExternalService(this.state.selectedSource) && (
                         <Stack horizontal>
                             <Stack.Item>
                                 <DangerButton
@@ -460,7 +466,7 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
                 </>
             )}
             {this.state.selectedSources &&
-                (this.state.selectedSources.filter(s => s.serviceRef).length ===
+                (this.state.selectedSources.filter(s => isExternalService(s)).length ===
                 0 ? (
                     <>
                         <Label>{intl.get("sources.selectedMulti")}</Label>

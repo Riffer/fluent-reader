@@ -24,6 +24,7 @@ export const UPDATE_SOURCE_GROUP = "UPDATE_SOURCE_GROUP"
 export const REORDER_SOURCE_GROUPS = "REORDER_SOURCE_GROUPS"
 export const DELETE_SOURCE_GROUP = "DELETE_SOURCE_GROUP"
 export const TOGGLE_GROUP_EXPANSION = "TOGGLE_GROUP_EXPANSION"
+export const SET_GROUPS = "SET_GROUPS" // For P2P sync - replaces groups without saving
 
 interface CreateSourceGroupAction {
     type: typeof CREATE_SOURCE_GROUP
@@ -63,6 +64,11 @@ interface ToggleGroupExpansionAction {
     groupIndex: number
 }
 
+interface SetGroupsAction {
+    type: typeof SET_GROUPS
+    groups: SourceGroup[]
+}
+
 export type SourceGroupActionTypes =
     | CreateSourceGroupAction
     | AddSourceToGroupAction
@@ -71,6 +77,7 @@ export type SourceGroupActionTypes =
     | ReorderSourceGroupsAction
     | DeleteSourceGroupAction
     | ToggleGroupExpansionAction
+    | SetGroupsAction
 
 export function createSourceGroupDone(
     group: SourceGroup
@@ -179,6 +186,17 @@ export function reorderSourceGroups(groups: SourceGroup[]): AppThunk {
     return (dispatch, getState) => {
         dispatch(reorderSourceGroupsDone(groups))
         window.settings.saveGroups(getState().groups)
+    }
+}
+
+/**
+ * Set groups from P2P sync - replaces Redux state without saving to settings
+ * (Groups are already saved by Main Process)
+ */
+export function setGroupsFromP2P(groups: SourceGroup[]): SourceGroupActionTypes {
+    return {
+        type: SET_GROUPS,
+        groups: groups,
     }
 }
 
@@ -459,6 +477,9 @@ export function groupReducer(
                       }
                     : g
             )
+        case SET_GROUPS:
+            // Replace groups from P2P sync (already saved by Main Process)
+            return action.groups
         default:
             return state
     }
