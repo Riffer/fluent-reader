@@ -2126,6 +2126,9 @@ window.__articleData = ${JSON.stringify({
                 onDismiss={() => this.setState({ showP2PShareDialog: false })}
                 articleTitle={this.props.item.title}
                 articleLink={this.props.item.link}
+                feedName={this.props.source?.name}
+                feedUrl={this.props.source?.url}
+                feedIconUrl={this.props.source?.iconurl}
             />
         </FocusZone>
         )

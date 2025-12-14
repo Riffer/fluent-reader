@@ -285,3 +285,78 @@ export function getStoredP2PPeerId(): string | null {
 export function setStoredP2PPeerId(peerId: string): void {
     store.set(P2P_PEER_ID_STORE_KEY, peerId)
 }
+
+// ============================================
+// P2P SHARED FEEDS GROUP MANAGEMENT
+// ============================================
+
+import { P2P_GROUP_NAME } from "./db-sqlite"
+
+/**
+ * Get source groups from store
+ */
+export function getSourceGroups(): SourceGroup[] {
+    return store.get(GROUPS_STORE_KEY, []) as SourceGroup[]
+}
+
+/**
+ * Save source groups to store
+ */
+export function saveSourceGroups(groups: SourceGroup[]): void {
+    store.set(GROUPS_STORE_KEY, groups)
+}
+
+/**
+ * Find the index of the P2P shared feeds group, or -1 if not found
+ */
+export function findP2PGroupIndex(): number {
+    const groups = getSourceGroups()
+    return groups.findIndex(g => g.isMultiple && g.name === P2P_GROUP_NAME)
+}
+
+/**
+ * Get or create the "P2P Geteilt" group and add a source to it.
+ * Returns the updated groups array.
+ * 
+ * @param sid - Source ID to add to the group
+ * @returns Updated groups array
+ */
+export function addSourceToP2PGroup(sid: number): SourceGroup[] {
+    const groups = getSourceGroups()
+    let groupIndex = findP2PGroupIndex()
+    
+    if (groupIndex === -1) {
+        // Create new P2P group
+        console.log(`[settings] Creating new P2P group: "${P2P_GROUP_NAME}"`)
+        const newGroup: SourceGroup = {
+            isMultiple: true,
+            sids: [sid],
+            name: P2P_GROUP_NAME,
+            expanded: true
+        }
+        groups.push(newGroup)
+    } else {
+        // Add to existing group if not already present
+        const group = groups[groupIndex]
+        if (!group.sids.includes(sid)) {
+            console.log(`[settings] Adding source ${sid} to P2P group`)
+            group.sids.push(sid)
+        } else {
+            console.log(`[settings] Source ${sid} already in P2P group`)
+        }
+    }
+    
+    saveSourceGroups(groups)
+    return groups
+}
+
+/**
+ * Check if a source is in the P2P group
+ */
+export function isSourceInP2PGroup(sid: number): boolean {
+    const groupIndex = findP2PGroupIndex()
+    if (groupIndex === -1) return false
+    
+    const groups = getSourceGroups()
+    return groups[groupIndex].sids.includes(sid)
+}

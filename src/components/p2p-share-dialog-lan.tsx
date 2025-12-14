@@ -29,6 +29,9 @@ interface P2PShareDialogProps {
     onDismiss: () => void
     articleTitle: string
     articleLink: string
+    feedName?: string
+    feedUrl?: string
+    feedIconUrl?: string
 }
 
 interface PendingShareCounts {
@@ -40,6 +43,9 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
     onDismiss,
     articleTitle,
     articleLink,
+    feedName,
+    feedUrl,
+    feedIconUrl,
 }) => {
     const theme = useTheme()
     const [status, setStatus] = useState<P2PStatus | null>(null)
@@ -110,8 +116,14 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                 return
             }
             
-            // Build article object for sending
-            const article = { url: articleLink, title: articleTitle }
+            // Build article object for sending (include feed info for P2P storage)
+            const article = { 
+                url: articleLink, 
+                title: articleTitle,
+                feedName,
+                feedUrl,
+                feedIconUrl
+            }
             
             // Send to all peers with queueing for offline ones
             const results: Array<{ peer: string, success: boolean, queued: boolean, error?: string }> = []
@@ -129,7 +141,7 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                         })
                     } catch (err) {
                         // If immediate send fails, queue it
-                        await window.p2pLan.sendArticleLinkWithQueue(peer.peerId, articleTitle, articleLink)
+                        await window.p2pLan.sendArticleLinkWithQueue(peer.peerId, articleTitle, articleLink, feedName, feedUrl, feedIconUrl)
                         results.push({ 
                             peer: peer.displayName, 
                             success: false, 
@@ -138,7 +150,7 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                     }
                 } else {
                     // Peer is discovered but not connected - queue the share
-                    await window.p2pLan.sendArticleLinkWithQueue(peer.peerId, articleTitle, articleLink)
+                    await window.p2pLan.sendArticleLinkWithQueue(peer.peerId, articleTitle, articleLink, feedName, feedUrl, feedIconUrl)
                     results.push({ 
                         peer: peer.displayName, 
                         success: false, 

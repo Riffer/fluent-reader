@@ -9,7 +9,15 @@ import * as dgram from "dgram"
 import * as net from "net"
 import * as crypto from "crypto"
 import { getKnownPeers, addPeer, updatePeerLastSeen, KnownPeer, generatePeerHash } from "./p2p-share"
-import { getStoredP2PRoom, setStoredP2PRoom, clearStoredP2PRoom, getStoredP2PPeerId, setStoredP2PPeerId } from "./settings"
+import { 
+    getStoredP2PRoom, 
+    setStoredP2PRoom, 
+    clearStoredP2PRoom, 
+    getStoredP2PPeerId, 
+    setStoredP2PPeerId,
+    addSourceToP2PGroup,
+    getSourceGroups
+} from "./settings"
 import { 
     addPendingShare, 
     getPendingSharesForPeer, 
@@ -18,7 +26,12 @@ import {
     getPendingShareCounts,
     getAllPendingShares,
     removeOldPendingShares,
-    PendingShareRow
+    PendingShareRow,
+    getOrCreateP2PFeed,
+    insertItem,
+    getSourceByUrl,
+    getSourceById,
+    ItemRow
 } from "./db-sqlite"
 
 // Constants
@@ -1053,6 +1066,24 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
             if (msg.articles && msg.articles.length > 0) {
                 console.log(`[P2P-LAN] Received ${msg.articles.length} article(s) from ${peer.displayName}`)
                 
+                // Store articles in P2P feeds (if they have feedUrl)
+                const articlesToStore: P2PArticleData[] = msg.articles.map(a => ({
+                    url: a.url,
+                    title: a.title,
+                    feedUrl: a.feedUrl,
+                    feedName: a.feedName,
+                    feedIconUrl: a.feedIconUrl,
+                    timestamp: msg.timestamp,
+                    peerName: peer.displayName
+                }))
+                
+                const storeResult = storeP2PArticles(articlesToStore)
+                
+                // Notify renderer about state changes if feeds/groups were updated or articles stored
+                if (storeResult.groupsUpdated || storeResult.newFeeds.length > 0 || storeResult.newArticles.length > 0) {
+                    notifyP2PFeedsChanged(storeResult.newFeeds, storeResult.groupsUpdated, storeResult.newArticles)
+                }
+                
                 if (msg.articles.length === 1) {
                     // Single article - show dialog
                     const a = msg.articles[0]
@@ -1064,7 +1095,8 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
                         msg.timestamp,
                         a.feedName,
                         a.feedUrl,
-                        a.feedIconUrl
+                        a.feedIconUrl,
+                        storeResult.stored > 0 // Was it stored?
                     )
                 } else {
                     // Multiple articles - send to batch handler (goes to bell, no dialogs)
@@ -1078,7 +1110,8 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
                             feedName: a.feedName,
                             feedUrl: a.feedUrl,
                             feedIconUrl: a.feedIconUrl
-                        }))
+                        })),
+                        storeResult.stored
                     )
                 }
                 
@@ -1152,6 +1185,172 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
 }
 
 // ============================================================================
+// P2P Article Storage
+// ============================================================================
+
+interface P2PArticleData {
+    url: string
+    title: string
+    feedUrl?: string
+    feedName?: string
+    feedIconUrl?: string
+    timestamp: number
+    peerName: string
+}
+
+/**
+ * P2P article data for Renderer sync (matches Lovefield schema)
+ */
+export interface P2PArticleForRenderer {
+    _id: number
+    source: number
+    title: string
+    link: string
+    date: string  // ISO string
+    fetchedDate: string  // ISO string
+    thumb: string | null
+    content: string
+    snippet: string
+    creator: string
+    hasRead: boolean
+    starred: boolean
+    hidden: boolean
+    notify: boolean
+    serviceRef: string | null
+}
+
+/**
+ * Store a P2P received article in the database.
+ * Creates a passive feed if needed and adds the article to it.
+ * 
+ * @returns Object with sourceId, articleId, articleData, groupsUpdated flag
+ */
+function storeP2PArticle(article: P2PArticleData): { 
+    sourceId: number | null
+    articleId: number | null
+    articleData: P2PArticleForRenderer | null
+    feedCreated: boolean
+    groupsUpdated: boolean
+    error?: string
+} {
+    // If no feedUrl provided, we can't create a feed
+    if (!article.feedUrl) {
+        console.log(`[P2P-LAN] Article "${article.title}" has no feedUrl - cannot store in feed`)
+        return { sourceId: null, articleId: null, articleData: null, feedCreated: false, groupsUpdated: false }
+    }
+    
+    try {
+        // Get or create the P2P feed
+        const feedName = article.feedName || new URL(article.feedUrl).hostname
+        const { sid, created } = getOrCreateP2PFeed(article.feedUrl, feedName, article.feedIconUrl)
+        
+        let groupsUpdated = false
+        
+        // If feed was newly created, add it to P2P group
+        if (created) {
+            console.log(`[P2P-LAN] New P2P feed created (sid=${sid}), adding to P2P group`)
+            addSourceToP2PGroup(sid)
+            groupsUpdated = true
+        }
+        
+        // Create and insert the article
+        const now = new Date().toISOString()
+        const articleDate = new Date(article.timestamp).toISOString()
+        
+        const itemRow: Omit<ItemRow, "_id"> = {
+            source: sid,
+            title: article.title,
+            link: article.url,
+            date: articleDate,
+            fetchedDate: now,
+            thumb: null,
+            content: `<p>Dieser Artikel wurde von <strong>${article.peerName}</strong> via P2P geteilt.</p><p><a href="${article.url}" target="_blank">${article.url}</a></p>`,
+            snippet: `Geteilt von ${article.peerName}`,
+            creator: article.peerName,
+            hasRead: 0,
+            starred: 0,
+            hidden: 0,
+            notify: 1, // Mark for notification
+            serviceRef: null
+        }
+        
+        const articleId = insertItem(itemRow)
+        console.log(`[P2P-LAN] Stored P2P article "${article.title}" (id=${articleId}) in feed ${sid}`)
+        
+        // Create article data for Renderer (with proper boolean types for Lovefield)
+        const articleData: P2PArticleForRenderer = {
+            _id: articleId,
+            source: sid,
+            title: article.title,
+            link: article.url,
+            date: articleDate,
+            fetchedDate: now,
+            thumb: null,
+            content: itemRow.content,
+            snippet: itemRow.snippet,
+            creator: article.peerName,
+            hasRead: false,
+            starred: false,
+            hidden: false,
+            notify: true,
+            serviceRef: null
+        }
+        
+        return { sourceId: sid, articleId, articleData, feedCreated: created, groupsUpdated }
+        
+    } catch (err) {
+        // Handle duplicate article (UNIQUE constraint on link)
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        if (errorMsg.includes("UNIQUE constraint failed")) {
+            console.log(`[P2P-LAN] Article already exists: "${article.title}"`)
+            return { sourceId: null, articleId: null, articleData: null, feedCreated: false, groupsUpdated: false, error: "duplicate" }
+        }
+        console.error(`[P2P-LAN] Error storing P2P article:`, err)
+        return { sourceId: null, articleId: null, articleData: null, feedCreated: false, groupsUpdated: false, error: errorMsg }
+    }
+}
+
+/**
+ * Store multiple P2P articles at once
+ */
+function storeP2PArticles(articles: P2PArticleData[]): {
+    stored: number
+    duplicates: number
+    errors: number
+    groupsUpdated: boolean
+    newFeeds: number[]
+    newArticles: P2PArticleForRenderer[]
+} {
+    let stored = 0
+    let duplicates = 0
+    let errors = 0
+    let groupsUpdated = false
+    const newFeeds: number[] = []
+    const newArticles: P2PArticleForRenderer[] = []
+    
+    for (const article of articles) {
+        const result = storeP2PArticle(article)
+        if (result.articleId && result.articleData) {
+            stored++
+            newArticles.push(result.articleData)
+            if (result.feedCreated && result.sourceId) {
+                newFeeds.push(result.sourceId)
+            }
+            if (result.groupsUpdated) {
+                groupsUpdated = true
+            }
+        } else if (result.error === "duplicate") {
+            duplicates++
+        } else if (result.error) {
+            errors++
+        }
+    }
+    
+    console.log(`[P2P-LAN] Batch store result: ${stored} stored, ${duplicates} duplicates, ${errors} errors`)
+    return { stored, duplicates, errors, groupsUpdated, newFeeds, newArticles }
+}
+
+// ============================================================================
 // Private: IPC Notifications to Renderer
 // ============================================================================
 
@@ -1191,7 +1390,8 @@ function notifyArticleReceived(
     timestamp: number,
     feedName?: string,
     feedUrl?: string,
-    feedIconUrl?: string
+    feedIconUrl?: string,
+    storedInFeed?: boolean
 ): void {
     const mainWindow = getMainWindow()
     if (!mainWindow) return
@@ -1204,7 +1404,8 @@ function notifyArticleReceived(
         timestamp,
         feedName,
         feedUrl,
-        feedIconUrl
+        feedIconUrl,
+        storedInFeed: storedInFeed ?? false
     })
 }
 
@@ -1222,17 +1423,45 @@ function notifyArticlesReceivedBatch(
         feedName?: string
         feedUrl?: string
         feedIconUrl?: string
-    }>
+    }>,
+    storedCount?: number
 ): void {
     const mainWindow = getMainWindow()
     if (!mainWindow) return
     
-    console.log(`[P2P-LAN] Sending batch of ${articles.length} articles from ${peerName}`)
+    console.log(`[P2P-LAN] Sending batch of ${articles.length} articles from ${peerName} (${storedCount ?? 0} stored)`)
     mainWindow.webContents.send("p2p:articlesReceivedBatch", {
         peerId,
         peerName,
         articles,
-        count: articles.length
+        count: articles.length,
+        storedCount: storedCount ?? 0
+    })
+}
+
+/**
+ * Notify renderer that P2P feeds/groups have changed
+ * This tells the renderer to reload sources and groups.
+ * Sends complete feed data so renderer can insert into Lovefield.
+ */
+function notifyP2PFeedsChanged(
+    newFeedIds: number[], 
+    groupsUpdated: boolean, 
+    newArticles?: P2PArticleForRenderer[]
+): void {
+    const mainWindow = getMainWindow()
+    if (!mainWindow) return
+    
+    // Get complete feed data for new feeds
+    const newFeeds = newFeedIds.map(sid => getSourceById(sid)).filter(Boolean)
+    
+    console.log(`[P2P-LAN] Notifying feeds changed: ${newFeedIds.length} new feeds, ${newArticles?.length ?? 0} articles, groups updated: ${groupsUpdated}`)
+    mainWindow.webContents.send("p2p:feedsChanged", {
+        newFeedIds,
+        newFeeds, // Complete feed data for Lovefield insertion
+        newArticles: newArticles ?? [], // Article data for Lovefield insertion
+        groupsUpdated,
+        groups: groupsUpdated ? getSourceGroups() : null
     })
 }
 

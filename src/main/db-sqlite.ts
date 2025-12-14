@@ -310,6 +310,80 @@ export function getNextSourceId(): number {
 }
 
 // ============================================
+// P2P SHARED FEED OPERATIONS
+// ============================================
+
+/** ServiceRef value for P2P shared feeds - prevents auto-fetching */
+export const P2P_SHARED_SERVICE_REF = "p2p-shared"
+
+/** Default group name for P2P shared feeds */
+export const P2P_GROUP_NAME = "P2P Geteilt"
+
+/**
+ * Get or create a passive P2P feed for the given URL.
+ * If feed already exists (active or passive), returns the existing sid.
+ * If not, creates a new passive feed with serviceRef = "p2p-shared".
+ * 
+ * @returns { sid: number, created: boolean }
+ */
+export function getOrCreateP2PFeed(
+    feedUrl: string,
+    feedName: string,
+    feedIconUrl?: string
+): { sid: number; created: boolean } {
+    if (!db) throw new Error("Database not initialized")
+    
+    // Check if feed already exists
+    const existing = getSourceByUrl(feedUrl)
+    if (existing) {
+        console.log(`[db-sqlite] P2P Feed already exists: "${existing.name}" (sid=${existing.sid})`)
+        return { sid: existing.sid, created: false }
+    }
+    
+    // Create new passive feed
+    const nextSid = getNextSourceId()
+    const now = new Date().toISOString()
+    
+    const sid = insertSource({
+        sid: nextSid,
+        url: feedUrl,
+        iconurl: feedIconUrl ?? null,
+        name: feedName || "P2P Shared Feed",
+        openTarget: 0, // SourceOpenTarget.Local
+        defaultZoom: 0,
+        lastFetched: now,
+        serviceRef: P2P_SHARED_SERVICE_REF, // This prevents auto-fetching!
+        fetchFrequency: 0,
+        rules: null,
+        textDir: 0, // SourceTextDirection.LTR
+        hidden: 0, // SQLite boolean (0 = false)
+        mobileMode: 0, // SQLite boolean (0 = false)
+        persistCookies: 0 // SQLite boolean (0 = false)
+    })
+    
+    console.log(`[db-sqlite] Created P2P Feed: "${feedName}" (sid=${sid}, url=${feedUrl})`)
+    return { sid, created: true }
+}
+
+/**
+ * Get all P2P shared feeds (feeds with serviceRef = "p2p-shared")
+ */
+export function getP2PSharedFeeds(): SourceRow[] {
+    if (!db) throw new Error("Database not initialized")
+    return db.prepare("SELECT * FROM sources WHERE serviceRef = ?").all(P2P_SHARED_SERVICE_REF) as SourceRow[]
+}
+
+/**
+ * Convert a P2P passive feed to an active feed (enable auto-fetching)
+ */
+export function convertP2PFeedToActive(sid: number): void {
+    if (!db) throw new Error("Database not initialized")
+    db.prepare("UPDATE sources SET serviceRef = NULL WHERE sid = ? AND serviceRef = ?")
+        .run(sid, P2P_SHARED_SERVICE_REF)
+    console.log(`[db-sqlite] Converted P2P Feed sid=${sid} to active feed`)
+}
+
+// ============================================
 // ITEM OPERATIONS
 // ============================================
 
@@ -804,6 +878,12 @@ export function setupDatabaseIPC(): void {
     ipcMain.handle("db:pendingShares:removeForPeer", (_, peerId: string) => removePendingSharesForPeer(peerId))
     ipcMain.handle("db:pendingShares:incrementAttempts", (_, id: number) => incrementPendingShareAttempts(id))
     ipcMain.handle("db:pendingShares:removeOld", (_, maxAgeDays?: number) => removeOldPendingShares(maxAgeDays))
+
+    // P2P Shared Feeds operations
+    ipcMain.handle("db:p2pFeeds:getOrCreate", (_, feedUrl: string, feedName: string, feedIconUrl?: string) =>
+        getOrCreateP2PFeed(feedUrl, feedName, feedIconUrl))
+    ipcMain.handle("db:p2pFeeds:getAll", () => getP2PSharedFeeds())
+    ipcMain.handle("db:p2pFeeds:convertToActive", (_, sid: number) => convertP2PFeedToActive(sid))
 
     console.log("[db-sqlite] IPC handlers registered")
 }
