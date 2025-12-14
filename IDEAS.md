@@ -282,78 +282,47 @@ powerMonitor.on("resume", () => { /* System ist aufgewacht */ })
 
 #### 7. P2P-Teilen im Artikel-Kontextmenü
 
-**Status:** Idee
+**Status:** ✅ Implementiert (14.12.2025)
 
-**Problem:**
-Aktuell kann man Artikel nur über das Artikel-Menü (geöffneter Artikel) via P2P teilen. In der Artikelübersicht gibt es zwar ein "Teilen"-Kontextmenü, aber dort fehlt die P2P-Option.
+**Implementiert:**
+- ✅ P2P-Peers werden im "Teilen"-Untermenü des Artikel-Kontextmenüs angezeigt
+- ✅ Schnelles Teilen ohne Artikel öffnen zu müssen
+- ✅ Peers werden nur angezeigt wenn P2P verbunden und Peers verfügbar
+- ✅ QR-Code zum Teilen wird im gleichen Menü angezeigt
 
-**Anforderung:**
-- Im Kontextmenü der Artikelübersicht (Rechtsklick auf Artikel-Karte) den "Teilen"-Eintrag um P2P-Sharing erweitern
-- Ermöglicht schnelles Teilen ohne den Artikel erst öffnen zu müssen
-- Konsistente UX mit dem bestehenden Teilen-Dialog
-
-**Mögliche Umsetzung:**
-- [ ] Kontextmenü-Komponente (`context-menu.tsx`) erweitern
-- [ ] P2P-Peers als Untermenü unter "Teilen" anzeigen
-- [ ] Alternativ: "An Peer teilen..." Dialog öffnen mit Peer-Auswahl
-- [ ] Prüfen ob im P2P-Room (sonst Option ausgrauen/verstecken)
-
-**Vorteile:**
-- Schnellerer Workflow (kein Artikel-Öffnen nötig)
-- Konsistent mit anderen Share-Optionen
-- Batch-Sharing möglich (mehrere Artikel auswählen)
+**Technische Umsetzung:**
+- `context-menu.tsx`: `getShareSubmenuItems()` Methode für P2P-Peers
+- IPC-Kommunikation via `window.p2p.getPeers()` und `window.p2p.shareToPeer()`
+- State-Management für P2P-Verbindungsstatus im Kontextmenü
 
 #### 8. Feed abonnieren aus P2P-Artikel
 
-**Status:** Idee
+**Status:** ✅ Implementiert (14.12.2025)
 
-**Problem:**
-Wenn ein Artikel via P2P empfangen wird, landet er in der P2P-Gruppe. Der Empfänger hat möglicherweise Interesse, den ursprünglichen Feed zu abonnieren, muss aber derzeit die Feed-URL manuell herausfinden und eingeben.
+**Implementiert:**
+- ✅ "Feed abonnieren" Option im Feed-Listen-Kontextmenü (Rechtsklick auf P2P-Feed in Sidebar)
+- ✅ Konvertiert P2P-Feed zu aktivem Feed (entfernt `serviceRef: "p2p-shared"`)
+- ✅ Feed wird automatisch aus P2P-Gruppe entfernt
+- ✅ Artikel werden sofort aktualisiert nach dem Abonnieren (`fetchItems`)
+- ✅ Übersetzungen für DE und EN-US
 
-**Anforderung:**
-- Benutzer soll aus einem P2P-Artikel heraus den Original-Feed abonnieren können
-- Feed-URL ist bereits im P2P-Artikel gespeichert (`feedUrl`)
-- Prüfung ob Feed bereits abonniert ist
+**Technische Umsetzung:**
+- `context-menu.tsx`: `handleSubscribeFeedFromGroup()` Handler für Feed-Listen-Kontextmenü
+- `context-menu.tsx`: `convertP2PFeedToActive()` für die gemeinsame Konvertierungslogik
+- `context-menu-container.tsx`: `sources` und `groups` werden an `ContextMenuType.Group` weitergegeben
+- `bridges/db.ts`: `window.db.p2pFeeds.convertToActive(sid)` Bridge-Funktion
+- SQLite: `UPDATE sources SET serviceRef = NULL WHERE sid = ?`
 
-**Mögliche Workflows:**
+**Design-Entscheidungen:**
+- **Option C gewählt:** Flag und Gruppe getrennt halten
+  - Das `serviceRef`-Flag ist die **einzige Wahrheit** über den P2P-Status
+  - Die Gruppenzugehörigkeit ist nur organisatorisch
+  - Manuelles Verschieben aus der Gruppe ändert das Flag NICHT
+- Menüpunkt nur für einzelne P2P-Feeds sichtbar (nicht für Gruppen)
+- Nach Konvertierung: Feed bleibt wo er ist, neue Artikel kommen vom Original-Feed
 
-| Option | Beschreibung | Empfehlung |
-|--------|--------------|------------|
-| **A: Im Empfangs-Dialog** | Button "Feed abonnieren" beim Artikel-Empfang | Unterbricht Flow, User will erstmal lesen |
-| **B: Kontext-Menü auf Artikel** ⭐ | Rechtsklick → "Feed abonnieren" | Natürlicher Zeitpunkt nach dem Lesen |
-| **C: P2P-Feed-Übersicht** | Rechtsklick auf P2P-Feed → "Als echten Feed abonnieren" | Nicht artikel-spezifisch |
-| **D: Automatisch** | Vorschlag nach X Artikeln vom gleichen Feed | Kann nerven |
-
-**Empfohlene Umsetzung: Option B + A (klein)**
-
-1. **Kontext-Menü (Hauptweg):**
-   - Im Artikel-Reader: Menü → "Feed abonnieren"
-   - In Artikel-Liste: Rechtsklick → "Feed abonnieren"
-   - Nur sichtbar wenn `feedUrl` vorhanden und Feed nicht bereits abonniert
-
-2. **Empfangs-Dialog (optional, dezent):**
-   - Kleiner Link/Button "Feed abonnieren" unter dem Artikel-Titel
-   - Nicht prominent, da User erstmal lesen will
-
-**Technisch benötigt:**
-- [x] `feedUrl` ist bereits im P2P-Artikel gespeichert ✓
-- [ ] Funktion `isSourceSubscribed(feedUrl)` zur Prüfung
-- [ ] Kontext-Menü erweitern: "Feed abonnieren" (nur für P2P-Artikel mit `feedUrl`)
-- [ ] Bestehende `addSource(feedUrl)` Funktion nutzen
-- [ ] Nach Abo: Optional Artikel in neuen Feed verschieben oder belassen
-
-**UI-Flow:**
-```
-User klickt "Feed abonnieren"
-  → Prüfung: Feed bereits abonniert?
-    → Ja: Hinweis "Du hast diesen Feed bereits abonniert"
-    → Nein: Feed hinzufügen → Erfolgs-Toast "Feed [Name] wurde abonniert"
-```
-
-**Offene Fragen:**
-- Soll der P2P-Artikel nach dem Abo in den "echten" Feed verschoben werden?
-- Oder als Duplikat in beiden Feeds existieren?
-- Empfehlung: Artikel bleibt wo er ist, neue Artikel kommen in den abonnierten Feed
+**Bekanntes Verhalten:**
+- React async pattern: Props werden am Funktionsanfang kopiert um Stale-Props nach await zu vermeiden
 
 ---
 
