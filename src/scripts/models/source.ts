@@ -1,6 +1,7 @@
 import intl from "react-intl-universal"
 import * as db from "../db"
 import lf from "lovefield"
+import { SourceRow, ItemRow } from "../../bridges/db"
 import {
     fetchFavicon,
     ActionStatus,
@@ -78,20 +79,15 @@ export class RSSSource {
         item: MyParserItem
     ): Promise<RSSItem> {
         let i = new RSSItem(item, source)
-        const existingItems = (await db.itemsDB
-            .select()
-            .from(db.items)
-            .where(
-                lf.op.and(
-                    db.items.source.eq(i.source),
-                    db.items.title.eq(i.title),
-                    db.items.date.eq(i.date)
-                )
-            )
-            .limit(1)
-            .exec()) as RSSItem[]
         
-        if (existingItems.length === 0) {
+        // Use SQLite for duplicate check via window.db bridge
+        const exists = await window.db.items.exists(
+            i.source,
+            i.title,
+            i.date.toISOString()
+        )
+        
+        if (!exists) {
             RSSItem.parseContent(i, item)
             if (source.rules) SourceRule.applyAll(source.rules, i)
             return i
@@ -213,14 +209,13 @@ export function initSourcesFailure(err): SourceActionTypes {
 }
 
 async function unreadCount(sources: SourceState): Promise<SourceState> {
-    const rows = await db.itemsDB
-        .select(db.items.source, lf.fn.count(db.items._id))
-        .from(db.items)
-        .where(db.items.hasRead.eq(false))
-        .groupBy(db.items.source)
-        .exec()
-    for (let row of rows) {
-        sources[row["source"]].unreadCount = row["COUNT(_id)"]
+    // Use SQLite for unread counts via window.db bridge
+    const counts = await window.db.getUnreadCounts()
+    for (const [sourceId, count] of Object.entries(counts)) {
+        const sid = parseInt(sourceId)
+        if (sources[sid]) {
+            sources[sid].unreadCount = count
+        }
     }
     return sources
 }
@@ -241,26 +236,36 @@ export function updateUnreadCounts(): AppThunk<Promise<void>> {
     }
 }
 
+// Helper function to convert SQLite SourceRow to RSSSource
+function rowToSource(row: SourceRow): RSSSource {
+    const source = new RSSSource(row.url, row.name)
+    source.sid = row.sid
+    source.iconurl = row.iconurl ?? undefined
+    source.openTarget = row.openTarget
+    source.defaultZoom = row.defaultZoom
+    source.lastFetched = new Date(row.lastFetched)
+    source.serviceRef = row.serviceRef ?? undefined
+    source.fetchFrequency = row.fetchFrequency
+    source.rules = row.rules ? JSON.parse(row.rules) : undefined
+    source.textDir = row.textDir
+    source.hidden = row.hidden === 1
+    source.mobileMode = row.mobileMode === 1
+    source.persistCookies = row.persistCookies === 1
+    source.unreadCount = 0
+    return source
+}
+
 export function initSources(): AppThunk<Promise<void>> {
     return async dispatch => {
         dispatch(initSourcesRequest())
+        // Initialize Lovefield for migration support (will be removed later)
         await db.init()
-        const sources = (await db.sourcesDB
-            .select()
-            .from(db.sources)
-            .exec()) as RSSSource[]
+        
+        // Use SQLite for source data via window.db bridge
+        const sourceRows = await window.db.sources.getAll()
         const state: SourceState = {}
-        for (let source of sources) {
-            source.unreadCount = 0
-            // Migration: Ensure mobileMode field exists (for older databases)
-            if (source.mobileMode === undefined) {
-                source.mobileMode = false
-            }
-            // Migration: Ensure persistCookies field exists (for older databases)
-            if (source.persistCookies === undefined) {
-                source.persistCookies = false
-            }
-            state[source.sid] = source
+        for (let row of sourceRows) {
+            state[row.sid] = rowToSource(row)
         }
         await unreadCount(state)
         dispatch(fixBrokenGroups(state))
@@ -297,6 +302,26 @@ export function addSourceFailure(err, batch: boolean): SourceActionTypes {
     }
 }
 
+// Helper function to convert RSSSource to SQLite SourceRow
+function sourceToRow(source: RSSSource): Omit<SourceRow, "sid"> & { sid?: number } {
+    return {
+        sid: source.sid,
+        url: source.url,
+        iconurl: source.iconurl ?? null,
+        name: source.name,
+        openTarget: source.openTarget,
+        defaultZoom: source.defaultZoom,
+        lastFetched: source.lastFetched.toISOString(),
+        serviceRef: source.serviceRef ?? null,
+        fetchFrequency: source.fetchFrequency,
+        rules: source.rules ? JSON.stringify(source.rules) : null,
+        textDir: source.textDir,
+        hidden: source.hidden ? 1 : 0,
+        mobileMode: source.mobileMode ? 1 : 0,
+        persistCookies: source.persistCookies ? 1 : 0
+    }
+}
+
 let insertPromises = Promise.resolve()
 export function insertSource(source: RSSSource): AppThunk<Promise<RSSSource>> {
     return (_, getState) => {
@@ -304,17 +329,18 @@ export function insertSource(source: RSSSource): AppThunk<Promise<RSSSource>> {
             insertPromises = insertPromises.then(async () => {
                 let sids = Object.values(getState().sources).map(s => s.sid)
                 source.sid = Math.max(...sids, -1) + 1
-                const row = db.sources.createRow(source)
                 try {
-                    const inserted = (await db.sourcesDB
-                        .insert()
-                        .into(db.sources)
-                        .values([row])
-                        .exec()) as RSSSource[]
-                    resolve(inserted[0])
+                    // Use SQLite for insert via window.db bridge
+                    const row = sourceToRow(source)
+                    await window.db.sources.insert(row)
+                    resolve(source)
                 } catch (err) {
-                    if (err.code === 201) reject(intl.get("sources.exist"))
-                    else reject(err)
+                    // SQLite UNIQUE constraint error
+                    if (err.message?.includes("UNIQUE constraint failed")) {
+                        reject(intl.get("sources.exist"))
+                    } else {
+                        reject(err)
+                    }
                 }
             })
         })
@@ -372,12 +398,9 @@ export function updateSource(source: RSSSource): AppThunk<Promise<void>> {
     return async dispatch => {
         let sourceCopy = { ...source }
         delete sourceCopy.unreadCount
-        const row = db.sources.createRow(sourceCopy)
-        await db.sourcesDB
-            .insertOrReplace()
-            .into(db.sources)
-            .values([row])
-            .exec()
+        // Use SQLite for update via window.db bridge
+        const row = sourceToRow(sourceCopy)
+        await window.db.sources.update(source.sid, row)
         dispatch(updateSourceDone(source))
     }
 }
@@ -396,16 +419,10 @@ export function deleteSource(
     return async (dispatch, getState) => {
         if (!batch) dispatch(saveSettings())
         try {
-            await db.itemsDB
-                .delete()
-                .from(db.items)
-                .where(db.items.source.eq(source.sid))
-                .exec()
-            await db.sourcesDB
-                .delete()
-                .from(db.sources)
-                .where(db.sources.sid.eq(source.sid))
-                .exec()
+            // Use SQLite for delete via window.db bridge
+            // Items are deleted automatically due to CASCADE foreign key
+            await window.db.items.deleteBySource(source.sid)
+            await window.db.sources.delete(source.sid)
             dispatch(deleteSourceDone(source))
             window.settings.saveGroups(getState().groups)
         } catch (err) {

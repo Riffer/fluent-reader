@@ -1,5 +1,6 @@
 import * as db from "../db"
 import lf from "lovefield"
+import { SourceRow } from "../../bridges/db"
 import { SyncService, ServiceConfigs } from "../../schema-types"
 import { AppThunk, ActionStatus } from "../utils"
 import { RSSItem, insertItems, fetchItemsSuccess } from "./item"
@@ -123,12 +124,9 @@ function updateSources(
                 existing.delete(s.serviceRef)
                 return doc
             } else {
-                const docs = (await db.sourcesDB
-                    .select()
-                    .from(db.sources)
-                    .where(db.sources.url.eq(s.url))
-                    .exec()) as RSSSource[]
-                if (docs.length === 0) {
+                // Use SQLite to check if source exists by URL
+                const existingRow = await window.db.sources.getByUrl(s.url)
+                if (!existingRow) {
                     // Create a new source
                     forceSettings()
                     const inserted = await dispatch(insertSource(s))
@@ -137,21 +135,50 @@ function updateSources(
                     window.settings.saveGroups(getState().groups)
                     dispatch(updateFavicon([inserted.sid]))
                     return inserted
-                } else if (docs[0].serviceRef !== s.serviceRef) {
+                } else if (existingRow.serviceRef !== s.serviceRef) {
                     // Mark an existing source as remote and remove all items
-                    const doc = docs[0]
+                    // Convert row to RSSSource
+                    const doc: RSSSource = {
+                        sid: existingRow.sid,
+                        url: existingRow.url,
+                        iconurl: existingRow.iconurl ?? undefined,
+                        name: existingRow.name,
+                        openTarget: existingRow.openTarget,
+                        defaultZoom: existingRow.defaultZoom,
+                        lastFetched: new Date(existingRow.lastFetched),
+                        serviceRef: s.serviceRef,
+                        fetchFrequency: existingRow.fetchFrequency,
+                        rules: existingRow.rules ? JSON.parse(existingRow.rules) : undefined,
+                        textDir: existingRow.textDir,
+                        hidden: existingRow.hidden === 1,
+                        mobileMode: existingRow.mobileMode === 1,
+                        persistCookies: existingRow.persistCookies === 1,
+                        unreadCount: 0
+                    } as RSSSource
                     forceSettings()
-                    doc.serviceRef = s.serviceRef
-                    doc.unreadCount = 0
                     await dispatch(updateSource(doc))
-                    await db.itemsDB
-                        .delete()
-                        .from(db.items)
-                        .where(db.items.source.eq(doc.sid))
-                        .exec()
+                    // Delete items using SQLite
+                    await window.db.items.deleteBySource(doc.sid)
                     return doc
                 } else {
-                    return docs[0]
+                    // Convert existing row to RSSSource
+                    return {
+                        sid: existingRow.sid,
+                        url: existingRow.url,
+                        iconurl: existingRow.iconurl ?? undefined,
+                        name: existingRow.name,
+                        openTarget: existingRow.openTarget,
+                        defaultZoom: existingRow.defaultZoom,
+                        lastFetched: new Date(existingRow.lastFetched),
+                        serviceRef: existingRow.serviceRef ?? undefined,
+                        fetchFrequency: existingRow.fetchFrequency,
+                        rules: existingRow.rules ? JSON.parse(existingRow.rules) : undefined,
+                        textDir: existingRow.textDir,
+                        hidden: existingRow.hidden === 1,
+                        mobileMode: existingRow.mobileMode === 1,
+                        persistCookies: existingRow.persistCookies === 1,
+                        unreadCount: 0
+                    } as RSSSource
                 }
             }
         })

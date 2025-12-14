@@ -54,9 +54,80 @@ Die App verwendet **zwei Datenbanken parallel**, was zu Inkonsistenzen führt:
 - [ ] Lovefield komplett entfernen
 - [ ] Dann: P2P-Feeds in UI anzeigen
 
+### Detaillierter Migrationsplan (14.12.2025)
+
+**Branch:** `feature/sqlite-migration`
+
+**Lovefield-Aufrufe die ersetzt werden müssen:**
+
+#### Phase 1: source.ts (8 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 81-91 | `checkItem()` | `db.itemsDB.select()...where()` | `window.db.items.exists(source, title, date)` |
+| 216-221 | `unreadCount()` | `db.itemsDB.select().groupBy()` | `window.db.items.getUnreadCounts()` |
+| 248-250 | `initSources()` | `db.sourcesDB.select()` | `window.db.sources.getAll()` |
+| 307-313 | `insertSource()` | `db.sourcesDB.insert()` | `window.db.sources.insert()` |
+| 375-379 | `updateSource()` | `db.sourcesDB.insertOrReplace()` | `window.db.sources.update()` |
+| 399-407 | `deleteSource()` | `db.itemsDB.delete()` + `db.sourcesDB.delete()` | `window.db.sources.delete()` (CASCADE) |
+
+#### Phase 2: item.ts (12 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 204-209 | `insertItems()` | `db.itemsDB.insert()` | `window.db.items.insertBatch()` |
+| 357-360 | `markRead()` | `db.itemsDB.update()` | `window.db.items.update()` |
+| 389-401 | `markAllRead()` | `db.itemsDB.update().where()` | `window.db.items.markAllRead()` |
+| 424-427 | `markUnread()` | `db.itemsDB.update()` | `window.db.items.update()` |
+| 445-448 | `toggleStarred()` | `db.itemsDB.update()` | `window.db.items.update()` |
+| 459-462 | `toggleHidden()` | `db.itemsDB.update()` | `window.db.items.update()` |
+
+#### Phase 3: feed.ts (4 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 54-70 | `loadMore()` predicates | `db.items.hasRead/starred/hidden/title/snippet` | `window.db.items.query()` mit Optionen |
+| 123-128 | `loadMore()` query | `db.itemsDB.select().from().where().orderBy()` | `window.db.items.query()` |
+
+#### Phase 4: service.ts (3 Aufrufe)
+| Zeile | Funktion | Lovefield-Aufruf | SQLite-Ersatz |
+|-------|----------|------------------|---------------|
+| 126-129 | `syncWithService()` | `db.sourcesDB.select().where()` | `window.db.sources.getByUrl()` |
+| 147+ | `syncWithService()` | `db.itemsDB...` | `window.db.items...` |
+
+**Neue Bridge-Funktionen benötigt:**
+
+```typescript
+// In src/bridges/db.ts hinzufügen:
+items: {
+    // NEU: Duplikatprüfung für RSS-Items
+    exists: (source: number, title: string, date: string): Promise<boolean>
+    
+    // NEU: Unread-Counts gruppiert nach Source
+    getUnreadCounts: (): Promise<{source: number, count: number}[]>
+    
+    // NEU: Batch-Insert für mehrere Items
+    insertBatch: (items: ItemRow[]): Promise<ItemRow[]>
+    
+    // NEU: Mark All Read mit komplexen Filtern
+    markAllRead: (sids: number[], date?: string, before?: boolean): Promise<void>
+    
+    // NEU: Komplexe Query für Feed-Anzeige
+    query: (options: ItemQueryOptions): Promise<ItemRow[]>
+}
+```
+
+**Migrationsreihenfolge:**
+1. ✅ Bridge-Funktionen in `db-sqlite.ts` implementieren
+2. ✅ IPC-Handler in `window.ts` registrieren
+3. ✅ Bridge-Typen in `bridges/db.ts` erweitern
+4. ⬜ `source.ts` migrieren (kritisch für initSources)
+5. ⬜ `item.ts` migrieren (kritisch für fetchItems)
+6. ⬜ `feed.ts` migrieren (kritisch für UI)
+7. ⬜ `service.ts` migrieren (Cloud-Services)
+8. ⬜ Lovefield-Code entfernen
+
 ---
 
 ## Bugs (bekannte Probleme)
+
 
 ### 🐛 Dual-Database Sync Problem
 
