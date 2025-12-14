@@ -1,5 +1,93 @@
 # Feature Ideas
 
+## ⚠️ WICHTIG: Datenbankarchitektur (Stand: 14.12.2025)
+
+### Aktueller Zustand - DUAL-DATABASE PROBLEM
+
+Die App verwendet **zwei Datenbanken parallel**, was zu Inkonsistenzen führt:
+
+| Datenbank | Ort | Status | Nutzung |
+|-----------|-----|--------|---------|
+| **Lovefield (IndexedDB)** | Renderer | ⚠️ LEGACY | Alle UI-Operationen, Models (`source.ts`, `item.ts`, `feed.ts`, `service.ts`) |
+| **SQLite** | Main Process | ✅ NEU | Nur Migration, P2P-Features, `window.db.*` Bridge |
+
+### Das Problem
+- Die Models (`src/scripts/models/*.ts`) nutzen direkt `db.sourcesDB` und `db.itemsDB` (Lovefield)
+- Die Migration (`migrateLovefieldToSQLite`) kopiert nur Daten, aber die App arbeitet weiter mit Lovefield
+- Lösch-/Update-Operationen über UI aktualisieren **nur Lovefield, nicht SQLite**
+- SQLite und Lovefield laufen auseinander
+
+### 🚨 REGEL FÜR NEUE FEATURES
+
+1. **KEINE Änderungen an Lovefield-Code:**
+   - `src/scripts/db.ts` (Lovefield Schema/Init)
+   - `db.sourcesDB`, `db.itemsDB` Aufrufe in Models
+   - Keine neuen Funktionen die Lovefield nutzen
+
+2. **Neue Features nur über SQLite:**
+   - `src/main/db-sqlite.ts` (Main Process)
+   - `window.db.*` Bridge für Renderer-Zugriff
+   - `src/bridges/db.ts` für Type-Definitionen
+
+3. **P2P Shared Feeds - Korrekter Ansatz:**
+   - Feeds/Artikel nur in SQLite speichern (Main Process) ✓
+   - **NICHT** versuchen, in Lovefield zu synchronisieren
+   - UI-Anzeige der P2P-Feeds kommt erst nach vollständiger SQLite-Migration
+
+### Dateien die NUR SQLite nutzen sollten:
+- `src/main/db-sqlite.ts` - SQLite Implementierung ✓
+- `src/main/p2p-lan.ts` - P2P Features ✓
+- `src/main/settings.ts` - Einstellungen (nutzt electron-store, kein DB)
+- `src/bridges/db.ts` - Bridge zum Renderer ✓
+
+### Dateien die noch Lovefield nutzen (Legacy):
+- `src/scripts/db.ts` - Lovefield Init
+- `src/scripts/models/source.ts` - Source CRUD
+- `src/scripts/models/item.ts` - Item CRUD
+- `src/scripts/models/feed.ts` - Feed Display
+- `src/scripts/models/service.ts` - Cloud Services
+- `src/scripts/models/services/*.ts` - Service Implementierungen
+
+### Zukünftige Migration (TODO)
+- [ ] Alle Lovefield-Aufrufe in Models durch `window.db.*` ersetzen
+- [ ] Lovefield komplett entfernen
+- [ ] Dann: P2P-Feeds in UI anzeigen
+
+---
+
+## Bugs (bekannte Probleme)
+
+### 🐛 Dual-Database Sync Problem
+
+**Status:** 🔴 Offen
+
+**Problem:**
+Die App verwendet zwei Datenbanken parallel:
+1. **Lovefield (IndexedDB)** - Original-DB für UI/Renderer
+2. **SQLite** - Neue DB für Main-Prozess und P2P-Features
+
+Lösch- und Update-Operationen über die UI aktualisieren nur Lovefield, nicht SQLite.
+
+**Symptome:**
+- Gelöschte Feeds erscheinen als "existiert bereits" bei P2P
+- SQLite enthält veraltete Daten nach UI-Löschungen
+- Inkonsistente Zustände zwischen UI und P2P-Funktionen
+
+**Betroffene Operationen:**
+- `deleteSource` - Feed löschen
+- `deleteItem` - Artikel löschen  
+- Alle Artikel eines Feeds löschen
+- Möglicherweise auch: Read/Unread, Starred, etc.
+
+**Lösungsoptionen:**
+1. **Sync-Layer**: Alle DB-Operationen müssen beide DBs aktualisieren
+2. **Migration zu SQLite-only**: Lovefield komplett ersetzen (großer Aufwand)
+3. **SQLite als Cache**: SQLite nur für P2P-spezifische Daten nutzen
+
+**Priorität:** Hoch (verhindert korrektes Testen von P2P-Features)
+
+---
+
 
 ## P2P LAN Artikel-Sharing
 
