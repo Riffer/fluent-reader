@@ -32,6 +32,8 @@ interface P2PShareDialogProps {
     feedName?: string
     feedUrl?: string
     feedIconUrl?: string
+    openTarget?: number  // SourceOpenTarget: 0=Local, 1=Webpage, 2=External, 3=FullContent
+    defaultZoom?: number
 }
 
 interface PendingShareCounts {
@@ -46,6 +48,8 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
     feedName,
     feedUrl,
     feedIconUrl,
+    openTarget,
+    defaultZoom,
 }) => {
     const theme = useTheme()
     const [status, setStatus] = useState<P2PStatus | null>(null)
@@ -122,7 +126,9 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                 title: articleTitle,
                 feedName,
                 feedUrl,
-                feedIconUrl
+                feedIconUrl,
+                openTarget,
+                defaultZoom
             }
             
             // Send to all peers with queueing for offline ones

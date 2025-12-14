@@ -329,7 +329,9 @@ export const P2P_GROUP_NAME = "P2P Geteilt"
 export function getOrCreateP2PFeed(
     feedUrl: string,
     feedName: string,
-    feedIconUrl?: string
+    feedIconUrl?: string,
+    openTarget?: number,
+    defaultZoom?: number
 ): { sid: number; created: boolean } {
     if (!db) throw new Error("Database not initialized")
     
@@ -349,8 +351,8 @@ export function getOrCreateP2PFeed(
         url: feedUrl,
         iconurl: feedIconUrl ?? null,
         name: feedName || "P2P Shared Feed",
-        openTarget: 0, // SourceOpenTarget.Local
-        defaultZoom: 0,
+        openTarget: openTarget ?? 0, // SourceOpenTarget.Local if not provided
+        defaultZoom: defaultZoom ?? 0,
         lastFetched: now,
         serviceRef: P2P_SHARED_SERVICE_REF, // This prevents auto-fetching!
         fetchFrequency: 0,
@@ -880,8 +882,8 @@ export function setupDatabaseIPC(): void {
     ipcMain.handle("db:pendingShares:removeOld", (_, maxAgeDays?: number) => removeOldPendingShares(maxAgeDays))
 
     // P2P Shared Feeds operations
-    ipcMain.handle("db:p2pFeeds:getOrCreate", (_, feedUrl: string, feedName: string, feedIconUrl?: string) =>
-        getOrCreateP2PFeed(feedUrl, feedName, feedIconUrl))
+    ipcMain.handle("db:p2pFeeds:getOrCreate", (_, feedUrl: string, feedName: string, feedIconUrl?: string, openTarget?: number, defaultZoom?: number) =>
+        getOrCreateP2PFeed(feedUrl, feedName, feedIconUrl, openTarget, defaultZoom))
     ipcMain.handle("db:p2pFeeds:getAll", () => getP2PSharedFeeds())
     ipcMain.handle("db:p2pFeeds:convertToActive", (_, sid: number) => convertP2PFeedToActive(sid))
 

@@ -2129,6 +2129,8 @@ window.__articleData = ${JSON.stringify({
                 feedName={this.props.source?.name}
                 feedUrl={this.props.source?.url}
                 feedIconUrl={this.props.source?.iconurl}
+                openTarget={this.props.source?.openTarget}
+                defaultZoom={this.props.source?.defaultZoom}
             />
         </FocusZone>
         )

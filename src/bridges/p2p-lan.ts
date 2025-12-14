@@ -196,13 +196,13 @@ export const p2pLanBridge = {
      * Send articles with delivery acknowledgement to a specific peer
      * Always uses array format - single article is just an array with 1 element
      */
-    sendArticlesWithAck: (peerId: string, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>): Promise<{ success: boolean, error?: string }> =>
+    sendArticlesWithAck: (peerId: string, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string, openTarget?: number, defaultZoom?: number }>): Promise<{ success: boolean, error?: string }> =>
         ipcRenderer.invoke("p2p-lan:sendArticlesWithAck", peerId, articles),
     
     /**
      * Broadcast articles to all peers with delivery acknowledgement
      */
-    broadcastArticlesWithAck: (articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>): Promise<Record<string, { success: boolean, error?: string }>> =>
+    broadcastArticlesWithAck: (articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string, openTarget?: number, defaultZoom?: number }>): Promise<Record<string, { success: boolean, error?: string }>> =>
         ipcRenderer.invoke("p2p-lan:broadcastArticlesWithAck", articles),
     
     /**

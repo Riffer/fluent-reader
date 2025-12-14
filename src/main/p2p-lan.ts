@@ -78,6 +78,8 @@ interface P2PMessage {
         feedName?: string
         feedUrl?: string
         feedIconUrl?: string
+        openTarget?: number  // SourceOpenTarget: 0=Local, 1=Webpage, 2=External, 3=FullContent
+        defaultZoom?: number
     }>
     echoData?: any
 }
@@ -429,6 +431,8 @@ export function sendArticlesWithAck(
         feedName?: string
         feedUrl?: string
         feedIconUrl?: string
+        openTarget?: number
+        defaultZoom?: number
     }>,
     queueOnFailure: boolean = false
 ): Promise<boolean> {
@@ -549,6 +553,8 @@ export async function broadcastArticlesWithAck(
         feedName?: string
         feedUrl?: string
         feedIconUrl?: string
+        openTarget?: number
+        defaultZoom?: number
     }>
 ): Promise<Map<string, { success: boolean, error?: string }>> {
     const results = new Map<string, { success: boolean, error?: string }>()
@@ -1073,6 +1079,8 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
                     feedUrl: a.feedUrl,
                     feedName: a.feedName,
                     feedIconUrl: a.feedIconUrl,
+                    openTarget: a.openTarget,
+                    defaultZoom: a.defaultZoom,
                     timestamp: msg.timestamp,
                     peerName: peer.displayName
                 }))
@@ -1194,6 +1202,8 @@ interface P2PArticleData {
     feedUrl?: string
     feedName?: string
     feedIconUrl?: string
+    openTarget?: number
+    defaultZoom?: number
     timestamp: number
     peerName: string
 }
@@ -1242,7 +1252,7 @@ function storeP2PArticle(article: P2PArticleData): {
     try {
         // Get or create the P2P feed
         const feedName = article.feedName || new URL(article.feedUrl).hostname
-        const { sid, created } = getOrCreateP2PFeed(article.feedUrl, feedName, article.feedIconUrl)
+        const { sid, created } = getOrCreateP2PFeed(article.feedUrl, feedName, article.feedIconUrl, article.openTarget, article.defaultZoom)
         
         let groupsUpdated = false
         
@@ -1506,7 +1516,7 @@ export function registerP2PLanIpcHandlers(): void {
         return sendToPeer(peerId, message)
     })
     
-    ipcMain.handle("p2p-lan:sendArticlesWithAck", async (_, peerId: string, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>) => {
+    ipcMain.handle("p2p-lan:sendArticlesWithAck", async (_, peerId: string, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string, openTarget?: number, defaultZoom?: number }>) => {
         try {
             await sendArticlesWithAck(peerId, articles)
             return { success: true }
@@ -1522,7 +1532,7 @@ export function registerP2PLanIpcHandlers(): void {
         return await sendArticleLinkWithQueue(peerId, title, url, feedName, feedUrl, feedIconUrl)
     })
     
-    ipcMain.handle("p2p-lan:broadcastArticlesWithAck", async (_, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string }>) => {
+    ipcMain.handle("p2p-lan:broadcastArticlesWithAck", async (_, articles: Array<{ url: string, title: string, feedName?: string, feedUrl?: string, feedIconUrl?: string, openTarget?: number, defaultZoom?: number }>) => {
         const results = await broadcastArticlesWithAck(articles)
         // Convert Map to object for IPC
         const resultObj: Record<string, { success: boolean, error?: string }> = {}
