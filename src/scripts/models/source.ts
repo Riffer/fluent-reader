@@ -135,6 +135,7 @@ export type SourceState = {
 
 export const INIT_SOURCES = "INIT_SOURCES"
 export const ADD_SOURCE = "ADD_SOURCE"
+export const ADD_P2P_SOURCES = "ADD_P2P_SOURCES"
 export const UPDATE_SOURCE = "UPDATE_SOURCE"
 export const UPDATE_UNREAD_COUNTS = "UPDATE_UNREAD_COUNTS"
 export const DELETE_SOURCE = "DELETE_SOURCE"
@@ -177,9 +178,15 @@ interface ToggleSourceHiddenAction {
     source: RSSSource
 }
 
+interface AddP2PSourcesAction {
+    type: typeof ADD_P2P_SOURCES
+    sources: SourceState
+}
+
 export type SourceActionTypes =
     | InitSourcesAction
     | AddSourceAction
+    | AddP2PSourcesAction
     | UpdateSourceAction
     | UpdateUnreadCountsAction
     | DeleteSourceAction
@@ -486,6 +493,135 @@ export function updateFavicon(
     }
 }
 
+/**
+ * Action creator for adding P2P sources to the state
+ */
+export function addP2PSourcesDone(sources: SourceState): SourceActionTypes {
+    return {
+        type: ADD_P2P_SOURCES,
+        sources: sources,
+    }
+}
+
+/**
+ * Import from P2PFeedsChangedData interface in p2p-lan bridge
+ */
+interface P2PSourceData {
+    sid: number
+    url: string
+    iconurl: string | null
+    name: string
+    openTarget: number
+    defaultZoom: number
+    lastFetched: string
+    serviceRef: string | null
+    fetchFrequency: number
+    rules: string | null
+    textDir: number
+    hidden: number
+    mobileMode: number
+    persistCookies: number
+}
+
+interface P2PArticleData {
+    _id: number
+    source: number
+    title: string
+    link: string
+    date: string
+    fetchedDate: string
+    thumb: string | null
+    content: string
+    snippet: string
+    creator: string
+    hasRead: boolean
+    starred: boolean
+    hidden: boolean
+    notify: boolean
+    serviceRef: string | null
+}
+
+/**
+ * Handle P2P feeds changed event - adds new sources and items to Redux state.
+ * Called when the Main Process notifies that P2P articles have been stored in SQLite.
+ */
+export function handleP2PFeedsChanged(
+    newFeeds: P2PSourceData[],
+    newArticles: P2PArticleData[],
+    groupsUpdated: boolean,
+    groups: any[] | null
+): AppThunk<Promise<void>> {
+    return async (dispatch, getState) => {
+        console.log(`[P2P] Handling feeds changed: ${newFeeds.length} feeds, ${newArticles.length} articles`)
+        
+        // Convert and add new sources to state
+        if (newFeeds.length > 0) {
+            const sourcesToAdd: SourceState = {}
+            for (const feedData of newFeeds) {
+                const source = new RSSSource(feedData.url, feedData.name)
+                source.sid = feedData.sid
+                source.iconurl = feedData.iconurl ?? undefined
+                source.openTarget = feedData.openTarget
+                source.defaultZoom = feedData.defaultZoom
+                source.lastFetched = new Date(feedData.lastFetched)
+                source.serviceRef = feedData.serviceRef ?? undefined
+                source.fetchFrequency = feedData.fetchFrequency
+                source.rules = feedData.rules ? JSON.parse(feedData.rules) : undefined
+                source.textDir = feedData.textDir
+                source.hidden = feedData.hidden === 1
+                source.mobileMode = feedData.mobileMode === 1
+                source.persistCookies = feedData.persistCookies === 1
+                source.unreadCount = 0
+                
+                sourcesToAdd[source.sid] = source
+            }
+            dispatch(addP2PSourcesDone(sourcesToAdd))
+            console.log(`[P2P] Added ${Object.keys(sourcesToAdd).length} new sources to Redux state`)
+        }
+        
+        // Convert and add new articles to items state
+        if (newArticles.length > 0) {
+            const itemsToAdd: RSSItem[] = newArticles.map(articleData => ({
+                _id: articleData._id,
+                source: articleData.source,
+                title: articleData.title,
+                link: articleData.link,
+                date: new Date(articleData.date),
+                fetchedDate: new Date(articleData.fetchedDate),
+                thumb: articleData.thumb ?? undefined,
+                content: articleData.content,
+                snippet: articleData.snippet,
+                creator: articleData.creator ?? undefined,
+                hasRead: articleData.hasRead,
+                starred: articleData.starred,
+                hidden: articleData.hidden,
+                notify: articleData.notify,
+                serviceRef: articleData.serviceRef ?? undefined
+            } as RSSItem))
+            
+            // Create itemState map
+            const itemState: { [_id: number]: RSSItem } = {}
+            for (const item of itemsToAdd) {
+                itemState[item._id] = item
+            }
+            
+            // Dispatch FETCH_ITEMS with success to add items to state
+            dispatch({
+                type: FETCH_ITEMS,
+                status: ActionStatus.Success,
+                items: itemsToAdd,
+                itemState: itemState,
+            })
+            console.log(`[P2P] Added ${itemsToAdd.length} new articles to Redux state`)
+        }
+        
+        // Update unread counts for affected sources
+        if (newFeeds.length > 0 || newArticles.length > 0) {
+            await dispatch(updateUnreadCounts())
+        }
+    }
+}
+
 export function sourceReducer(
     state: SourceState = {},
     action: SourceActionTypes | ItemActionTypes
@@ -509,6 +645,12 @@ export function sourceReducer(
                     }
                 default:
                     return state
+            }
+        case ADD_P2P_SOURCES:
+            // Merge new P2P sources into state
+            return {
+                ...state,
+                ...action.sources,
             }
         case UPDATE_SOURCE:
             return {
