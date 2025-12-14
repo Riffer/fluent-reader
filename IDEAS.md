@@ -41,7 +41,7 @@ Die App verwendet **zwei Datenbanken parallel**, was zu Inkonsistenzen führt:
 - `src/bridges/db.ts` - Bridge zum Renderer ✓
 
 ### Dateien die noch Lovefield nutzen (Legacy):
-- `src/scripts/db.ts` - Lovefield Init
+- `src/scripts/db.ts` - Lovefield Init ⚠️ **Hat Warnkommentar am Dateianfang!**
 - `src/scripts/models/source.ts` - Source CRUD
 - `src/scripts/models/item.ts` - Item CRUD
 - `src/scripts/models/feed.ts` - Feed Display
@@ -49,6 +49,7 @@ Die App verwendet **zwei Datenbanken parallel**, was zu Inkonsistenzen führt:
 - `src/scripts/models/services/*.ts` - Service Implementierungen
 
 ### Zukünftige Migration (TODO)
+- [x] Warnkommentar in `src/scripts/db.ts` hinzugefügt (14.12.2025)
 - [ ] Alle Lovefield-Aufrufe in Models durch `window.db.*` ersetzen
 - [ ] Lovefield komplett entfernen
 - [ ] Dann: P2P-Feeds in UI anzeigen
