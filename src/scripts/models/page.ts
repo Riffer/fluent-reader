@@ -152,6 +152,48 @@ export function showItemFromId(iid: number): AppThunk {
     }
 }
 
+/**
+ * Navigate to a P2P article by sourceId and articleId.
+ * This will:
+ * 1. Select the source (navigate to P2P feed)
+ * 2. Initialize the feed (load articles)
+ * 3. Show the article
+ */
+export function navigateToP2PArticle(sourceId: number, articleId: number, feedName: string): AppThunk {
+    return async (dispatch, getState) => {
+        console.log(`[navigateToP2PArticle] Navigating to source=${sourceId}, article=${articleId}`)
+        
+        // Step 1: Navigate to the source feed
+        const menuKey = `source-${sourceId}`
+        dispatch({
+            type: SELECT_PAGE,
+            pageType: PageType.Sources,
+            keepMenu: getWindowBreakpoint(),
+            filter: getState().page.filter,
+            sids: [sourceId],
+            menuKey: menuKey,
+            title: feedName,
+            init: true,
+        } as PageActionTypes)
+        
+        // Step 2: Initialize feeds (this loads the articles into the feed view)
+        dispatch(initFeeds())
+        
+        // Step 3: Wait for feed to load, then show the article
+        setTimeout(() => {
+            const state = getState()
+            const item = state.items[articleId]
+            if (item) {
+                console.log(`[navigateToP2PArticle] Found article in state, showing it`)
+                dispatch(showItem(null, item))
+                if (!item.hasRead) dispatch(markRead(item))
+            } else {
+                console.log(`[navigateToP2PArticle] Article ${articleId} not in state yet`)
+            }
+        }, 500)
+    }
+}
+
 export const dismissItem = (): PageActionTypes => ({ type: DISMISS_ITEM })
 
 export const toggleSearch = (): AppThunk => {

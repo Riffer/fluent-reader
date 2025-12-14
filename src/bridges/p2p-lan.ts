@@ -41,6 +41,9 @@ type ArticleCallback = (data: {
     feedName?: string
     feedUrl?: string
     feedIconUrl?: string
+    storedInFeed?: boolean
+    articleId?: number
+    sourceId?: number
 }) => void
 type ArticleBatchCallback = (data: {
     peerId: string

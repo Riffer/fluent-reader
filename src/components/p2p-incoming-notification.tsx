@@ -76,13 +76,18 @@ interface IncomingArticle {
     url: string
     title: string
     timestamp: number
+    storedInFeed?: boolean
+    articleId?: number
+    sourceId?: number
+    feedName?: string
 }
 
 interface P2PIncomingNotificationProps {
     addToLog: (title: string, url: string, peerName: string) => void
+    navigateToArticle: (sourceId: number, articleId: number, feedName: string) => void
 }
 
-export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = ({ addToLog }) => {
+export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = ({ addToLog, navigateToArticle }) => {
     const [incomingArticle, setIncomingArticle] = useState<IncomingArticle | null>(null)
     const [collectLinksInLog, setCollectLinksInLog] = useState<boolean>(false)
     const queueRef = useRef<IncomingArticle[]>([])
@@ -197,12 +202,33 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
         handleDismiss()
     }, [incomingArticle, addToLog, handleDismiss])
 
+    const handleGoToArticle = useCallback(() => {
+        if (!incomingArticle) return
+        if (!incomingArticle.articleId || !incomingArticle.sourceId) {
+            console.log("[P2P Notification] Cannot navigate - no articleId/sourceId")
+            return
+        }
+        console.log("[P2P Notification] Navigating to article:", incomingArticle.articleId, "in source:", incomingArticle.sourceId)
+        
+        // Store values before dismissing
+        const { sourceId, articleId, feedName } = incomingArticle
+        
+        // Dismiss dialog first
+        handleDismiss()
+        
+        // Navigate after dialog has closed (async to prevent focus issues)
+        setTimeout(() => {
+            navigateToArticle(sourceId, articleId, feedName || "P2P Geteilt")
+        }, 50)
+    }, [incomingArticle, navigateToArticle, handleDismiss])
+
     const theme = useTheme()
 
     if (!incomingArticle) return null
 
     const timeAgo = getTimeAgo(incomingArticle.timestamp)
     const decodedTitle = decodeHtmlEntities(incomingArticle.title)
+    const canNavigateToArticle = incomingArticle.storedInFeed && incomingArticle.articleId && incomingArticle.sourceId
 
     return (
         <Dialog
@@ -217,6 +243,11 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
             modalProps={{
                 isBlocking: false,
                 styles: { main: { minWidth: 520, maxWidth: 600 } },
+            }}
+            // Prevent focus trap issues when dialog is dismissed during navigation
+            focusTrapZoneProps={{
+                forceFocusInsideTrap: false,
+                isClickableOutsideFocusTrap: true,
             }}
             minWidth={520}
             maxWidth={600}
@@ -256,18 +287,26 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
                     tokens={{ childrenGap: 8 }}
                     styles={{ root: { width: "100%" } }}
                 >
-                    <PrimaryButton 
-                        title="Open in Reader"
+                    {canNavigateToArticle && (
+                        <PrimaryButton 
+                            text="Zum Artikel"
+                            onClick={handleGoToArticle} 
+                            iconProps={{ iconName: "ReadingMode" }}
+                        />
+                    )}
+                    <DefaultButton 
+                        text="Im Reader"
                         onClick={handleOpenInReader} 
                         iconProps={{ iconName: "NavigateExternalInline" }}
+                        primary={!canNavigateToArticle}
                     />
                     <DefaultButton 
-                        title="Open in Browser"
+                        text="Im Browser"
                         onClick={handleOpenInBrowser} 
                         iconProps={{ iconName: "Globe" }}
                     />
                     <DefaultButton 
-                        title="Copy Link"
+                        text="Kopieren"
                         onClick={handleCopyLink} 
                         iconProps={{ iconName: "Link" }}
                     />
@@ -275,7 +314,7 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
                         <span />
                     </Stack.Item>
                     <DefaultButton 
-                        title="Later"
+                        text="Später"
                         onClick={handleLater} 
                         iconProps={{ iconName: "Ringer" }} 
                     />

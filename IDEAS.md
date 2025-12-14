@@ -243,21 +243,18 @@ Geteilte Artikel sind nach App-Neustart nicht mehr verfügbar (nur in der Notifi
 - [ ] Gruppierung: Ein Feed "P2P Geteilt" oder pro Peer "Von [Name]"
 - [ ] Items werden in SQLite gespeichert wie normale Artikel
 
-#### 5. Artikel-Modus beim Teilen mitgeben
+#### ~~5. Artikel-Modus beim Teilen mitgeben~~ ✅ Erledigt
 
-**Problem:**
-Aktuell wird nur der Artikel-Link und Titel übermittelt, aber nicht der Anzeigemodus (RSS/Webpage/FullContent) und andere Einstellungen.
+**Status:** ✅ Implementiert (v1.1.10)
 
-**Anforderung:**
-- Der aktuell verwendete Modus soll mit übertragen werden
-- Empfänger kann Artikel direkt im gleichen Modus öffnen wie der Sender
-- Weitere relevante Einstellungen könnten mitgesendet werden (z.B. Zoom-Level)
+**Implementiert:**
+- ✅ `openTarget` (Anzeigemodus: Lokal/Extern) wird mit übertragen
+- ✅ `defaultZoom` (Zoom-Level) wird mit übertragen
+- ✅ Werte werden beim Erstellen neuer P2P-Feeds verwendet
 
-**Umsetzung:**
-- [ ] `article-link-batch` Message erweitern um `viewMode` (0=RSS, 1=Webpage, 2=FullContent)
-- [ ] Optional: `zoomLevel`, `mobileMode` mitschicken
-- [ ] Empfänger-UI: "Öffnen im empfohlenen Modus" vs. "Standard-Modus verwenden"
-- [ ] Fallback wenn Modus nicht unterstützt wird
+**Verhalten:**
+- Neuer P2P-Feed erhält die Anzeigeeinstellungen vom Sender
+- Bestehende Feeds behalten ihre eigenen Einstellungen
 
 #### 6. System-Events nutzen (Sleep/Resume)
 
@@ -282,6 +279,29 @@ import { powerMonitor } from "electron"
 powerMonitor.on("suspend", () => { /* System geht schlafen */ })
 powerMonitor.on("resume", () => { /* System ist aufgewacht */ })
 ```
+
+#### 7. P2P-Teilen im Artikel-Kontextmenü
+
+**Status:** Idee
+
+**Problem:**
+Aktuell kann man Artikel nur über das Artikel-Menü (geöffneter Artikel) via P2P teilen. In der Artikelübersicht gibt es zwar ein "Teilen"-Kontextmenü, aber dort fehlt die P2P-Option.
+
+**Anforderung:**
+- Im Kontextmenü der Artikelübersicht (Rechtsklick auf Artikel-Karte) den "Teilen"-Eintrag um P2P-Sharing erweitern
+- Ermöglicht schnelles Teilen ohne den Artikel erst öffnen zu müssen
+- Konsistente UX mit dem bestehenden Teilen-Dialog
+
+**Mögliche Umsetzung:**
+- [ ] Kontextmenü-Komponente (`context-menu.tsx`) erweitern
+- [ ] P2P-Peers als Untermenü unter "Teilen" anzeigen
+- [ ] Alternativ: "An Peer teilen..." Dialog öffnen mit Peer-Auswahl
+- [ ] Prüfen ob im P2P-Room (sonst Option ausgrauen/verstecken)
+
+**Vorteile:**
+- Schnellerer Workflow (kein Artikel-Öffnen nötig)
+- Konsistent mit anderen Share-Optionen
+- Batch-Sharing möglich (mehrere Artikel auswählen)
 
 ---
 

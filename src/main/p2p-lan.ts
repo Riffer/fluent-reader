@@ -31,7 +31,8 @@ import {
     insertItem,
     getSourceByUrl,
     getSourceById,
-    ItemRow
+    ItemRow,
+    findArticleByLink
 } from "./db-sqlite"
 
 // Constants
@@ -1072,29 +1073,35 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
             if (msg.articles && msg.articles.length > 0) {
                 console.log(`[P2P-LAN] Received ${msg.articles.length} article(s) from ${peer.displayName}`)
                 
-                // Store articles in P2P feeds (if they have feedUrl)
-                const articlesToStore: P2PArticleData[] = msg.articles.map(a => ({
-                    url: a.url,
-                    title: a.title,
-                    feedUrl: a.feedUrl,
-                    feedName: a.feedName,
-                    feedIconUrl: a.feedIconUrl,
-                    openTarget: a.openTarget,
-                    defaultZoom: a.defaultZoom,
-                    timestamp: msg.timestamp,
-                    peerName: peer.displayName
-                }))
-                
-                const storeResult = storeP2PArticles(articlesToStore)
-                
-                // Notify renderer about state changes if feeds/groups were updated or articles stored
-                if (storeResult.groupsUpdated || storeResult.newFeeds.length > 0 || storeResult.newArticles.length > 0) {
-                    notifyP2PFeedsChanged(storeResult.newFeeds, storeResult.groupsUpdated, storeResult.newArticles)
-                }
-                
                 if (msg.articles.length === 1) {
-                    // Single article - show dialog
+                    // Single article - store and show dialog
                     const a = msg.articles[0]
+                    
+                    // Store the article (will return existing articleId if duplicate)
+                    const singleResult = storeP2PArticle({
+                        url: a.url,
+                        title: a.title,
+                        feedUrl: a.feedUrl,
+                        feedName: a.feedName,
+                        feedIconUrl: a.feedIconUrl,
+                        openTarget: a.openTarget,
+                        defaultZoom: a.defaultZoom,
+                        timestamp: msg.timestamp,
+                        peerName: peer.displayName
+                    })
+                    
+                    // Notify about state changes (new feed, groups, or article)
+                    if (singleResult.groupsUpdated || singleResult.feedCreated || singleResult.articleData) {
+                        notifyP2PFeedsChanged(
+                            singleResult.feedCreated && singleResult.sourceId ? [singleResult.sourceId] : [], 
+                            singleResult.groupsUpdated, 
+                            singleResult.articleData ? [singleResult.articleData] : []
+                        )
+                    }
+                    
+                    // Article is in feed if stored OR if duplicate (both have sourceId/articleId)
+                    const isInFeed = singleResult.sourceId !== null && singleResult.articleId !== null
+                    
                     notifyArticleReceived(
                         peerId,
                         peer.displayName,
@@ -1104,10 +1111,32 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
                         a.feedName,
                         a.feedUrl,
                         a.feedIconUrl,
-                        storeResult.stored > 0 // Was it stored?
+                        isInFeed,
+                        singleResult.articleId ?? undefined,
+                        singleResult.sourceId ?? undefined
                     )
                 } else {
-                    // Multiple articles - send to batch handler (goes to bell, no dialogs)
+                    // Multiple articles - batch store and send to bell (no dialogs)
+                    const articlesToStore: P2PArticleData[] = msg.articles.map(a => ({
+                        url: a.url,
+                        title: a.title,
+                        feedUrl: a.feedUrl,
+                        feedName: a.feedName,
+                        feedIconUrl: a.feedIconUrl,
+                        openTarget: a.openTarget,
+                        defaultZoom: a.defaultZoom,
+                        timestamp: msg.timestamp,
+                        peerName: peer.displayName
+                    }))
+                    
+                    const storeResult = storeP2PArticles(articlesToStore)
+                    
+                    // Notify renderer about state changes
+                    if (storeResult.groupsUpdated || storeResult.newFeeds.length > 0 || storeResult.newArticles.length > 0) {
+                        notifyP2PFeedsChanged(storeResult.newFeeds, storeResult.groupsUpdated, storeResult.newArticles)
+                    }
+                    
+                    // Send to batch handler (goes to bell, no dialogs)
                     notifyArticlesReceivedBatch(
                         peerId,
                         peer.displayName,
@@ -1231,7 +1260,11 @@ export interface P2PArticleForRenderer {
 
 /**
  * Store a P2P received article in the database.
- * Creates a passive feed if needed and adds the article to it.
+ * 
+ * Logic:
+ * 1. Search globally for article by link - if found, return existing IDs (no duplicate)
+ * 2. If not found, check if the feed exists - if yes, insert article into that feed
+ * 3. If neither article nor feed exist, create P2P feed and insert article there
  * 
  * @returns Object with sourceId, articleId, articleData, groupsUpdated flag
  */
@@ -1243,27 +1276,60 @@ function storeP2PArticle(article: P2PArticleData): {
     groupsUpdated: boolean
     error?: string
 } {
-    // If no feedUrl provided, we can't create a feed
-    if (!article.feedUrl) {
-        console.log(`[P2P-LAN] Article "${article.title}" has no feedUrl - cannot store in feed`)
-        return { sourceId: null, articleId: null, articleData: null, feedCreated: false, groupsUpdated: false }
-    }
-    
     try {
-        // Get or create the P2P feed
-        const feedName = article.feedName || new URL(article.feedUrl).hostname
-        const { sid, created } = getOrCreateP2PFeed(article.feedUrl, feedName, article.feedIconUrl, article.openTarget, article.defaultZoom)
-        
-        let groupsUpdated = false
-        
-        // If feed was newly created, add it to P2P group
-        if (created) {
-            console.log(`[P2P-LAN] New P2P feed created (sid=${sid}), adding to P2P group`)
-            addSourceToP2PGroup(sid)
-            groupsUpdated = true
+        // Step 1: Search globally for article by link
+        const existingArticle = findArticleByLink(article.url)
+        if (existingArticle) {
+            console.log(`[P2P-LAN] Article already exists globally: "${article.title}" (id=${existingArticle.articleId}, source=${existingArticle.sourceId})`)
+            return { 
+                sourceId: existingArticle.sourceId, 
+                articleId: existingArticle.articleId, 
+                articleData: null, 
+                feedCreated: false, 
+                groupsUpdated: false, 
+                error: "duplicate" 
+            }
         }
         
-        // Create and insert the article
+        // Step 2: Check if the feed exists (by URL)
+        let sid: number | null = null
+        let feedCreated = false
+        let groupsUpdated = false
+        
+        if (article.feedUrl) {
+            const existingSource = getSourceByUrl(article.feedUrl)
+            if (existingSource) {
+                // Feed exists - use it
+                sid = existingSource.sid
+                console.log(`[P2P-LAN] Using existing feed: "${existingSource.name}" (sid=${sid})`)
+            } else {
+                // Step 3: Create new P2P feed
+                const feedName = article.feedName || new URL(article.feedUrl).hostname
+                const result = getOrCreateP2PFeed(article.feedUrl, feedName, article.feedIconUrl, article.openTarget, article.defaultZoom)
+                sid = result.sid
+                feedCreated = result.created
+                
+                if (feedCreated) {
+                    console.log(`[P2P-LAN] New P2P feed created (sid=${sid}), adding to P2P group`)
+                    addSourceToP2PGroup(sid)
+                    groupsUpdated = true
+                }
+            }
+        } else {
+            // No feedUrl - create a generic P2P feed
+            console.log(`[P2P-LAN] Article "${article.title}" has no feedUrl - creating generic P2P feed`)
+            const genericUrl = "p2p://shared-articles"
+            const result = getOrCreateP2PFeed(genericUrl, "P2P Shared Articles", undefined, undefined, undefined)
+            sid = result.sid
+            feedCreated = result.created
+            
+            if (feedCreated) {
+                addSourceToP2PGroup(sid)
+                groupsUpdated = true
+            }
+        }
+        
+        // Insert the article into the feed
         const now = new Date().toISOString()
         const articleDate = new Date(article.timestamp).toISOString()
         
@@ -1306,15 +1372,11 @@ function storeP2PArticle(article: P2PArticleData): {
             serviceRef: null
         }
         
-        return { sourceId: sid, articleId, articleData, feedCreated: created, groupsUpdated }
+        return { sourceId: sid, articleId, articleData, feedCreated, groupsUpdated }
         
     } catch (err) {
-        // Handle duplicate article (UNIQUE constraint on link)
+        // Handle any other errors
         const errorMsg = err instanceof Error ? err.message : String(err)
-        if (errorMsg.includes("UNIQUE constraint failed")) {
-            console.log(`[P2P-LAN] Article already exists: "${article.title}"`)
-            return { sourceId: null, articleId: null, articleData: null, feedCreated: false, groupsUpdated: false, error: "duplicate" }
-        }
         console.error(`[P2P-LAN] Error storing P2P article:`, err)
         return { sourceId: null, articleId: null, articleData: null, feedCreated: false, groupsUpdated: false, error: errorMsg }
     }
@@ -1401,7 +1463,9 @@ function notifyArticleReceived(
     feedName?: string,
     feedUrl?: string,
     feedIconUrl?: string,
-    storedInFeed?: boolean
+    storedInFeed?: boolean,
+    articleId?: number,
+    sourceId?: number
 ): void {
     const mainWindow = getMainWindow()
     if (!mainWindow) return
@@ -1415,7 +1479,9 @@ function notifyArticleReceived(
         feedName,
         feedUrl,
         feedIconUrl,
-        storedInFeed: storedInFeed ?? false
+        storedInFeed: storedInFeed ?? false,
+        articleId,
+        sourceId
     })
 }
 

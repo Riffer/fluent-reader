@@ -575,6 +575,41 @@ export function itemExists(sourceId: number, title: string, date: string): boole
 }
 
 /**
+ * Check if an item with given link already exists in a source (for P2P deduplication)
+ * Returns the existing item's _id if found, null otherwise
+ */
+export function itemExistsByLink(sourceId: number, link: string): number | null {
+    if (!db) throw new Error("Database not initialized")
+    
+    const row = db.prepare(`
+        SELECT _id FROM items 
+        WHERE source = ? AND link = ?
+        LIMIT 1
+    `).get(sourceId, link) as { _id: number } | undefined
+    
+    return row?._id ?? null
+}
+
+/**
+ * Find an article globally by its link (across all feeds)
+ * Returns the article's _id and source, or null if not found
+ */
+export function findArticleByLink(link: string): { articleId: number, sourceId: number } | null {
+    if (!db) throw new Error("Database not initialized")
+    
+    const row = db.prepare(`
+        SELECT _id, source FROM items 
+        WHERE link = ?
+        LIMIT 1
+    `).get(link) as { _id: number, source: number } | undefined
+    
+    if (row) {
+        return { articleId: row._id, sourceId: row.source }
+    }
+    return null
+}
+
+/**
  * Query items with flexible filtering
  */
 export interface ItemQueryOptions {
