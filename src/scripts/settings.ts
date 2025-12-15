@@ -1,9 +1,7 @@
-import * as db from "./db"
 import { IPartialTheme, loadTheme } from "@fluentui/react"
 import locales from "./i18n/_locales"
 import { ThemeSettings } from "../schema-types"
 import intl from "react-intl-universal"
-import { SourceTextDirection } from "./models/source"
 
 let lightTheme: IPartialTheme = {
     defaultFontStyle: {
@@ -95,9 +93,10 @@ export async function exportAll() {
     )
     if (write) {
         let output = window.settings.getAll()
+        // Export from SQLite instead of Lovefield
         output["lovefield"] = {
-            sources: await db.sourcesDB.select().from(db.sources).exec(),
-            items: await db.itemsDB.select().from(db.items).exec(),
+            sources: await window.db.sources.getAll(),
+            items: await window.db.items.getAll(),
         }
         write(JSON.stringify(output), intl.get("settings.writeError"))
     }
@@ -117,9 +116,13 @@ export async function importAll() {
     )
     if (!confirmed) return true
     let configs = JSON.parse(data)
-    await db.sourcesDB.delete().from(db.sources).exec()
-    await db.itemsDB.delete().from(db.items).exec()
+    
+    // Clear existing SQLite data
+    await window.db.sources.deleteAll()
+    await window.db.items.deleteAll()
+    
     if (configs.nedb) {
+        // Legacy NeDB import - migrate via IndexedDB
         let openRequest = window.indexedDB.open("NeDB")
         configs.useNeDB = true
         openRequest.onsuccess = () => {
@@ -143,19 +146,22 @@ export async function importAll() {
             })
         }
     } else {
-        const sRows = configs.lovefield.sources.map(s => {
-            s.lastFetched = new Date(s.lastFetched)
-            if (!s.textDir) s.textDir = SourceTextDirection.LTR
-            if (!s.hidden) s.hidden = false
-            return db.sources.createRow(s)
-        })
-        const iRows = configs.lovefield.items.map(i => {
-            i.date = new Date(i.date)
-            i.fetchedDate = new Date(i.fetchedDate)
-            return db.items.createRow(i)
-        })
-        await db.sourcesDB.insert().into(db.sources).values(sRows).exec()
-        await db.itemsDB.insert().into(db.items).values(iRows).exec()
+        // Import into SQLite from lovefield backup format
+        const sources = configs.lovefield.sources.map(s => ({
+            ...s,
+            lastFetched: new Date(s.lastFetched).toISOString(),
+            textDir: s.textDir || 0,
+            hidden: s.hidden || false,
+        }))
+        const items = configs.lovefield.items.map(i => ({
+            ...i,
+            date: new Date(i.date).toISOString(),
+            fetchedDate: new Date(i.fetchedDate).toISOString(),
+        }))
+        
+        await window.db.sources.bulkInsert(sources)
+        await window.db.items.bulkInsert(items)
+        
         delete configs.lovefield
         window.settings.setAll(configs)
     }
