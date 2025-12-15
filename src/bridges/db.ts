@@ -49,6 +49,7 @@ export interface ItemQueryOptions {
     starredOnly?: boolean
     hiddenOnly?: boolean
     searchTerm?: string
+    hasServiceRef?: boolean
     limit?: number
     offset?: number
     orderBy?: "date" | "fetchedDate"
@@ -135,6 +136,25 @@ const dbBridge = {
         
         query: (options?: ItemQueryOptions): Promise<ItemRow[]> => 
             ipcRenderer.invoke("db:items:query", options || {}),
+        
+        // Service sync operations (for cloud service integration)
+        getUnreadServiceRefs: (sourceIds: number[], beforeDate?: string, afterDate?: string): Promise<string[]> =>
+            ipcRenderer.invoke("db:items:getUnreadServiceRefs", sourceIds, beforeDate, afterDate),
+        
+        markReadByServiceRef: (serviceRef: string): Promise<void> =>
+            ipcRenderer.invoke("db:items:markReadByServiceRef", serviceRef),
+        
+        markUnreadByServiceRef: (serviceRef: string): Promise<void> =>
+            ipcRenderer.invoke("db:items:markUnreadByServiceRef", serviceRef),
+        
+        setStarredByServiceRef: (serviceRef: string, starred: boolean): Promise<void> =>
+            ipcRenderer.invoke("db:items:setStarredByServiceRef", serviceRef, starred),
+        
+        deleteOlderThan: (date: string): Promise<number> =>
+            ipcRenderer.invoke("db:items:deleteOlderThan", date),
+        
+        getForSync: (): Promise<ItemRow[]> =>
+            ipcRenderer.invoke("db:items:getForSync"),
     },
 
     // P2P Feed operations
@@ -152,6 +172,10 @@ const dbBridge = {
     
     getStats: (): Promise<DbStats> => 
         ipcRenderer.invoke("db:getStats"),
+    
+    // Database management
+    clearAll: (): Promise<void> =>
+        ipcRenderer.invoke("db:clearAll"),
 }
 
 export default dbBridge
