@@ -204,6 +204,9 @@ function updateSources(
     }
 }
 
+// UNTESTED: SQLite migration - requires cloud service API access to verify
+// Converted from Lovefield to SQLite on 2024-12-15
+// This function syncs local read/starred state with external services
 function syncItems(hook: ServiceHooks["syncItems"]): AppThunk<Promise<void>> {
     return async (dispatch, getState) => {
         const state = getState()

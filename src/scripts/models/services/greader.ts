@@ -322,6 +322,8 @@ export const gReaderServiceHooks: ServiceHooks = {
         }
     },
 
+    // UNTESTED: SQLite migration - requires GReader API access to verify
+    // Converted from Lovefield to SQLite on 2024-12-15
     markAllRead: (sids, date, before) => async (_, getState) => {
         const state = getState()
         const configs = state.service as GReaderConfigs
