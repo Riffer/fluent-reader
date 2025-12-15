@@ -1,5 +1,3 @@
-import * as db from "../db"
-import lf from "lovefield"
 import { SourceRow } from "../../bridges/db"
 import { SyncService, ServiceConfigs } from "../../schema-types"
 import { AppThunk, ActionStatus } from "../utils"
@@ -212,57 +210,43 @@ function syncItems(hook: ServiceHooks["syncItems"]): AppThunk<Promise<void>> {
         const [unreadRefs, starredRefs] = await dispatch(hook())
         const unreadCopy = new Set(unreadRefs)
         const starredCopy = new Set(starredRefs)
-        const rows = await db.itemsDB
-            .select(db.items.serviceRef, db.items.hasRead, db.items.starred)
-            .from(db.items)
-            .where(
-                lf.op.and(
-                    db.items.serviceRef.isNotNull(),
-                    lf.op.or(
-                        db.items.hasRead.eq(false),
-                        db.items.starred.eq(true)
-                    )
-                )
-            )
-            .exec()
-        const updates = new Array<lf.query.Update>()
-        for (let row of rows) {
-            const serviceRef = row["serviceRef"]
-            if (row["hasRead"] === false && !unreadRefs.delete(serviceRef)) {
-                updates.push(
-                    db.itemsDB
-                        .update(db.items)
-                        .set(db.items.hasRead, true)
-                        .where(db.items.serviceRef.eq(serviceRef))
-                )
+        
+        // Query items with serviceRef that are unread or starred using SQLite
+        const items = await window.db.items.query({
+            hasServiceRef: true
+        })
+        
+        // Filter to only unread or starred items
+        const relevantItems = items.filter(item => !item.hasRead || item.starred)
+        
+        const updates: Promise<void>[] = []
+        
+        for (let item of relevantItems) {
+            const serviceRef = item.serviceRef
+            if (!serviceRef) continue
+            
+            // If local item is unread but service says it's read, mark as read
+            if (!item.hasRead && !unreadRefs.delete(serviceRef)) {
+                updates.push(window.db.items.markReadByServiceRef(serviceRef))
             }
-            if (row["starred"] === true && !starredRefs.delete(serviceRef)) {
-                updates.push(
-                    db.itemsDB
-                        .update(db.items)
-                        .set(db.items.starred, false)
-                        .where(db.items.serviceRef.eq(serviceRef))
-                )
+            // If local item is starred but service says it's not, unstar it
+            if (item.starred && !starredRefs.delete(serviceRef)) {
+                updates.push(window.db.items.setStarredByServiceRef(serviceRef, false))
             }
         }
+        
+        // Mark items as unread that the service says are unread
         for (let unread of unreadRefs) {
-            updates.push(
-                db.itemsDB
-                    .update(db.items)
-                    .set(db.items.hasRead, false)
-                    .where(db.items.serviceRef.eq(unread))
-            )
+            updates.push(window.db.items.markUnreadByServiceRef(unread))
         }
+        
+        // Mark items as starred that the service says are starred
         for (let starred of starredRefs) {
-            updates.push(
-                db.itemsDB
-                    .update(db.items)
-                    .set(db.items.starred, true)
-                    .where(db.items.serviceRef.eq(starred))
-            )
+            updates.push(window.db.items.setStarredByServiceRef(starred, true))
         }
+        
         if (updates.length > 0) {
-            await db.itemsDB.createTransaction().exec(updates)
+            await Promise.all(updates)
             await dispatch(updateUnreadCounts())
             dispatch(syncLocalItems(unreadCopy, starredCopy))
         }

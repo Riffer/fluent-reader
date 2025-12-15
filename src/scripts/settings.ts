@@ -1,4 +1,3 @@
-import * as db from "./db"
 import { IPartialTheme, loadTheme } from "@fluentui/react"
 import locales from "./i18n/_locales"
 import { ThemeSettings } from "../schema-types"
@@ -95,9 +94,10 @@ export async function exportAll() {
     )
     if (write) {
         let output = window.settings.getAll()
-        output["lovefield"] = {
-            sources: await db.sourcesDB.select().from(db.sources).exec(),
-            items: await db.itemsDB.select().from(db.items).exec(),
+        // Export from SQLite
+        output["sqlite"] = {
+            sources: await window.db.sources.getAll(),
+            items: await window.db.items.query({}),
         }
         write(JSON.stringify(output), intl.get("settings.writeError"))
     }
@@ -117,47 +117,67 @@ export async function importAll() {
     )
     if (!confirmed) return true
     let configs = JSON.parse(data)
-    await db.sourcesDB.delete().from(db.sources).exec()
-    await db.itemsDB.delete().from(db.items).exec()
-    if (configs.nedb) {
-        let openRequest = window.indexedDB.open("NeDB")
-        configs.useNeDB = true
-        openRequest.onsuccess = () => {
-            let indexedDB = openRequest.result
-            let objectStore = indexedDB
-                .transaction("nedbdata", "readwrite")
-                .objectStore("nedbdata")
-            let requests = Object.entries(configs.nedb).map(([key, value]) => {
-                return objectStore.put(value, key)
-            })
-            let promises = requests.map(
-                req =>
-                    new Promise<void>((resolve, reject) => {
-                        req.onsuccess = () => resolve()
-                        req.onerror = () => reject()
-                    })
-            )
-            Promise.all(promises).then(() => {
-                delete configs.nedb
-                window.settings.setAll(configs)
+    
+    // Clear existing data in SQLite
+    await window.db.clearAll()
+    
+    // Handle different backup formats
+    if (configs.sqlite) {
+        // New SQLite format
+        for (const source of configs.sqlite.sources) {
+            await window.db.sources.insert(source)
+        }
+        if (configs.sqlite.items?.length > 0) {
+            await window.db.items.insertMany(configs.sqlite.items)
+        }
+        delete configs.sqlite
+    } else if (configs.lovefield) {
+        // Legacy Lovefield format - convert and import
+        for (const s of configs.lovefield.sources) {
+            await window.db.sources.insert({
+                sid: s.sid,
+                url: s.url,
+                iconurl: s.iconurl || null,
+                name: s.name,
+                openTarget: s.openTarget ?? 0,
+                defaultZoom: s.defaultZoom ?? 1.0,
+                lastFetched: s.lastFetched || new Date().toISOString(),
+                serviceRef: s.serviceRef || null,
+                fetchFrequency: s.fetchFrequency ?? 0,
+                rules: s.rules ? JSON.stringify(s.rules) : null,
+                textDir: s.textDir ?? SourceTextDirection.LTR,
+                hidden: s.hidden ? 1 : 0,
+                mobileMode: s.mobileMode ? 1 : 0,
+                persistCookies: s.persistCookies ? 1 : 0,
             })
         }
-    } else {
-        const sRows = configs.lovefield.sources.map(s => {
-            s.lastFetched = new Date(s.lastFetched)
-            if (!s.textDir) s.textDir = SourceTextDirection.LTR
-            if (!s.hidden) s.hidden = false
-            return db.sources.createRow(s)
-        })
-        const iRows = configs.lovefield.items.map(i => {
-            i.date = new Date(i.date)
-            i.fetchedDate = new Date(i.fetchedDate)
-            return db.items.createRow(i)
-        })
-        await db.sourcesDB.insert().into(db.sources).values(sRows).exec()
-        await db.itemsDB.insert().into(db.items).values(iRows).exec()
+        if (configs.lovefield.items?.length > 0) {
+            const items = configs.lovefield.items.map(i => ({
+                source: i.source,
+                title: i.title || "",
+                link: i.link || "",
+                date: i.date || new Date().toISOString(),
+                fetchedDate: i.fetchedDate || new Date().toISOString(),
+                thumb: i.thumb || null,
+                content: i.content || "",
+                snippet: i.snippet || "",
+                creator: i.creator || null,
+                hasRead: i.hasRead ? 1 : 0,
+                starred: i.starred ? 1 : 0,
+                hidden: i.hidden ? 1 : 0,
+                notify: i.notify ? 1 : 0,
+                serviceRef: i.serviceRef || null,
+            }))
+            await window.db.items.insertMany(items)
+        }
         delete configs.lovefield
-        window.settings.setAll(configs)
     }
+    
+    // Remove legacy flags if present
+    delete configs.useNeDB
+    delete configs.useLovefield
+    delete configs.nedb
+    
+    window.settings.setAll(configs)
     return false
 }

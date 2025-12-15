@@ -1,6 +1,4 @@
 import intl from "react-intl-universal"
-import * as db from "../db"
-import lf from "lovefield"
 import { SourceRow, ItemRow } from "../../bridges/db"
 import {
     fetchFavicon,

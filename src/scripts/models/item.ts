@@ -1,5 +1,3 @@
-import * as db from "../db"
-import lf from "lovefield"
 import intl from "react-intl-universal"
 import type { MyParserItem } from "../utils"
 import { ItemRow } from "../../bridges/db"

@@ -253,27 +253,22 @@ function byteLength(str: string) {
     return s
 }
 
-export function calculateItemSize(): Promise<number> {
-    return new Promise((resolve, reject) => {
-        let result = 0
-        let openRequest = window.indexedDB.open("itemsDB")
-        openRequest.onsuccess = () => {
-            let db = openRequest.result
-            let objectStore = db.transaction("items").objectStore("items")
-            let cursorRequest = objectStore.openCursor()
-            cursorRequest.onsuccess = () => {
-                let cursor = cursorRequest.result
-                if (cursor) {
-                    result += byteLength(JSON.stringify(cursor.value))
-                    cursor.continue()
-                } else {
-                    resolve(result)
-                }
-            }
-            cursorRequest.onerror = () => reject()
+export async function calculateItemSize(): Promise<number> {
+    // Get database size from SQLite stats
+    const stats = await window.db.getStats()
+    // Parse the dbSize string (e.g., "5.2 MB") to bytes
+    const sizeMatch = stats.dbSize.match(/^([\d.]+)\s*(KB|MB|GB)?$/i)
+    if (sizeMatch) {
+        const value = parseFloat(sizeMatch[1])
+        const unit = (sizeMatch[2] || "").toUpperCase()
+        switch (unit) {
+            case "GB": return value * 1024 * 1024 * 1024
+            case "MB": return value * 1024 * 1024
+            case "KB": return value * 1024
+            default: return value
         }
-        openRequest.onerror = () => reject()
-    })
+    }
+    return 0
 }
 
 export function validateRegex(regex: string, flags = ""): RegExp {

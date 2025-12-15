@@ -49,6 +49,7 @@ export interface ItemQueryOptions {
     starredOnly?: boolean
     hiddenOnly?: boolean
     searchTerm?: string
+    hasServiceRef?: boolean
     limit?: number
     offset?: number
     orderBy?: "date" | "fetchedDate"
@@ -135,6 +136,28 @@ const dbBridge = {
         
         query: (options?: ItemQueryOptions): Promise<ItemRow[]> => 
             ipcRenderer.invoke("db:items:query", options || {}),
+        
+        // Get service refs for unread items (for cloud sync)
+        getUnreadServiceRefs: (sourceIds: number[], beforeDate?: string, afterDate?: string): Promise<string[]> =>
+            ipcRenderer.invoke("db:items:getUnreadServiceRefs", sourceIds, beforeDate, afterDate),
+        
+        // Batch update items by serviceRef
+        markReadByServiceRef: (serviceRef: string): Promise<void> =>
+            ipcRenderer.invoke("db:items:markReadByServiceRef", serviceRef),
+        
+        markUnreadByServiceRef: (serviceRef: string): Promise<void> =>
+            ipcRenderer.invoke("db:items:markUnreadByServiceRef", serviceRef),
+        
+        setStarredByServiceRef: (serviceRef: string, starred: boolean): Promise<void> =>
+            ipcRenderer.invoke("db:items:setStarredByServiceRef", serviceRef, starred),
+        
+        // Delete items older than date
+        deleteOlderThan: (date: string): Promise<void> =>
+            ipcRenderer.invoke("db:items:deleteOlderThan", date),
+        
+        // Get items with serviceRef that are unread or starred (for sync)
+        getItemsForSync: (): Promise<Array<{serviceRef: string, hasRead: boolean, starred: boolean}>> =>
+            ipcRenderer.invoke("db:items:getForSync"),
     },
 
     // P2P Feed operations
@@ -152,6 +175,10 @@ const dbBridge = {
     
     getStats: (): Promise<DbStats> => 
         ipcRenderer.invoke("db:getStats"),
+    
+    // Clear all data (for import)
+    clearAll: (): Promise<void> =>
+        ipcRenderer.invoke("db:clearAll"),
 }
 
 export default dbBridge

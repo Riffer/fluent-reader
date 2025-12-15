@@ -618,6 +618,7 @@ export interface ItemQueryOptions {
     starredOnly?: boolean
     hiddenOnly?: boolean
     searchTerm?: string
+    hasServiceRef?: boolean
     limit?: number
     offset?: number
     orderBy?: "date" | "fetchedDate"
@@ -652,6 +653,10 @@ export function queryItems(options: ItemQueryOptions = {}): ItemRow[] {
         conditions.push("(title LIKE ? OR snippet LIKE ?)")
         const term = `%${options.searchTerm}%`
         params.push(term, term)
+    }
+    
+    if (options.hasServiceRef) {
+        conditions.push("serviceRef IS NOT NULL")
     }
     
     let query = "SELECT * FROM items"
@@ -857,6 +862,97 @@ export function getStats(): { sources: number; items: number; dbSize: string } {
 }
 
 // ============================================
+// SERVICE SYNC OPERATIONS
+// ============================================
+
+/**
+ * Get serviceRef values for unread items in specific sources
+ * Used by cloud sync services to sync read status
+ */
+export function getUnreadServiceRefs(sourceIds: number[], beforeDate?: string, afterDate?: string): string[] {
+    if (!db) throw new Error("Database not initialized")
+    
+    if (sourceIds.length === 0) return []
+    
+    const placeholders = sourceIds.map(() => '?').join(',')
+    let query = `SELECT serviceRef FROM items WHERE hasRead = 0 AND source IN (${placeholders}) AND serviceRef IS NOT NULL`
+    const params: (number | string)[] = [...sourceIds]
+    
+    if (beforeDate) {
+        query += ` AND date < ?`
+        params.push(beforeDate)
+    }
+    if (afterDate) {
+        query += ` AND date > ?`
+        params.push(afterDate)
+    }
+    
+    const rows = db.prepare(query).all(...params) as { serviceRef: string }[]
+    return rows.map(r => r.serviceRef)
+}
+
+/**
+ * Mark items as read by their serviceRef
+ */
+export function markReadByServiceRef(serviceRef: string): void {
+    if (!db) throw new Error("Database not initialized")
+    db.prepare("UPDATE items SET hasRead = 1 WHERE serviceRef = ?").run(serviceRef)
+}
+
+/**
+ * Mark items as unread by their serviceRef
+ */
+export function markUnreadByServiceRef(serviceRef: string): void {
+    if (!db) throw new Error("Database not initialized")
+    db.prepare("UPDATE items SET hasRead = 0 WHERE serviceRef = ?").run(serviceRef)
+}
+
+/**
+ * Set starred status by serviceRef
+ */
+export function setStarredByServiceRef(serviceRef: string, starred: boolean): void {
+    if (!db) throw new Error("Database not initialized")
+    db.prepare("UPDATE items SET starred = ? WHERE serviceRef = ?").run(starred ? 1 : 0, serviceRef)
+}
+
+/**
+ * Delete items older than a specific date
+ * Excludes starred items to preserve user favorites
+ */
+export function deleteOlderThan(date: string): number {
+    if (!db) throw new Error("Database not initialized")
+    const result = db.prepare("DELETE FROM items WHERE date < ? AND starred = 0").run(date)
+    console.log(`[db-sqlite] Deleted ${result.changes} items older than ${date}`)
+    return result.changes
+}
+
+/**
+ * Get all items for sync purposes (export/migration)
+ * Returns raw item data
+ */
+export function getItemsForSync(): RSSItem[] {
+    if (!db) throw new Error("Database not initialized")
+    const rows = db.prepare("SELECT * FROM items").all() as any[]
+    return rows.map(parseItemRow)
+}
+
+/**
+ * Clear all data from the database
+ * Used during import to start fresh
+ */
+export function clearAll(): void {
+    if (!db) throw new Error("Database not initialized")
+    
+    db.exec(`
+        DELETE FROM items;
+        DELETE FROM sources;
+        DELETE FROM p2p_pending_shares;
+    `)
+    
+    console.log("[db-sqlite] Cleared all data from database")
+}
+
+// ============================================
 // IPC HANDLER SETUP
 // ============================================
 
@@ -904,6 +1000,17 @@ export function setupDatabaseIPC(): void {
     ipcMain.handle("db:getUnreadCounts", () => getUnreadCounts())
     ipcMain.handle("db:vacuum", () => vacuum())
     ipcMain.handle("db:getStats", () => getStats())
+
+    // Service sync operations
+    ipcMain.handle("db:items:getUnreadServiceRefs", (_, sourceIds: number[], beforeDate?: string, afterDate?: string) =>
+        getUnreadServiceRefs(sourceIds, beforeDate, afterDate))
+    ipcMain.handle("db:items:markReadByServiceRef", (_, serviceRef: string) => markReadByServiceRef(serviceRef))
+    ipcMain.handle("db:items:markUnreadByServiceRef", (_, serviceRef: string) => markUnreadByServiceRef(serviceRef))
+    ipcMain.handle("db:items:setStarredByServiceRef", (_, serviceRef: string, starred: boolean) => 
+        setStarredByServiceRef(serviceRef, starred))
+    ipcMain.handle("db:items:deleteOlderThan", (_, date: string) => deleteOlderThan(date))
+    ipcMain.handle("db:items:getForSync", () => getItemsForSync())
+    ipcMain.handle("db:clearAll", () => clearAll())
 
     // P2P Pending Shares operations
     ipcMain.handle("db:pendingShares:add", (_, peerId: string, peerName: string, url: string, title: string, feedName?: string) => 

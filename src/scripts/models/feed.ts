@@ -1,5 +1,3 @@
-import * as db from "../db"
-import lf from "lovefield"
 import { ItemQueryOptions, ItemRow } from "../../bridges/db"
 import {
     SourceActionTypes,
@@ -73,33 +71,6 @@ export class FeedFilter {
         }
         
         return options
-    }
-
-    // Legacy: Convert FeedFilter to Lovefield predicates (kept for compatibility)
-    static toPredicates(filter: FeedFilter) {
-        let type = filter.type
-        const predicates = new Array<lf.Predicate>()
-        if (!(type & FilterType.ShowRead))
-            predicates.push(db.items.hasRead.eq(false))
-        if (!(type & FilterType.ShowNotStarred))
-            predicates.push(db.items.starred.eq(true))
-        if (!(type & FilterType.ShowHidden))
-            predicates.push(db.items.hidden.eq(false))
-        if (filter.search !== "") {
-            const flags = type & FilterType.CaseInsensitive ? "i" : ""
-            const regex = RegExp(filter.search, flags)
-            if (type & FilterType.FullSearch) {
-                predicates.push(
-                    lf.op.or(
-                        db.items.title.match(regex),
-                        db.items.snippet.match(regex)
-                    )
-                )
-            } else {
-                predicates.push(db.items.title.match(regex))
-            }
-        }
-        return predicates
     }
 
     static testItem(filter: FeedFilter, item: RSSItem) {
