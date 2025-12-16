@@ -10,6 +10,7 @@ import { AppDispatch } from "./scripts/utils"
 import { applyThemeSettings } from "./scripts/settings"
 import { initApp, openTextMenu } from "./scripts/models/app"
 import { handleP2PFeedsChanged } from "./scripts/models/source"
+import { fetchItems } from "./scripts/models/item"
 
 window.settings.setProxy()
 
@@ -44,6 +45,12 @@ if (window.p2pLan) {
 window.fontList = [""]
 window.utils.initFontList().then(fonts => {
     window.fontList.push(...fonts)
+})
+
+// Auto-Refresh Feeds beim Aufwachen aus Standby/Sleep
+window.utils.addPowerResumeListener(() => {
+    console.log("[PowerResume] Triggering automatic feed refresh after system wake")
+    store.dispatch(fetchItems(true)) // background=true für stille Aktualisierung
 })
 
 // Globaler F12-Handler für App Developer Tools

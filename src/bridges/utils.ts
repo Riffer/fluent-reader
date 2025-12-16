@@ -188,6 +188,20 @@ const utilsBridge = {
         return ipcRenderer.invoke("init-font-list")
     },
 
+    // ===== Power Events =====
+    
+    /**
+     * Registriert einen Listener für System-Resume Events (Aufwachen aus Standby)
+     * Wird verwendet um Feeds automatisch zu aktualisieren
+     */
+    addPowerResumeListener: (callback: () => void) => {
+        ipcRenderer.removeAllListeners("power-resume")
+        ipcRenderer.on("power-resume", () => {
+            console.log("[PowerMonitor] System resumed from sleep - triggering callback")
+            callback()
+        })
+    },
+
     // ===== Cookie Persistence =====
     
     /**
