@@ -115,20 +115,17 @@ if (process.platform === "darwin") {
 
 const winManager = new WindowManager()
 
-// Workaround für GPU-Crashes: Software-Rendering mit Skia statt GPU
-// Das exit_code=-1073740791 deutet auf GPU-Hardware-Inkompatibilität hin
-if (process.platform === "win32") {
-    // Windows: SwiftShader (Software-Rendering) verwenden - stabiler aber immer noch optimiert
-    app.commandLine.appendSwitch("use-gl", "swiftshader");
-    app.commandLine.appendSwitch("disable-gpu-compositing");
-} else {
-    app.commandLine.appendSwitch("disable-gpu");
-}
+// GPU-Rendering: Früher deaktiviert wegen Crash-Problemen (exit_code=-1073740791)
+// Jetzt wieder aktiviert für flüssigeres Scrolling - bei Problemen auskommentieren
+// if (process.platform === "win32") {
+//     app.commandLine.appendSwitch("use-gl", "swiftshader");
+//     app.commandLine.appendSwitch("disable-gpu-compositing");
+// } else {
+//     app.commandLine.appendSwitch("disable-gpu");
+// }
 
 // Touch-Support
 app.commandLine.appendSwitch("touch-events", "enabled");
-
-console.debug("GPU disabled - using software rendering for stability");
 
 // Handle system sleep/hibernate - notify P2P peers
 powerMonitor.on("suspend", () => {
