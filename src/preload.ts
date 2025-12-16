@@ -22,7 +22,7 @@ const limitedIpcRenderer = {
     },
     // Vom Main-Prozess an den Renderer
     on: (channel: string, listener: Function) => {
-        if (["set-webview-zoom", "webview-zoom-changed", "set-zoom-overlay-setting"].includes(channel)) {
+        if (["set-webview-zoom", "webview-zoom-changed", "set-zoom-overlay-setting", "power-resume"].includes(channel)) {
             ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
         }
     },

@@ -136,10 +136,16 @@ powerMonitor.on("suspend", () => {
     onSystemSuspend()
 })
 
-// Handle system resume - re-announce to P2P peers
+// Handle system resume - re-announce to P2P peers and notify renderer for feed refresh
 powerMonitor.on("resume", () => {
     console.log("[Electron] System resumed from sleep/hibernate")
     onSystemResume()
+    
+    // Notify renderer to refresh feeds
+    if (winManager.hasWindow()) {
+        console.log("[Electron] Notifying renderer to refresh feeds after resume")
+        winManager.mainWindow.webContents.send("power-resume")
+    }
 })
 
 // Gracefully shutdown P2P when app is quitting
