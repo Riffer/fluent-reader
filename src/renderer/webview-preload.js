@@ -482,6 +482,21 @@ try {
 
   // Arrow key navigation - send to parent via webContents
   // This allows left/right arrow keys to navigate articles even when focus is on webview
+  // Smooth keyboard scrolling state
+  let scrollDirection = 0; // -1 = up, 0 = stopped, 1 = down
+  let scrollAnimationFrame = null;
+  const scrollSpeed = 8; // pixels per frame (~480px/sec at 60fps)
+  
+  function smoothScroll() {
+    if (scrollDirection === 0) {
+      scrollAnimationFrame = null;
+      return;
+    }
+    const container = document.getElementById('fr-zoom-container') || document.body;
+    container.scrollTop += scrollSpeed * scrollDirection;
+    scrollAnimationFrame = requestAnimationFrame(smoothScroll);
+  }
+  
   window.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       // Send message to parent window/renderer to handle navigation
@@ -492,14 +507,21 @@ try {
         e.preventDefault();
       } catch {}
     } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      // Handle up/down arrow scrolling within the webview
-      try {
-        const container = document.getElementById('fr-zoom-container') || document.body;
-        const scrollAmount = 50; // pixels per arrow press
-        const direction = e.key === 'ArrowUp' ? -1 : 1;
-        container.scrollTop += scrollAmount * direction;
-        e.preventDefault();
-      } catch {}
+      // Handle up/down arrow scrolling with smooth continuous animation
+      e.preventDefault();
+      const newDirection = e.key === 'ArrowUp' ? -1 : 1;
+      if (scrollDirection !== newDirection) {
+        scrollDirection = newDirection;
+        if (!scrollAnimationFrame) {
+          scrollAnimationFrame = requestAnimationFrame(smoothScroll);
+        }
+      }
+    }
+  });
+  
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      scrollDirection = 0; // Stop scrolling when key released
     }
   });
 

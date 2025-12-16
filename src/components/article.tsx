@@ -1841,6 +1841,18 @@ window.__articleData = ${JSON.stringify({
         e.href = e.href;
     }
     
+    // Comic-Modus: Scrolle zum ersten Bild
+    if (document.body.classList.contains('comic-mode')) {
+        const firstImg = main.querySelector('img');
+        if (firstImg) {
+            firstImg.id = 'comic-image';
+            // Warte kurz bis Bilder geladen sind, dann scrolle
+            setTimeout(() => {
+                firstImg.scrollIntoView({ behavior: 'instant', block: 'start' });
+            }, 100);
+        }
+    }
+    
     main.classList.add("show");
 })();
     </script>
