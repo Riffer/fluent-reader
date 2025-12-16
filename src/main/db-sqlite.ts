@@ -309,6 +309,46 @@ export function getNextSourceId(): number {
     return (row.maxSid ?? 0) + 1
 }
 
+export function deleteAllSources(): void {
+    if (!db) throw new Error("Database not initialized")
+    db.prepare("DELETE FROM sources").run()
+}
+
+export function bulkInsertSources(sources: SourceRow[]): number[] {
+    if (!db) throw new Error("Database not initialized")
+    
+    const stmt = db.prepare(`
+        INSERT INTO sources (sid, url, iconurl, name, openTarget, defaultZoom, lastFetched, serviceRef, fetchFrequency, rules, textDir, hidden, mobileMode, persistCookies)
+        VALUES (@sid, @url, @iconurl, @name, @openTarget, @defaultZoom, @lastFetched, @serviceRef, @fetchFrequency, @rules, @textDir, @hidden, @mobileMode, @persistCookies)
+    `)
+    
+    const insertMany = db.transaction((sources: SourceRow[]) => {
+        const ids: number[] = []
+        for (const source of sources) {
+            const result = stmt.run({
+                sid: source.sid ?? null,
+                url: source.url,
+                iconurl: source.iconurl ?? null,
+                name: source.name,
+                openTarget: source.openTarget,
+                defaultZoom: source.defaultZoom,
+                lastFetched: source.lastFetched,
+                serviceRef: source.serviceRef ?? null,
+                fetchFrequency: source.fetchFrequency,
+                rules: source.rules ?? null,
+                textDir: source.textDir,
+                hidden: source.hidden,
+                mobileMode: source.mobileMode,
+                persistCookies: source.persistCookies
+            })
+            ids.push(result.lastInsertRowid as number)
+        }
+        return ids
+    })
+    
+    return insertMany(sources)
+}
+
 // ============================================
 // P2P SHARED FEED OPERATIONS
 // ============================================
@@ -513,6 +553,53 @@ export function deleteItem(id: number): void {
 export function deleteItemsBySource(sourceId: number): void {
     if (!db) throw new Error("Database not initialized")
     db.prepare("DELETE FROM items WHERE source = ?").run(sourceId)
+}
+
+export function getAllItems(): ItemRow[] {
+    if (!db) throw new Error("Database not initialized")
+    return db.prepare("SELECT * FROM items").all() as ItemRow[]
+}
+
+export function deleteAllItems(): void {
+    if (!db) throw new Error("Database not initialized")
+    db.prepare("DELETE FROM items").run()
+}
+
+export function bulkInsertItems(items: ItemRow[]): number[] {
+    if (!db) throw new Error("Database not initialized")
+    if (items.length === 0) return []
+    
+    const stmt = db.prepare(`
+        INSERT INTO items (_id, source, title, link, date, fetchedDate, thumb, content, snippet, creator, hasRead, starred, hidden, notify, serviceRef)
+        VALUES (@_id, @source, @title, @link, @date, @fetchedDate, @thumb, @content, @snippet, @creator, @hasRead, @starred, @hidden, @notify, @serviceRef)
+    `)
+    
+    const insertMany = db.transaction((items: ItemRow[]) => {
+        const ids: number[] = []
+        for (const item of items) {
+            const result = stmt.run({
+                _id: item._id ?? null,
+                source: item.source,
+                title: item.title,
+                link: item.link,
+                date: item.date,
+                fetchedDate: item.fetchedDate,
+                thumb: item.thumb ?? null,
+                content: item.content,
+                snippet: item.snippet,
+                creator: item.creator ?? null,
+                hasRead: item.hasRead,
+                starred: item.starred,
+                hidden: item.hidden,
+                notify: item.notify,
+                serviceRef: item.serviceRef ?? null
+            })
+            ids.push(result.lastInsertRowid as number)
+        }
+        return ids
+    })
+    
+    return insertMany(items)
 }
 
 export function markItemRead(id: number, hasRead: boolean = true): void {
@@ -975,8 +1062,11 @@ export function setupDatabaseIPC(): void {
     ipcMain.handle("db:sources:update", (_, sid: number, updates) => updateSource(sid, updates))
     ipcMain.handle("db:sources:delete", (_, sid: number) => deleteSource(sid))
     ipcMain.handle("db:sources:getNextId", () => getNextSourceId())
+    ipcMain.handle("db:sources:deleteAll", () => deleteAllSources())
+    ipcMain.handle("db:sources:bulkInsert", (_, sources) => bulkInsertSources(sources))
 
     // Item operations
+    ipcMain.handle("db:items:getAll", () => getAllItems())
     ipcMain.handle("db:items:getById", (_, id: number) => getItemById(id))
     ipcMain.handle("db:items:getBySource", (_, sourceId: number, limit?: number, offset?: number) => 
         getItemsBySource(sourceId, limit, offset))
@@ -987,6 +1077,8 @@ export function setupDatabaseIPC(): void {
     ipcMain.handle("db:items:update", (_, id: number, updates) => updateItem(id, updates))
     ipcMain.handle("db:items:delete", (_, id: number) => deleteItem(id))
     ipcMain.handle("db:items:deleteBySource", (_, sourceId: number) => deleteItemsBySource(sourceId))
+    ipcMain.handle("db:items:deleteAll", () => deleteAllItems())
+    ipcMain.handle("db:items:bulkInsert", (_, items) => bulkInsertItems(items))
     ipcMain.handle("db:items:markRead", (_, id: number, hasRead?: boolean) => markItemRead(id, hasRead))
     ipcMain.handle("db:items:markAllRead", (_, sourceIds: number[], beforeDate?: string) => 
         markAllRead(sourceIds, beforeDate))

@@ -91,10 +91,19 @@ const dbBridge = {
         
         getNextId: (): Promise<number> => 
             ipcRenderer.invoke("db:sources:getNextId"),
+        
+        deleteAll: (): Promise<void> =>
+            ipcRenderer.invoke("db:sources:deleteAll"),
+        
+        bulkInsert: (sources: SourceRow[]): Promise<number[]> =>
+            ipcRenderer.invoke("db:sources:bulkInsert", sources),
     },
 
     // Item operations
     items: {
+        getAll: (): Promise<ItemRow[]> => 
+            ipcRenderer.invoke("db:items:getAll"),
+        
         getById: (id: number): Promise<ItemRow | undefined> => 
             ipcRenderer.invoke("db:items:getById", id),
         
@@ -155,6 +164,12 @@ const dbBridge = {
         
         getForSync: (): Promise<ItemRow[]> =>
             ipcRenderer.invoke("db:items:getForSync"),
+        
+        deleteAll: (): Promise<void> =>
+            ipcRenderer.invoke("db:items:deleteAll"),
+        
+        bulkInsert: (items: ItemRow[]): Promise<number[]> =>
+            ipcRenderer.invoke("db:items:bulkInsert", items),
     },
 
     // P2P Feed operations

@@ -1,5 +1,30 @@
 # Feature Ideas
 
+## 💡 Offene Ideen
+
+### Auto-Refresh nach Aufwachen aus Suspend (16.12.2025)
+**Beschreibung:** Wenn das Gerät aus dem Suspend/Sleep aufwacht, soll die App automatisch eine Aktualisierung aller Feeds durchführen.
+
+**Technische Umsetzung:**
+- Electron bietet `powerMonitor.on('resume', callback)` Event
+- In `src/electron.ts` oder `src/main/window.ts` registrieren
+- IPC-Message an Renderer senden, der dann `fetchItems()` auslöst
+- Optional: Konfigurierbar in Settings (an/aus)
+
+**Beispiel-Code:**
+```typescript
+import { powerMonitor } from 'electron'
+
+powerMonitor.on('resume', () => {
+    // Notify renderer to refresh feeds
+    mainWindow?.webContents.send('power-resume')
+})
+```
+
+**Status:** 📋 Geplant
+
+---
+
 ## ✅ Datenbankarchitektur (Stand: 14.12.2025)
 
 ### Aktueller Zustand - SQLite-ONLY
