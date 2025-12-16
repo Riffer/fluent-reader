@@ -1,5 +1,5 @@
 import intl from "react-intl-universal"
-import * as db from "../db"
+import { init as initDb } from "../db"
 import { SourceRow, ItemRow } from "../../bridges/db"
 import {
     fetchFavicon,
@@ -265,8 +265,8 @@ function rowToSource(row: SourceRow): RSSSource {
 export function initSources(): AppThunk<Promise<void>> {
     return async dispatch => {
         dispatch(initSourcesRequest())
-        // Initialize Lovefield for migration support (will be removed later)
-        await db.init()
+        // Initialize SQLite database
+        await initDb()
         
         // Use SQLite for source data via window.db bridge
         const sourceRows = await window.db.sources.getAll()
