@@ -25,7 +25,60 @@ powerMonitor.on('resume', () => {
 
 ---
 
-## ✅ Datenbankarchitektur (Stand: 14.12.2025)
+## 🗑️ Final Cut: Lovefield & NeDB entfernen (16.12.2025)
+
+**Branch:** `feature/sqlite-final-cut` (v1.2.2)
+
+**Beschreibung:** Vorlage-Branch zum vollständigen Entfernen der Legacy-Datenbanken (Lovefield und NeDB). Kann als Basis verwendet werden, sobald alle Nutzer auf v1.2.0+ migriert haben.
+
+### Voraussetzungen
+- ⚠️ **BREAKING CHANGE**: Nutzer müssen mindestens auf v1.2.0 aktualisiert haben
+- Direktes Upgrade von v1.1.x auf diese Version führt zu Datenverlust!
+- Die SQLite-Datenbank muss bereits existieren (Migration von v1.2.0 oder v1.2.1)
+
+### Entfernte Abhängigkeiten (package.json)
+```json
+// Diese 3 Dependencies wurden entfernt:
+"@seald-io/nedb": "^4.0.2",
+"@types/nedb": "^1.8.9", 
+"lovefield": "^2.1.12"
+```
+
+### Geänderte Dateien
+
+| Datei | Änderung |
+|-------|----------|
+| `package.json` | 3 Dependencies entfernt |
+| `src/scripts/db.ts` | Komplett ersetzt (298 → 30 Zeilen) - nur noch `init()` Funktion |
+| `src/scripts/models/source.ts` | Import geändert: `import { init as initDb }` statt `import * as db` |
+| `src/bridges/settings.ts` | 4 Funktionen entfernt: `getNeDBStatus`, `setNeDBStatus`, `getLovefieldStatus`, `setLovefieldStatus` |
+| `src/main/settings.ts` | IPC-Handler für NeDB/Lovefield Status entfernt |
+| `src/schema-types.ts` | `useNeDB` und `useLovefield` aus SchemaTypes entfernt |
+
+### Neue db.ts (minimal)
+```typescript
+// src/scripts/db.ts - Final Cut Version
+export async function init(): Promise<void> {
+    console.log("[db] Initializing SQLite database...")
+    await window.db.init()
+    console.log("[db] SQLite database initialized")
+}
+```
+
+### Ergebnis
+- **Bundle-Größe reduziert:** 2.25 MiB → 2.04 MiB (-210 KB / -9%)
+- **302 Zeilen Code entfernt** (netto)
+- **Saubere Architektur:** Nur noch SQLite via Main Process
+
+### Verwendung dieser Vorlage
+1. Sicherstellen, dass alle Produktiv-Nutzer auf v1.2.x sind
+2. Branch `feature/sqlite-final-cut` in `master` mergen
+3. Version auf v1.3.0 erhöhen (Major Change wegen Breaking)
+4. In Release Notes warnen: "Requires previous upgrade to v1.2.x"
+
+**Status:** 📋 Vorlage - Bereit für spätere Verwendung
+
+--- (Stand: 14.12.2025)
 
 ### Aktueller Zustand - SQLite-ONLY
 
