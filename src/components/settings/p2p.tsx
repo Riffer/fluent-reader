@@ -413,7 +413,7 @@ export const P2PSettings: React.FC = () => {
                             label="Room Code"
                             value={generatedCode}
                             readOnly
-                            styles={{ field: { fontSize: 24, textAlign: "center", letterSpacing: 4 } }}
+                            styles={{ field: { fontSize: 24, textAlign: "center", letterSpacing: "4px" } }}
                         />
                         <DefaultButton
                             text="Copy Code"
@@ -456,7 +456,7 @@ export const P2PSettings: React.FC = () => {
                         onChange={(_, value) => setRoomCode(value?.toUpperCase() ?? "")}
                         placeholder="ABC123"
                         maxLength={6}
-                        styles={{ field: { fontSize: 18, textAlign: "center", letterSpacing: 4 } }}
+                        styles={{ field: { fontSize: 18, textAlign: "center", letterSpacing: "4px" } }}
                     />
                 </Stack>
                 <DialogFooter>

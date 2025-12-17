@@ -11,6 +11,20 @@ import type { P2PLanBridge } from "../bridges/p2p-lan"
 type ArticleExtractorBridge = ReturnType<typeof createArticleExtractorBridge>
 
 declare global {
+    /**
+     * Extend HTMLElement with Webkit-specific scrollIntoViewIfNeeded method
+     * This is a non-standard method supported by Chrome, Edge, and Safari
+     * @see https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollIntoViewIfNeeded
+     */
+    interface HTMLElement {
+        /**
+         * Scrolls the element into the visible area of the browser window if it's not already visible.
+         * Non-standard Webkit extension - check for existence before calling.
+         * @param centerIfNeeded If true, centers the element in the visible area. If false, aligns to nearest edge.
+         */
+        scrollIntoViewIfNeeded?(centerIfNeeded?: boolean): void
+    }
+
     interface Window {
         /**
          * Settings bridge - access to application settings

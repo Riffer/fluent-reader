@@ -99,4 +99,9 @@ export type SchemaTypes = {
     listViewConfigs: ViewConfigs
     useNeDB: boolean
     useLovefield: boolean
+    // P2P settings
+    p2pCollectLinks: boolean
+    p2pRoomCode: string | null
+    p2pDisplayName: string
+    p2pPeerId: string | null
 }
