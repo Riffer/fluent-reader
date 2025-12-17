@@ -166,6 +166,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.sendZoomOverlaySettingToPreload(newValue);
     }
 
+    // Input Mode: Sendet Status an WebView um Keyboard-Navigation zu deaktivieren
+    private setInputMode = (enabled: boolean) => {
+        this.setState({ inputModeEnabled: enabled });
+        if (this.webview) {
+            try {
+                this.webview.send('set-input-mode', enabled);
+            } catch (e) {
+                console.warn('[InputMode] Could not send to webview:', e);
+            }
+        }
+    }
+
     // Lokaler State für Mobile Mode (für zuverlässiges IPC-Timing nach Reload)
     private localMobileMode: boolean = false;
 
@@ -649,7 +661,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                                     console.log('[CookiePersist] Article: Saving cookies after leaving input mode (Menu)');
                                     this.savePersistedCookies();
                                 }
-                                this.setState({ inputModeEnabled: newValue });
+                                this.setInputMode(newValue);
                             },
                         },
                         {
@@ -734,7 +746,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     console.log('[CookiePersist] Article: Saving cookies after leaving input mode (Ctrl+I)');
                     this.savePersistedCookies();
                 }
-                this.setState({ inputModeEnabled: newValue });
+                this.setInputMode(newValue);
                 return;
             }
             
@@ -743,7 +755,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 if (input.key === 'Escape') {
                     console.log('[InputMode] Escape pressed - disabling input mode');
                     console.log('[InputMode] persistCookies:', this.props.source.persistCookies, 'loadWebpage:', this.state.loadWebpage);
-                    this.setState({ inputModeEnabled: false });
+                    this.setInputMode(false);
                     // Cookies speichern beim Verlassen des Eingabe-Modus (z.B. nach Login)
                     if (this.props.source.persistCookies && this.state.loadWebpage) {
                         console.log('[CookiePersist] Article: Saving cookies after leaving input mode');
@@ -1084,7 +1096,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Eingabe-Modus bei Artikelwechsel zurücksetzen
             if (this.state.inputModeEnabled) {
                 console.log('[InputMode] Article changed - disabling input mode');
-                this.setState({ inputModeEnabled: false });
+                this.setInputMode(false);
             }
             
             // Cookies des alten Artikels speichern (falls persistCookies aktiviert war)

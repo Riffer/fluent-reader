@@ -349,6 +349,13 @@ try {
     }
   });
 
+  // Listener für Input Mode Status (deaktiviert Keyboard-Navigation für Login-Formulare etc.)
+  let inputModeEnabled = false;
+  ipcRenderer.on('set-input-mode', (event, enabled) => {
+    inputModeEnabled = !!enabled;
+    console.log('[Preload] Input mode changed:', inputModeEnabled ? 'ON (navigation disabled)' : 'OFF (navigation enabled)');
+  });
+
   // NSFW-Cleanup Einstellung - synchron beim Start laden
   let nsfwCleanupEnabled = false;
   try {
@@ -497,7 +504,59 @@ try {
     scrollAnimationFrame = requestAnimationFrame(smoothScroll);
   }
   
+  // Image gallery navigation - jump between images with Space/Shift+Space
+  let currentImageIndex = -1;
+  
+  function getVisibleImages() {
+    const container = document.getElementById('fr-zoom-container') || document.body;
+    const images = Array.from(container.querySelectorAll('img'));
+    // Filter out tiny images (icons, trackers) - only include substantial images
+    return images.filter(img => {
+      const rect = img.getBoundingClientRect();
+      return rect.width > 100 && rect.height > 50;
+    });
+  }
+  
+  function scrollToImage(direction) {
+    const images = getVisibleImages();
+    if (images.length === 0) return false;
+    
+    const container = document.getElementById('fr-zoom-container') || document.body;
+    const containerRect = container.getBoundingClientRect();
+    const viewportTop = container.scrollTop;
+    const viewportMiddle = viewportTop + containerRect.height / 2;
+    
+    // Find current image (the one closest to viewport top)
+    let currentIdx = -1;
+    for (let i = 0; i < images.length; i++) {
+      const imgTop = images[i].offsetTop;
+      if (imgTop >= viewportTop - 50) {
+        currentIdx = i;
+        break;
+      }
+    }
+    if (currentIdx === -1) currentIdx = images.length - 1;
+    
+    // Calculate next image index
+    let nextIdx = currentIdx + direction;
+    if (nextIdx < 0) nextIdx = 0;
+    if (nextIdx >= images.length) nextIdx = images.length - 1;
+    
+    // Only scroll if we're moving to a different image
+    if (nextIdx === currentIdx && direction > 0 && currentIdx === images.length - 1) {
+      return false; // Already at last image
+    }
+    
+    // Scroll to the next image
+    images[nextIdx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    currentImageIndex = nextIdx;
+    return true;
+  }
+  
   window.addEventListener('keydown', (e) => {
+    // Skip navigation shortcuts in input mode (for login forms etc.)
+    if (inputModeEnabled) return;
+    
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       // Send message to parent window/renderer to handle navigation
       try {
@@ -516,6 +575,11 @@ try {
           scrollAnimationFrame = requestAnimationFrame(smoothScroll);
         }
       }
+    } else if (e.key === ' ' || e.key === 'Spacebar') {
+      // Space = next image, Shift+Space = previous image
+      e.preventDefault();
+      const direction = e.shiftKey ? -1 : 1;
+      scrollToImage(direction);
     }
   });
   
