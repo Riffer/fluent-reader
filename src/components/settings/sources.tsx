@@ -37,7 +37,7 @@ type SourcesTabProps = {
     serviceOn: boolean
     sids: number[]
     acknowledgeSIDs: () => void
-    addSource: (url: string) => void
+    addSource: (url: string) => Promise<number>
     updateSourceName: (source: RSSSource, name: string) => void
     updateSourceIcon: (source: RSSSource, iconUrl: string) => Promise<void>
     updateSourceOpenTarget: (

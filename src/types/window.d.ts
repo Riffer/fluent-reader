@@ -25,6 +25,19 @@ declare global {
         scrollIntoViewIfNeeded?(centerIfNeeded?: boolean): void
     }
 
+    /**
+     * Extend HTMLWebViewElement with Electron webview properties
+     * @see https://www.electronjs.org/docs/latest/api/webview-tag
+     */
+    interface HTMLWebViewElement {
+        /** The URL to load in the webview */
+        src: string
+        /** The partition to use for the webview session */
+        partition?: string
+        /** Whether to enable web security */
+        webpreferences?: string
+    }
+
     interface Window {
         /**
          * Settings bridge - access to application settings
