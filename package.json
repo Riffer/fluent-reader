@@ -30,7 +30,6 @@
     "@fluentui/react": "^7.204.0",
     "@seald-io/nedb": "^4.0.2",
     "@types/better-sqlite3": "^7.6.8",
-    "@types/minimatch": "^6.0.0",
     "@types/nedb": "^1.8.9",
     "@types/node": "^24.10.1",
     "@types/react": "^16.9.35",
