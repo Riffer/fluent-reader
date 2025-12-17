@@ -1103,7 +1103,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             const card = document.querySelector(
                 `#refocus div[data-iid="${this.props.item._id}"]`
             ) as HTMLElement
-            // @ts-ignore - scrollIntoViewIfNeeded ist ein Webkit-spezifisches Feature
             if (card && card.scrollIntoViewIfNeeded) {
                 card.scrollIntoViewIfNeeded(false) // false = nur scrollen wenn nötig, zentriert nicht
             } else if (card) {

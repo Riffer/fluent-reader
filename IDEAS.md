@@ -2,20 +2,6 @@
 
 ## 💡 Offene Ideen
 
-**Beschreibung:** Prüfen von Dependencies
-
-- bei einer frischen Installation und folgendem "npm install" werden folgende Warnungen ausgegeben die geprüft werden sollen:
-
-```log
-npm warn skipping integrity check for git dependency ssh://git@github.com/electron/node-gyp.git
-npm warn deprecated @types/classnames@2.3.4: This is a stub types definition. classnames provides its own type definitions, so you do not need this installed.
-npm warn deprecated @types/minimatch@6.0.0: This is a stub types definition. minimatch provides its own type definitions, so you do not need this installed.
-npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported
-npm warn deprecated @npmcli/move-file@2.0.1: This functionality has been moved to @npmcli/fs
-npm warn deprecated rimraf@2.6.3: Rimraf versions prior to v4 are no longer supported
-npm warn deprecated glob@8.1.0: Glob versions prior to v9 are no longer supported
-npm warn gitignore-fallback No .npmignore file found, using .gitignore for file exclusion. Consider creating a .npmignore file to explicitly control published files.
-```
 
 ### Auto-Refresh nach Aufwachen aus Suspend (16.12.2025)
 **Beschreibung:** Wenn das Gerät aus dem Suspend/Sleep aufwacht, soll die App automatisch eine Aktualisierung aller Feeds durchführen.

@@ -149,9 +149,10 @@ export class WindowManager {
                     const emulationParams = {
                         screenPosition: params.screenPosition || "mobile",
                         screenSize: params.screenSize || { width: 390, height: 844 },
+                        viewPosition: params.viewPosition || { x: 0, y: 0 },
                         deviceScaleFactor: params.deviceScaleFactor || 3,
                         viewSize: params.viewSize || { width: 390, height: 844 },
-                        fitToView: params.fitToView !== undefined ? params.fitToView : true
+                        scale: params.scale || 1
                     }
                     console.log('[DeviceEmulation] Applying emulation:', JSON.stringify(emulationParams))
                     wc.enableDeviceEmulation(emulationParams)
@@ -396,12 +397,13 @@ ipcMain.on("set-global-mobile-mode", (_event, enabled: boolean, params?: any) =>
 app.on('web-contents-created', (_event, contents) => {
     // Nur für webview-Tags (type === 'webview')
     if (contents.getType() === 'webview') {
-        const webContentsId = contents.id
-        console.log('[MobileMode] New webview created, id:', webContentsId, 'globalMobileMode:', globalMobileMode)
+        const webContentsId = contents.id;
+        console.log('[MobileMode] New webview created, id:', webContentsId, 'globalMobileMode:', globalMobileMode);
         
         // did-attach feuert wenn der webview an ein BrowserWindow attached wird
         // Das ist der frühestmögliche Zeitpunkt für Emulation
-        contents.on('did-attach', () => {
+        // Note: 'did-attach' is a webview-specific event not in standard Electron types
+        (contents as any).on('did-attach', () => {
             if (globalMobileMode && globalMobileEmulationParams) {
                 console.log('[MobileMode] Applying emulation on did-attach for webContentsId:', webContentsId)
                 try {
@@ -413,9 +415,10 @@ app.on('web-contents-created', (_event, contents) => {
                     const emulationParams = {
                         screenPosition: globalMobileEmulationParams.screenPosition || "mobile",
                         screenSize: globalMobileEmulationParams.screenSize || { width: 390, height: 844 },
+                        viewPosition: globalMobileEmulationParams.viewPosition || { x: 0, y: 0 },
                         deviceScaleFactor: globalMobileEmulationParams.deviceScaleFactor || 3,
                         viewSize: globalMobileEmulationParams.viewSize || { width: 390, height: 844 },
-                        fitToView: globalMobileEmulationParams.fitToView !== undefined ? globalMobileEmulationParams.fitToView : true
+                        scale: globalMobileEmulationParams.scale || 1
                     }
                     contents.enableDeviceEmulation(emulationParams)
                     console.log('[MobileMode] Emulation enabled on did-attach')

@@ -63,10 +63,14 @@ interface DiscoveryMessage {
 }
 
 interface P2PMessage {
-    type: "article-link-batch" | "article-ack" | "heartbeat" | "heartbeat-ack" | "echo-request" | "echo-response" | "goodbye"
+    type: "article-link-batch" | "article-ack" | "article-link-ack" | "heartbeat" | "heartbeat-ack" | "echo-request" | "echo-response" | "goodbye"
     messageId?: string
-    senderName: string
-    timestamp: number
+    senderId?: string       // Sender's peer ID for identification
+    ackId?: string          // ID of the message being acknowledged
+    roomCode?: string       // Room code for message routing
+    senderName?: string     // Sender's display name (used in article messages)
+    displayName?: string    // Sender's display name (used in heartbeat messages)
+    timestamp?: number
     url?: string
     title?: string
     feedName?: string
@@ -944,7 +948,8 @@ function handleIncomingConnection(socket: net.Socket): void {
                     connectedPeers.set(peerId, {
                         socket,
                         displayName,
-                        lastSeen: Date.now()
+                        lastSeen: Date.now(),
+                        lastHeartbeat: Date.now()
                     })
                     
                     console.log(`[P2P-LAN] Connected to ${displayName} (${peerId})`)
@@ -1023,7 +1028,8 @@ function connectToPeer(peerId: string, address: string, port: number, displayNam
                     connectedPeers.set(peerId, {
                         socket,
                         displayName,
-                        lastSeen: Date.now()
+                        lastSeen: Date.now(),
+                        lastHeartbeat: Date.now()
                     })
                     
                     console.log(`[P2P-LAN] Handshake complete with ${displayName}`)

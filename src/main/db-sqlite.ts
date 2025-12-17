@@ -1017,10 +1017,10 @@ export function deleteOlderThan(date: string): number {
  * Get all items for sync purposes (export/migration)
  * Returns raw item data
  */
-export function getItemsForSync(): RSSItem[] {
+export function getItemsForSync(): ItemRow[] {
     if (!db) throw new Error("Database not initialized")
-    const rows = db.prepare("SELECT * FROM items").all() as any[]
-    return rows.map(parseItemRow)
+    const rows = db.prepare("SELECT * FROM items").all() as ItemRow[]
+    return rows
 }
 
 /**
