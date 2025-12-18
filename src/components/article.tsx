@@ -1317,8 +1317,20 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 let extractorTitle = article?.title || undefined
                 let extractorDate = article?.published ? new Date(article.published) : undefined
                 
-                // Fallback: if extractor produces no content, extract manually
-                if (!contentToUse || contentToUse.length === 0) {
+                // Check if extracted content contains significant template syntax
+                // Some sites use Mustache/Handlebars templates that get extracted as-is
+                const hasTemplates = contentToUse && /\{\{[^}]+\}\}/g.test(contentToUse)
+                const templateMatches = contentToUse?.match(/\{\{[^}]+\}\}/g) || []
+                const templateRatio = contentToUse ? (templateMatches.join('').length / contentToUse.length) : 0
+                
+                // Fallback: if extractor produces no content OR content is mostly templates
+                if (!contentToUse || contentToUse.length === 0 || (hasTemplates && templateRatio > 0.05)) {
+                    console.log("[loadFull] Using fallback extraction:", {
+                        hasContent: !!contentToUse,
+                        contentLength: contentToUse?.length || 0,
+                        hasTemplates,
+                        templateRatio: templateRatio.toFixed(3)
+                    })
                     contentToUse = this.fallbackExtractContent(html)
                 }
                 
