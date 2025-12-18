@@ -1879,7 +1879,7 @@ window.__articleData = ${JSON.stringify({
     header: headerContent, 
     article: articleContent, 
     baseUrl: this.props.item.link 
-})};
+}).replace(/<\/script>/gi, '<\\/script>')};
 
 (function() {
     const { header, article, baseUrl } = window.__articleData;
