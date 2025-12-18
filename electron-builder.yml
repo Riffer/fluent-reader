@@ -3,30 +3,33 @@ productName: Fluent Reader
 copyright: Copyright © 2020 Haoyuan Liu
 
 # Explizite Liste der Dateien die ins Paket sollen
-# Nutzt die "files" Angabe aus package.json als Basis
 files:
     - "dist/**/*"
     - "!dist/**/*.map"
     - "!dist/**/*.LICENSE.txt"
     - "!dist/fontlist"
-    - "!node_modules"
+    # Ausschluss von Entwicklungsdateien
     - "!src"
-    - "!build"
     - "!docs"
     - "!bin"
     - "!.git"
     - "!.github"
     - "!.vscode"
     - "!**/*.md"
-    - "!**/*.yml"
-    - "!**/*.json"
     - "!**/*.ts"
     - "!**/*.tsx"
-    - "!*.config.js"
+    - "!webpack.config.js"
     - "!tsconfig*.json"
     - "!test-*.html"
     - "!notepad.txt"
+    - "!IDEAS.md"
+    - "!SETUP.md"
+    # package.json wird benötigt
     - "package.json"
+
+# Native Module aus der asar extrahieren (können nicht gepackt werden)
+asarUnpack:
+    - "node_modules/better-sqlite3/**/*"
 
 directories:
     output: "./bin/${platform}/${arch}/"
