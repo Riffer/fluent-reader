@@ -1,10 +1,33 @@
 appId: me.hyliu.fluentreader
 productName: Fluent Reader
 copyright: Copyright © 2020 Haoyuan Liu
+
+# Explizite Liste der Dateien die ins Paket sollen
+# Nutzt die "files" Angabe aus package.json als Basis
 files:
-    - "./dist/**/*"
-    - "!./dist/fontlist"
-    - "!**/*.js.map"
+    - "dist/**/*"
+    - "!dist/**/*.map"
+    - "!dist/**/*.LICENSE.txt"
+    - "!dist/fontlist"
+    - "!node_modules"
+    - "!src"
+    - "!build"
+    - "!docs"
+    - "!bin"
+    - "!.git"
+    - "!.github"
+    - "!.vscode"
+    - "!**/*.md"
+    - "!**/*.yml"
+    - "!**/*.json"
+    - "!**/*.ts"
+    - "!**/*.tsx"
+    - "!*.config.js"
+    - "!tsconfig*.json"
+    - "!test-*.html"
+    - "!notepad.txt"
+    - "package.json"
+
 directories:
     output: "./bin/${platform}/${arch}/"
 mac:
