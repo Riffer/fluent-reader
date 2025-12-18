@@ -517,6 +517,49 @@ try {
     });
   }
   
+  // Find a heading element (h1-h6) that precedes the image in the same container
+  // or as a previous sibling of the image's container (e.g., figure)
+  function findHeadingForImage(img) {
+    // Strategy 1: Check for previous sibling headings of parent elements
+    // This handles: <h2>Title</h2><figure><img></figure>
+    let element = img.parentElement;
+    let depth = 0;
+    const maxDepth = 5;
+    
+    while (element && depth < maxDepth) {
+      // Check previous siblings for a heading
+      let sibling = element.previousElementSibling;
+      while (sibling) {
+        if (/^H[1-6]$/.test(sibling.tagName)) {
+          return sibling;
+        }
+        sibling = sibling.previousElementSibling;
+      }
+      element = element.parentElement;
+      depth++;
+    }
+    
+    // Strategy 2: Check for heading inside the same container
+    // This handles: <div><h2>Title</h2><p><img></p></div>
+    let container = img.parentElement;
+    depth = 0;
+    
+    while (container && depth < maxDepth) {
+      const heading = container.querySelector('h1, h2, h3, h4, h5, h6');
+      if (heading) {
+        // Make sure the heading comes before the image in document order
+        const headingPos = heading.compareDocumentPosition(img);
+        if (headingPos & Node.DOCUMENT_POSITION_FOLLOWING) {
+          return heading;
+        }
+      }
+      container = container.parentElement;
+      depth++;
+    }
+    
+    return null;
+  }
+  
   function scrollToImage(direction) {
     const images = getVisibleImages();
     if (images.length === 0) return false;
@@ -547,8 +590,13 @@ try {
       return false; // Already at last image
     }
     
-    // Scroll to the next image
-    images[nextIdx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Check if the target image has an associated heading
+    const targetImage = images[nextIdx];
+    const heading = findHeadingForImage(targetImage);
+    
+    // Scroll to heading if found, otherwise to the image
+    const scrollTarget = heading || targetImage;
+    scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
     currentImageIndex = nextIdx;
     return true;
   }
