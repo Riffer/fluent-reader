@@ -6,16 +6,44 @@
 
 - bei einer frischen Installation und folgendem "npm install" werden folgende Warnungen ausgegeben die geprüft werden sollen:
 
+- beim compile kommen diese Fehler -- vielleicht ist ein noch genauerer Hinweis auf die richtigen Versionen in setup.md nötig
+
 ```log
-npm warn skipping integrity check for git dependency ssh://git@github.com/electron/node-gyp.git
-npm warn deprecated @types/classnames@2.3.4: This is a stub types definition. classnames provides its own type definitions, so you do not need this installed.
-npm warn deprecated @types/minimatch@6.0.0: This is a stub types definition. minimatch provides its own type definitions, so you do not need this installed.
-npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported
-npm warn deprecated @npmcli/move-file@2.0.1: This functionality has been moved to @npmcli/fs
-npm warn deprecated rimraf@2.6.3: Rimraf versions prior to v4 are no longer supported
-npm warn deprecated glob@8.1.0: Glob versions prior to v9 are no longer supported
-npm warn gitignore-fallback No .npmignore file found, using .gitignore for file exclusion. Consider creating a .npmignore file to explicitly control published files.
+WARNING in ./node_modules/linkedom/commonjs/canvas.cjs 3:2-36
+Module not found: Error: Can't resolve 'canvas' in 'C:\Projects\fluent-reader\node_modules\linkedom\commonjs'
+ @ ./node_modules/linkedom/esm/html/canvas-element.js 6:0-47 10:23-29
+ @ ./node_modules/linkedom/esm/shared/html-classes.js 29:0-60 70:0-139:2 170:2-19
+ @ ./node_modules/linkedom/esm/index.js 9:0-41 9:0-41
+ @ ./node_modules/@extractus/article-extractor/src/utils/linker.js 3:0-36 110:18-27
+ @ ./node_modules/@extractus/article-extractor/src/main.js 10:0-57 17:7-17
+ @ ./src/main/article-extractor.ts 5:28-67
+ @ ./src/main/window.ts 12:28-58
+ @ ./src/electron.ts 10:17-41
+
+Unhandled rejection: Error: The module '\\?\C:\Projects\fluent-reader\node_modules\better-sqlite3\build\Release\better_sqlite3.node'
+was compiled against a different Node.js version using
+NODE_MODULE_VERSION 137. This version of Node.js requires
+NODE_MODULE_VERSION 140. Please try re-compiling or re-installing
+the module (for instance, using `npm rebuild` or `npm install`).
+    at process.func [as dlopen] (node:electron/js2c/node_init:2:2617)
+    at Module._extensions..node (node:internal/modules/cjs/loader:1874:18)
+    at Object.func [as .node] (node:electron/js2c/node_init:2:2617)
+    at Module.load (node:internal/modules/cjs/loader:1448:32)
+    at Module._load (node:internal/modules/cjs/loader:1270:12)
+    at c._load (node:electron/js2c/node_init:2:17993)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:244:24)
+    at Module.require (node:internal/modules/cjs/loader:1470:12)
+    at require (node:internal/modules/helpers:147:16) {
+  code: 'ERR_DLOPEN_FAILED'
 ```
+
+### Nutzung von .npmignore und files in package.json
+**Beschreibung:** Um die Paket-Größe zu optimieren sollten nur absolut notwendige Dateien aufgenommen werden
+**Technische Umsetzung:**
+- Eintragungen des Grundgerüstes in .npmignore
+- Explizite Auflistung von nötigen Dateien in package.json
+
 
 ### Auto-Refresh nach Aufwachen aus Suspend (16.12.2025)
 **Beschreibung:** Wenn das Gerät aus dem Suspend/Sleep aufwacht, soll die App automatisch eine Aktualisierung aller Feeds durchführen.
