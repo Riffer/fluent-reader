@@ -560,45 +560,67 @@ try {
     return null;
   }
   
+  // Fallback: Scroll by page with overlap (like Page Down/Up but smoother)
+  function scrollByPage(direction) {
+    const container = document.getElementById('fr-zoom-container') || document.body;
+    const viewportHeight = container.getBoundingClientRect().height;
+    // Keep 20% overlap to maintain reading context
+    const scrollAmount = viewportHeight * 0.8 * direction;
+    container.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+  }
+  
   function scrollToImage(direction) {
     const images = getVisibleImages();
-    if (images.length === 0) return false;
+    
+    // If no substantial images, use page scrolling with overlap
+    if (images.length === 0) {
+      scrollByPage(direction);
+      return true;
+    }
     
     const container = document.getElementById('fr-zoom-container') || document.body;
     const containerRect = container.getBoundingClientRect();
     const viewportTop = container.scrollTop;
-    const viewportMiddle = viewportTop + containerRect.height / 2;
+    const viewportHeight = containerRect.height;
+    // Threshold: image/heading must be at least this far into viewport to be "current"
+    const visibilityThreshold = viewportHeight * 0.15; // 15% of viewport height
     
-    // Find current image (the one closest to viewport top)
-    let currentIdx = -1;
-    for (let i = 0; i < images.length; i++) {
-      const imgTop = images[i].offsetTop;
-      if (imgTop >= viewportTop - 50) {
-        currentIdx = i;
-        break;
+    // For each image, get its scroll target (heading or image itself)
+    const targets = images.map(img => {
+      const heading = findHeadingForImage(img);
+      return { img, target: heading || img };
+    });
+    
+    if (direction > 0) {
+      // Forward: Find first image whose target is not yet properly visible
+      // (target top is below the visibility threshold from viewport top)
+      for (let i = 0; i < targets.length; i++) {
+        const targetTop = targets[i].target.offsetTop;
+        if (targetTop > viewportTop + visibilityThreshold) {
+          // This image's heading/target is not yet in view - scroll to it
+          targets[i].target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          currentImageIndex = i;
+          return true;
+        }
       }
+      // All images are above threshold - continue with page scroll
+      scrollByPage(direction);
+      return true;
+    } else {
+      // Backward: Find the last image whose target is above current scroll position
+      for (let i = targets.length - 1; i >= 0; i--) {
+        const targetTop = targets[i].target.offsetTop;
+        if (targetTop < viewportTop - 10) {
+          // This target is above current view - scroll to it
+          targets[i].target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          currentImageIndex = i;
+          return true;
+        }
+      }
+      // No image above - use page scroll to go up
+      scrollByPage(direction);
+      return true;
     }
-    if (currentIdx === -1) currentIdx = images.length - 1;
-    
-    // Calculate next image index
-    let nextIdx = currentIdx + direction;
-    if (nextIdx < 0) nextIdx = 0;
-    if (nextIdx >= images.length) nextIdx = images.length - 1;
-    
-    // Only scroll if we're moving to a different image
-    if (nextIdx === currentIdx && direction > 0 && currentIdx === images.length - 1) {
-      return false; // Already at last image
-    }
-    
-    // Check if the target image has an associated heading
-    const targetImage = images[nextIdx];
-    const heading = findHeadingForImage(targetImage);
-    
-    // Scroll to heading if found, otherwise to the image
-    const scrollTarget = heading || targetImage;
-    scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    currentImageIndex = nextIdx;
-    return true;
   }
   
   window.addEventListener('keydown', (e) => {

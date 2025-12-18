@@ -1416,6 +1416,43 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Remove common non-content elements
             doc.querySelectorAll('script, style, noscript, nav, header, footer, [data-ad-container], .advertisement, .ads, .sidebar').forEach(el => el.remove())
             
+            // Helper to check if text contains significant template syntax
+            // (Mustache/Handlebars templates like {{title}}, {{#posts}}, {{/posts}})
+            const hasTemplateContent = (text: string): boolean => {
+                if (!text) return false
+                // Count template tags
+                const templateMatches = text.match(/\{\{[^}]+\}\}/g)
+                if (!templateMatches) return false
+                
+                // Calculate ratio of template content to total text
+                const templateLength = templateMatches.join('').length
+                const textLength = text.length
+                
+                // If more than 10% of the text is template syntax, it's template-heavy
+                return templateLength / textLength > 0.1
+            }
+            
+            // Helper to strip template syntax from content
+            const stripTemplates = (content: string): string => {
+                // Remove Mustache/Handlebars block tags: {{#...}}, {{/...}}, {{^...}}
+                content = content.replace(/\{\{[#/^][^}]+\}\}/g, '')
+                // Remove Mustache/Handlebars variable tags: {{variable}}
+                content = content.replace(/\{\{[^}]+\}\}/g, '')
+                // Clean up extra whitespace from removed templates
+                content = content.replace(/\s{3,}/g, ' ')
+                return content
+            }
+            
+            // Remove elements that are mostly template syntax (JavaScript-rendered content)
+            doc.querySelectorAll('*').forEach(el => {
+                const text = el.textContent || ''
+                // If the element contains mostly template syntax and no meaningful text,
+                // it's probably a JS-rendered component placeholder
+                if (hasTemplateContent(text) && el.children.length === 0) {
+                    el.remove()
+                }
+            })
+            
             // Find main content container
             const selectors = [
                 'article',
@@ -1430,13 +1467,30 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             for (const selector of selectors) {
                 const el = doc.querySelector(selector)
-                if (el && el.textContent && el.textContent.trim().length > 300) {
-                    return el.innerHTML
+                if (el && el.textContent) {
+                    const text = el.textContent.trim()
+                    // Skip if mostly template content
+                    if (hasTemplateContent(text)) continue
+                    // Need at least 300 chars of real content
+                    if (text.length > 300) {
+                        return stripTemplates(el.innerHTML)
+                    }
                 }
             }
             
-            // Last resort: return body
-            return doc.body.innerHTML
+            // Last resort: return body with templates stripped
+            const bodyHtml = doc.body.innerHTML
+            const strippedBody = stripTemplates(bodyHtml)
+            
+            // If the result is mostly empty after stripping templates, return a message
+            const strippedText = doc.body.textContent || ''
+            if (strippedText.replace(/\s/g, '').length < 100) {
+                return `<p><em>Diese Seite verwendet JavaScript zum Rendern des Inhalts. 
+                Der vollständige Inhalt kann nicht extrahiert werden. 
+                Bitte öffne die <a href="${this.props.item.link}" target="_blank">Originalseite</a>.</em></p>`
+            }
+            
+            return strippedBody
         } catch (err) {
             console.error("Fallback extraction failed:", err)
             return html
