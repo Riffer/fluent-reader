@@ -1099,6 +1099,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 this.setInputMode(false);
             }
             
+            // Feed-Liste zum neuen Artikel scrollen
+            const card = document.querySelector(
+                `#refocus div[data-iid="${this.props.item._id}"]`
+            ) as HTMLElement
+            if (card && card.scrollIntoViewIfNeeded) {
+                card.scrollIntoViewIfNeeded(false) // false = nur scrollen wenn nötig, zentriert nicht
+            } else if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+            }
+            
             // Cookies des alten Artikels speichern (falls persistCookies aktiviert war)
             if (prevProps.source.persistCookies) {
                 console.log("[CookiePersist] Article: Saving cookies before article change")
