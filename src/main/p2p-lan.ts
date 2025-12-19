@@ -1192,9 +1192,11 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
             // Unified handler for all article shares (1 or more)
             if (msg.articles && msg.articles.length > 0) {
                 console.log(`[P2P-LAN] Received ${msg.articles.length} article(s) from ${peer.displayName}`)
+                console.log(`[P2P-LAN] Article titles: ${msg.articles.map(a => a.title).join(", ")}`)
                 
                 if (msg.articles.length === 1) {
                     // Single article - store and show dialog
+                    console.log(`[P2P-LAN] Single article mode - will show dialog`)
                     const a = msg.articles[0]
                     
                     // Store the article (will return existing articleId if duplicate)
@@ -1587,9 +1589,14 @@ function notifyArticleReceived(
     articleId?: number,
     sourceId?: number
 ): void {
+    console.log(`[P2P-LAN] notifyArticleReceived called for "${title}" from ${peerName}`)
     const mainWindow = getMainWindow()
-    if (!mainWindow) return
+    if (!mainWindow) {
+        console.log(`[P2P-LAN] WARNING: No main window found, cannot send notification!`)
+        return
+    }
     
+    console.log(`[P2P-LAN] Sending p2p:articleReceived to renderer`)
     mainWindow.webContents.send("p2p:articleReceived", {
         peerId,
         peerName,
@@ -1603,6 +1610,7 @@ function notifyArticleReceived(
         articleId,
         sourceId
     })
+    console.log(`[P2P-LAN] p2p:articleReceived sent successfully`)
 }
 
 /**
