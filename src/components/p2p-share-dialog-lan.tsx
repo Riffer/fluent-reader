@@ -115,8 +115,21 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
             // Get list of all known peers (connected + discovered)
             const allPeers = status?.peers || []
             
-            if (allPeers.length === 0) {
-                setError("No peers in room. Make sure another device has joined the same room.")
+            // Also include peers that have pending shares (they were seen before)
+            const peersWithPending = Object.entries(pendingCounts).map(([peerId, info]) => ({
+                peerId,
+                displayName: info.peerName,
+                connected: false,
+                fromPending: true
+            }))
+            
+            // Merge: use allPeers, add any from pendingCounts that aren't already in allPeers
+            const knownPeerIds = new Set(allPeers.map(p => p.peerId))
+            const additionalPeers = peersWithPending.filter(p => !knownPeerIds.has(p.peerId))
+            const targetPeers = [...allPeers, ...additionalPeers]
+            
+            if (targetPeers.length === 0) {
+                setError("No peers known. Make sure another device has joined the same room at least once.")
                 return
             }
             
@@ -134,7 +147,7 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
             // Send to all peers with queueing for offline ones
             const results: Array<{ peer: string, success: boolean, queued: boolean, error?: string }> = []
             
-            for (const peer of allPeers) {
+            for (const peer of targetPeers) {
                 if (peer.connected) {
                     // Try immediate delivery with ACK (single article as array)
                     try {
@@ -319,7 +332,7 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                 <PrimaryButton
                     text={sending ? "Sending..." : (connectedCount > 0 ? "Send to All Peers" : "Queue for Later")}
                     onClick={handleSend}
-                    disabled={sending || loading || !status?.inRoom || (connectedCount === 0 && status?.peers.length === 0)}
+                    disabled={sending || loading || !status?.inRoom}
                 />
                 <DefaultButton text="Cancel" onClick={onDismiss} disabled={sending} />
             </DialogFooter>
