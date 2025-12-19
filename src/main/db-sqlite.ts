@@ -15,7 +15,7 @@ import path from "path"
 let db: Database.Database | null = null
 
 // Schema version for migrations
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
 // Types matching the Lovefield models
 export interface SourceRow {
@@ -169,6 +169,21 @@ function createTables(): void {
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_pending_shares_peerId ON p2p_pending_shares(peerId);
     `)
+
+    // P2P Known Peers table - persists peers across restarts
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS p2p_known_peers (
+            peerId TEXT PRIMARY KEY,
+            peerName TEXT NOT NULL,
+            roomCode TEXT NOT NULL,
+            lastSeen TEXT NOT NULL,
+            createdAt TEXT NOT NULL
+        )
+    `)
+
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_known_peers_roomCode ON p2p_known_peers(roomCode);
+    `)
 }
 
 /**
@@ -217,6 +232,23 @@ function runMigrations(): void {
             if (!columnNames.includes("feedIconUrl")) {
                 db.exec(`ALTER TABLE p2p_pending_shares ADD COLUMN feedIconUrl TEXT`)
             }
+        }
+
+        // Migration to v4: Add p2p_known_peers table for peer persistence
+        if (currentVersion < 4) {
+            console.log("[db-sqlite] Migration v4: Adding p2p_known_peers table")
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS p2p_known_peers (
+                    peerId TEXT PRIMARY KEY,
+                    peerName TEXT NOT NULL,
+                    roomCode TEXT NOT NULL,
+                    lastSeen TEXT NOT NULL,
+                    createdAt TEXT NOT NULL
+                )
+            `)
+            db.exec(`
+                CREATE INDEX IF NOT EXISTS idx_known_peers_roomCode ON p2p_known_peers(roomCode);
+            `)
         }
 
         // Update schema version
@@ -886,6 +918,102 @@ export function removeOldPendingShares(maxAgeDays: number = 7): number {
     if (result.changes > 0) {
         console.log(`[db-sqlite] Removed ${result.changes} old pending shares (older than ${maxAgeDays} days)`)
     }
+    return result.changes
+}
+
+// ============================================
+// P2P KNOWN PEERS OPERATIONS
+// ============================================
+
+export interface KnownPeerRow {
+    peerId: string
+    peerName: string
+    roomCode: string
+    lastSeen: string
+    createdAt: string
+}
+
+/**
+ * Add or update a known peer
+ */
+export function upsertKnownPeer(peerId: string, peerName: string, roomCode: string): void {
+    if (!db) throw new Error("Database not initialized")
+    
+    const now = new Date().toISOString()
+    db.prepare(`
+        INSERT INTO p2p_known_peers (peerId, peerName, roomCode, lastSeen, createdAt)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(peerId) DO UPDATE SET
+            peerName = excluded.peerName,
+            roomCode = excluded.roomCode,
+            lastSeen = excluded.lastSeen
+    `).run(peerId, peerName, roomCode, now, now)
+}
+
+/**
+ * Update last seen time for a peer
+ */
+export function updatePeerLastSeen(peerId: string): void {
+    if (!db) throw new Error("Database not initialized")
+    db.prepare("UPDATE p2p_known_peers SET lastSeen = ? WHERE peerId = ?").run(new Date().toISOString(), peerId)
+}
+
+/**
+ * Get all known peers for a specific room
+ */
+export function getKnownPeersForRoom(roomCode: string): KnownPeerRow[] {
+    if (!db) throw new Error("Database not initialized")
+    return db.prepare("SELECT * FROM p2p_known_peers WHERE roomCode = ? ORDER BY lastSeen DESC").all(roomCode) as KnownPeerRow[]
+}
+
+/**
+ * Get all known peers
+ */
+export function getAllKnownPeers(): KnownPeerRow[] {
+    if (!db) throw new Error("Database not initialized")
+    return db.prepare("SELECT * FROM p2p_known_peers ORDER BY lastSeen DESC").all() as KnownPeerRow[]
+}
+
+/**
+ * Remove a known peer (and their pending shares)
+ */
+export function removeKnownPeer(peerId: string): void {
+    if (!db) throw new Error("Database not initialized")
+    
+    // First remove their pending shares
+    const sharesRemoved = removePendingSharesForPeer(peerId)
+    
+    // Then remove the peer
+    db.prepare("DELETE FROM p2p_known_peers WHERE peerId = ?").run(peerId)
+    console.log(`[db-sqlite] Removed known peer ${peerId} and ${sharesRemoved} pending shares`)
+}
+
+/**
+ * Remove old peers (not seen in X days) and their pending shares
+ */
+export function removeOldKnownPeers(maxAgeDays: number = 7): number {
+    if (!db) throw new Error("Database not initialized")
+    
+    const cutoffDate = new Date()
+    cutoffDate.setDate(cutoffDate.getDate() - maxAgeDays)
+    const cutoffStr = cutoffDate.toISOString()
+    
+    // Get peer IDs to remove
+    const oldPeers = db.prepare("SELECT peerId FROM p2p_known_peers WHERE lastSeen < ?").all(cutoffStr) as Array<{ peerId: string }>
+    
+    if (oldPeers.length === 0) return 0
+    
+    // Remove pending shares for each old peer
+    let totalSharesRemoved = 0
+    for (const peer of oldPeers) {
+        const removed = removePendingSharesForPeer(peer.peerId)
+        totalSharesRemoved += removed
+    }
+    
+    // Remove old peers
+    const result = db.prepare("DELETE FROM p2p_known_peers WHERE lastSeen < ?").run(cutoffStr)
+    
+    console.log(`[db-sqlite] Removed ${result.changes} old peers (not seen in ${maxAgeDays} days) and ${totalSharesRemoved} pending shares`)
     return result.changes
 }
 

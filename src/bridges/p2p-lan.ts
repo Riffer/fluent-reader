@@ -259,6 +259,30 @@ export const p2pLanBridge = {
         ipcRenderer.invoke("p2p-lan:clearOldPendingShares", maxAgeDays),
     
     /**
+     * Get all known peers for the current room with their online status
+     */
+    getKnownPeersWithStatus: (): Promise<Array<{
+        peerId: string
+        peerName: string
+        roomCode: string
+        lastSeen: string
+        createdAt: string
+        online: boolean
+    }>> =>
+        ipcRenderer.invoke("p2p-lan:getKnownPeersWithStatus"),
+    
+    /**
+     * Share an article to all known peers (sends to online, queues for offline)
+     */
+    shareToAllKnownPeers: (title: string, url: string, feedName?: string, feedUrl?: string, feedIconUrl?: string): Promise<{
+        sent: number
+        queued: number
+        total: number
+        error?: string
+    }> =>
+        ipcRenderer.invoke("p2p-lan:shareToAllKnownPeers", title, url, feedName, feedUrl, feedIconUrl),
+    
+    /**
      * Share an article link with all connected peers
      */
     shareArticle: (url: string, title: string): Promise<number> =>

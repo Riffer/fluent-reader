@@ -26,6 +26,10 @@ import {
     getPendingShareCounts,
     getAllPendingShares,
     removeOldPendingShares,
+    removeOldKnownPeers,
+    upsertKnownPeer,
+    getKnownPeersForRoom,
+    KnownPeerRow,
     PendingShareRow,
     getOrCreateP2PFeed,
     insertItem,
@@ -44,6 +48,7 @@ const PEER_TIMEOUT = 15000    // ms before peer considered offline
 const HEARTBEAT_INTERVAL = 10000 // ms between heartbeats (10 seconds)
 const HEARTBEAT_TIMEOUT = 30000  // ms before peer considered dead (30 seconds)
 const ACK_TIMEOUT = 5000      // ms to wait for delivery acknowledgement
+const PEER_MAX_AGE_DAYS = 7   // Days before a peer is considered stale and removed
 
 /**
  * Generate a unique message ID for ACK tracking
@@ -193,6 +198,16 @@ export async function joinRoom(roomCode: string, displayName: string, saveToStor
         if (saveToStore) {
             setStoredP2PRoom(activeRoomCode, localDisplayName)
             console.log(`[P2P-LAN] Room saved to store`)
+        }
+        
+        // Clean up old peers and their pending shares (7 days)
+        try {
+            const removed = removeOldKnownPeers(PEER_MAX_AGE_DAYS)
+            if (removed > 0) {
+                console.log(`[P2P-LAN] Cleaned up ${removed} old peers`)
+            }
+        } catch (err) {
+            console.error("[P2P-LAN] Error cleaning up old peers:", err)
         }
         
         // Start TCP server
@@ -548,6 +563,96 @@ export async function sendArticleLinkWithQueue(
 }
 
 /**
+ * Get all known peers for the current room with their online status
+ */
+export function getKnownPeersWithStatus(): Array<KnownPeerRow & { online: boolean }> {
+    if (!activeRoomCode) return []
+    
+    const knownPeers = getKnownPeersForRoom(activeRoomCode)
+    return knownPeers.map(peer => ({
+        ...peer,
+        online: connectedPeers.has(peer.peerId)
+    }))
+}
+
+/**
+ * Queue an article to all known peers using pipeline strategy
+ * 
+ * Pipeline approach (robust):
+ * 1. First, queue article for ALL known peers (guaranteed persistence)
+ * 2. Then, attempt immediate delivery to online peers
+ * 3. On success: remove from queue
+ * 4. On failure: stays in queue for later delivery
+ * 
+ * This ensures no article is ever lost, even on app crash during send.
+ */
+export async function shareToAllKnownPeers(
+    title: string,
+    url: string,
+    feedName?: string,
+    feedUrl?: string,
+    feedIconUrl?: string
+): Promise<{ sent: number, queued: number, total: number, error?: string }> {
+    if (!activeRoomCode) {
+        return { sent: 0, queued: 0, total: 0, error: "Not in a room" }
+    }
+    
+    const knownPeers = getKnownPeersForRoom(activeRoomCode)
+    if (knownPeers.length === 0) {
+        return { sent: 0, queued: 0, total: 0, error: "No known peers in this room" }
+    }
+    
+    let sent = 0
+    let queued = 0
+    
+    // Step 1: Queue for ALL peers first (guaranteed persistence)
+    const queuedItems: Array<{ peerId: string, peerName: string, shareId: number, isOnline: boolean }> = []
+    
+    for (const peer of knownPeers) {
+        try {
+            const shareId = addPendingShare(peer.peerId, peer.peerName, url, title, feedName, feedUrl, feedIconUrl)
+            const isOnline = connectedPeers.has(peer.peerId)
+            queuedItems.push({ peerId: peer.peerId, peerName: peer.peerName, shareId, isOnline })
+            console.log(`[P2P-LAN] Pipeline: Queued for ${peer.peerName} (id: ${shareId}, online: ${isOnline})`)
+        } catch (err) {
+            console.error(`[P2P-LAN] Pipeline: Failed to queue for ${peer.peerName}:`, err)
+            // Continue with other peers even if one fails
+        }
+    }
+    
+    // Notify about queue changes
+    notifyPendingSharesChanged()
+    
+    // Step 2: Attempt immediate delivery for online peers
+    for (const item of queuedItems) {
+        if (item.isOnline) {
+            try {
+                // Try to send (without auto-queue since we already queued)
+                await sendArticlesWithAck(item.peerId, [{ url, title, feedName, feedUrl, feedIconUrl }], false)
+                
+                // Success! Remove from queue
+                removePendingShare(item.shareId)
+                sent++
+                console.log(`[P2P-LAN] Pipeline: Sent & removed from queue for ${item.peerName}`)
+            } catch (err) {
+                // Failed - stays in queue (already there)
+                queued++
+                console.log(`[P2P-LAN] Pipeline: Send failed for ${item.peerName}, staying in queue`)
+            }
+        } else {
+            // Offline - already queued
+            queued++
+            console.log(`[P2P-LAN] Pipeline: ${item.peerName} offline, staying in queue`)
+        }
+    }
+    
+    // Final notification
+    notifyPendingSharesChanged()
+    
+    return { sent, queued, total: knownPeers.length }
+}
+
+/**
  * Send article link to all peers with acknowledgement tracking
  * Returns results for each peer
  */
@@ -595,7 +700,9 @@ export async function broadcastArticlesWithAck(
  */
 async function processPendingSharesForPeer(peerId: string, peerName: string): Promise<void> {
     try {
+        // Get shares specifically for this peer
         const pendingShares = getPendingSharesForPeer(peerId)
+        
         if (pendingShares.length === 0) return
         
         console.log(`[P2P-LAN] Processing ${pendingShares.length} pending shares for ${peerName}`)
@@ -823,6 +930,13 @@ function handleDiscoveryMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
             tcpPort: data.tcpPort,
             lastSeen: Date.now()
         })
+        
+        // Persist peer to database (for offline sharing)
+        try {
+            upsertKnownPeer(data.peerId, data.displayName, data.roomCode)
+        } catch (err) {
+            console.error("[P2P-LAN] Error persisting peer:", err)
+        }
         
         // If not already connected, try to connect
         if (!connectedPeers.has(data.peerId)) {
@@ -1659,6 +1773,15 @@ export function registerP2PLanIpcHandlers(): void {
         } catch (err) {
             return { success: false, error: err instanceof Error ? err.message : "Unknown error" }
         }
+    })
+    
+    // Known peers handlers
+    ipcMain.handle("p2p-lan:getKnownPeersWithStatus", () => {
+        return getKnownPeersWithStatus()
+    })
+    
+    ipcMain.handle("p2p-lan:shareToAllKnownPeers", async (_, title: string, url: string, feedName?: string, feedUrl?: string, feedIconUrl?: string) => {
+        return await shareToAllKnownPeers(title, url, feedName, feedUrl, feedIconUrl)
     })
     
     console.log("[P2P-LAN] IPC handlers registered")
