@@ -60,6 +60,7 @@ export class AppLog {
     details?: string
     iid?: number
     url?: string
+    sourceId?: number
     time: Date
 
     constructor(
@@ -67,13 +68,15 @@ export class AppLog {
         title: string,
         details: string = null,
         iid: number = null,
-        url: string = null
+        url: string = null,
+        sourceId: number = null
     ) {
         this.type = type
         this.title = title
         this.details = details
         this.iid = iid
         this.url = url
+        this.sourceId = sourceId
         this.time = new Date()
     }
 }
@@ -189,6 +192,8 @@ interface PushP2PLinkAction {
     title: string
     url: string
     peerName: string
+    articleId?: number
+    sourceId?: number
 }
 
 export type LogMenuActionType = ToggleLogMenuAction | PushNotificationAction | PushP2PLinkAction
@@ -390,12 +395,14 @@ export function pushNotification(item: RSSItem): AppThunk {
     }
 }
 
-export function pushP2PLink(title: string, url: string, peerName: string): PushP2PLinkAction {
+export function pushP2PLink(title: string, url: string, peerName: string, articleId?: number, sourceId?: number): PushP2PLinkAction {
     return {
         type: PUSH_P2P_LINK,
         title,
         url,
         peerName,
+        articleId,
+        sourceId,
     }
 }
 
@@ -754,8 +761,9 @@ export function appReducer(
                             AppLogType.P2PLink,
                             action.title,
                             action.peerName,
-                            null,
-                            action.url
+                            action.articleId ?? null,
+                            action.url,
+                            action.sourceId ?? null
                         ),
                     ],
                 },

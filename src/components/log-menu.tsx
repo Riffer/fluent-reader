@@ -15,6 +15,7 @@ type LogMenuProps = {
     logs: AppLog[]
     close: () => void
     showItem: (iid: number) => void
+    showP2PArticle: (sourceId: number, articleId: number, feedName: string) => void
 }
 
 function getLogIcon(log: AppLog) {
@@ -35,15 +36,24 @@ class LogMenu extends React.Component<LogMenuProps> {
         this.props.logs
             .map((l, i) => ({
                 key: i,
-                activityDescription: l.iid ? (
+                activityDescription: l.type === AppLogType.P2PLink ? (
+                    // P2P Link: check if stored in feed
+                    l.iid && l.sourceId ? (
+                        <b>
+                            <Link onClick={() => this.handleP2PFeedArticleClick(l)}>
+                                {l.title}
+                            </Link>
+                        </b>
+                    ) : (
+                        <b>
+                            <Link onClick={() => this.handleP2PLinkClick(l)}>
+                                {l.title}
+                            </Link>
+                        </b>
+                    )
+                ) : l.iid ? (
                     <b>
                         <Link onClick={() => this.handleArticleClick(l)}>
-                            {l.title}
-                        </Link>
-                    </b>
-                ) : l.url ? (
-                    <b>
-                        <Link onClick={() => this.handleP2PLinkClick(l)}>
                             {l.title}
                         </Link>
                     </b>
@@ -64,6 +74,12 @@ class LogMenu extends React.Component<LogMenuProps> {
     handleP2PLinkClick = (log: AppLog) => {
         this.props.close()
         window.utils.openExternal(log.url)
+    }
+
+    handleP2PFeedArticleClick = (log: AppLog) => {
+        this.props.close()
+        // Navigate to the article in its P2P feed
+        this.props.showP2PArticle(log.sourceId, log.iid, log.details || "P2P Feed")
     }
 
     render() {

@@ -344,7 +344,7 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
                                                 } 
                                             }}
                                         >
-                                            {peer.online ? "online" : formatLastSeen(peer.lastSeen)}
+                                            {peer.online ? "online" : "offline"}
                                         </Text>
                                         {pendingCounts[peer.peerId] && (
                                             <Text 

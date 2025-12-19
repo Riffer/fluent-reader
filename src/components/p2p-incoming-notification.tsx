@@ -83,7 +83,7 @@ interface IncomingArticle {
 }
 
 interface P2PIncomingNotificationProps {
-    addToLog: (title: string, url: string, peerName: string) => void
+    addToLog: (title: string, url: string, peerName: string, articleId?: number, sourceId?: number) => void
     navigateToArticle: (sourceId: number, articleId: number, feedName: string) => void
 }
 
@@ -118,7 +118,7 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
             if (shouldCollect) {
                 // Add to log instead of showing dialog
                 console.log("[P2P Notification] Collecting link in log")
-                addToLog(article.title, article.url, article.peerName)
+                addToLog(article.title, article.url, article.peerName, article.articleId, article.sourceId)
                 playNotificationSound()
                 return
             }
@@ -198,7 +198,7 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
         if (!incomingArticle) return
         console.log("[P2P Notification] Saving for later:", incomingArticle.url)
         // Add to log menu (notification bell) for later viewing
-        addToLog(incomingArticle.title, incomingArticle.url, incomingArticle.peerName)
+        addToLog(incomingArticle.title, incomingArticle.url, incomingArticle.peerName, incomingArticle.articleId, incomingArticle.sourceId)
         handleDismiss()
     }, [incomingArticle, addToLog, handleDismiss])
 

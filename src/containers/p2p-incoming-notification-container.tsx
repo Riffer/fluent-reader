@@ -9,8 +9,8 @@ const mapStateToProps = (state: RootState) => ({
 })
 
 const mapDispatchToProps = (dispatch: any) => ({
-    addToLog: (title: string, url: string, peerName: string) => 
-        dispatch(pushP2PLink(title, url, peerName)),
+    addToLog: (title: string, url: string, peerName: string, articleId?: number, sourceId?: number) => 
+        dispatch(pushP2PLink(title, url, peerName, articleId, sourceId)),
     navigateToArticle: (sourceId: number, articleId: number, feedName: string) =>
         dispatch(navigateToP2PArticle(sourceId, articleId, feedName)),
 })

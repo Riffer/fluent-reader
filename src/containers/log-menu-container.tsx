@@ -3,7 +3,7 @@ import { createSelector } from "reselect"
 import { RootState } from "../scripts/reducer"
 import { toggleLogMenu } from "../scripts/models/app"
 import LogMenu from "../components/log-menu"
-import { showItemFromId } from "../scripts/models/page"
+import { showItemFromId, navigateToP2PArticle } from "../scripts/models/page"
 
 const getLogs = (state: RootState) => state.app.logMenu
 
@@ -13,6 +13,8 @@ const mapDispatchToProps = dispatch => {
     return {
         close: () => dispatch(toggleLogMenu()),
         showItem: (iid: number) => dispatch(showItemFromId(iid)),
+        showP2PArticle: (sourceId: number, articleId: number, feedName: string) => 
+            dispatch(navigateToP2PArticle(sourceId, articleId, feedName)),
     }
 }
 

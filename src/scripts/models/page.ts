@@ -158,10 +158,11 @@ export function showItemFromId(iid: number): AppThunk {
  * 1. Select the source (navigate to P2P feed)
  * 2. Initialize the feed (load articles)
  * 3. Show the article
+ * 4. Scroll the feed list to the article
  */
 export function navigateToP2PArticle(sourceId: number, articleId: number, feedName: string): AppThunk {
     return async (dispatch, getState) => {
-        console.log(`[navigateToP2PArticle] Navigating to source=${sourceId}, article=${articleId}`)
+        console.log(`[navigateToP2PArticle] START - Navigating to source=${sourceId}, article=${articleId}`)
         
         // Step 1: Navigate to the source feed
         const menuKey = `source-${sourceId}`
@@ -178,15 +179,102 @@ export function navigateToP2PArticle(sourceId: number, articleId: number, feedNa
         
         // Step 2: Initialize feeds (this loads the articles into the feed view)
         dispatch(initFeeds())
+        console.log(`[navigateToP2PArticle] Feed initialized, waiting 500ms for article to load...`)
         
         // Step 3: Wait for feed to load, then show the article
         setTimeout(() => {
             const state = getState()
             const item = state.items[articleId]
+            console.log(`[navigateToP2PArticle] After 500ms - item in state:`, item ? "YES" : "NO")
             if (item) {
                 console.log(`[navigateToP2PArticle] Found article in state, showing it`)
                 dispatch(showItem(null, item))
                 if (!item.hasRead) dispatch(markRead(item))
+                
+                // Step 4: Wait for the article card to appear in DOM, then scroll to it
+                const scrollToCard = () => {
+                    const card = document.querySelector(
+                        `#refocus div[data-iid="${articleId}"]`
+                    ) as HTMLElement
+                    console.log(`[navigateToP2PArticle] scrollToCard called - card found:`, card ? "YES" : "NO")
+                    if (card) {
+                        // Delay scroll slightly to let layout stabilize (slider, animations, etc.)
+                        console.log(`[navigateToP2PArticle] Card found! Waiting 500ms for layout to stabilize...`)
+                        setTimeout(() => {
+                            // Re-query the card to get fresh reference
+                            const freshCard = document.querySelector(
+                                `#refocus div[data-iid="${articleId}"]`
+                            ) as HTMLElement
+                            
+                            if (!freshCard) {
+                                console.log(`[navigateToP2PArticle] ERROR: Card disappeared!`)
+                                return
+                            }
+                            
+                            // Find the scrollable container (#refocus)
+                            const scrollContainer = document.getElementById('refocus')
+                            if (!scrollContainer) {
+                                console.log(`[navigateToP2PArticle] ERROR: Scroll container #refocus not found!`)
+                                return
+                            }
+                            
+                            console.log(`[navigateToP2PArticle] NOW scrolling to article card!`)
+                            console.log(`[navigateToP2PArticle] Card offsetTop:`, freshCard.offsetTop)
+                            console.log(`[navigateToP2PArticle] Container scrollHeight:`, scrollContainer.scrollHeight)
+                            console.log(`[navigateToP2PArticle] Container clientHeight:`, scrollContainer.clientHeight)
+                            
+                            // Calculate scroll position to center the card in the container
+                            const cardTop = freshCard.offsetTop
+                            const containerHeight = scrollContainer.clientHeight
+                            const cardHeight = freshCard.offsetHeight
+                            const scrollTo = cardTop - (containerHeight / 2) + (cardHeight / 2)
+                            
+                            console.log(`[navigateToP2PArticle] Scrolling container to:`, scrollTo)
+                            scrollContainer.scrollTo({
+                                top: Math.max(0, scrollTo),
+                                behavior: 'smooth'
+                            })
+                            
+                            console.log(`[navigateToP2PArticle] Scroll complete!`)
+                        }, 500) // 500ms delay for layout to stabilize
+                        return true
+                    }
+                    return false
+                }
+                
+                // Try immediately first
+                console.log(`[navigateToP2PArticle] Trying to find card immediately...`)
+                if (scrollToCard()) {
+                    console.log(`[navigateToP2PArticle] Card found immediately, scroll scheduled`)
+                    return
+                }
+                
+                // Use MutationObserver to wait for the card to appear
+                const feedContainer = document.querySelector('#refocus')
+                console.log(`[navigateToP2PArticle] Feed container #refocus found:`, feedContainer ? "YES" : "NO")
+                if (feedContainer) {
+                    console.log(`[navigateToP2PArticle] Setting up MutationObserver to wait for card...`)
+                    const observer = new MutationObserver((mutations, obs) => {
+                        console.log(`[navigateToP2PArticle] MutationObserver fired - checking for card...`)
+                        if (scrollToCard()) {
+                            console.log(`[navigateToP2PArticle] Card appeared via observer, disconnecting`)
+                            obs.disconnect()
+                        }
+                    })
+                    observer.observe(feedContainer, { 
+                        childList: true, 
+                        subtree: true 
+                    })
+                    
+                    // Fallback timeout in case card never appears
+                    setTimeout(() => {
+                        observer.disconnect()
+                        console.log(`[navigateToP2PArticle] Observer timeout, trying one last scroll`)
+                        scrollToCard()
+                    }, 5000)
+                } else {
+                    console.log(`[navigateToP2PArticle] Feed container not found`)
+                }
             } else {
                 console.log(`[navigateToP2PArticle] Article ${articleId} not in state yet`)
             }
