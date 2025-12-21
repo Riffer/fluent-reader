@@ -28,6 +28,7 @@ import {
     removeOldPendingShares,
     removeOldKnownPeers,
     upsertKnownPeer,
+    updatePeerLastSeen,
     getKnownPeersForRoom,
     KnownPeerRow,
     PendingShareRow,
@@ -266,6 +267,20 @@ export async function leaveRoom(clearStore: boolean = true, sendGoodbye: boolean
     
     // Stop heartbeat
     stopHeartbeat()
+    
+    // Update lastSeen in database for all discovered peers before clearing
+    // This ensures the 7-day cleanup logic has accurate timestamps
+    if (discoveredPeers.size > 0) {
+        console.log(`[P2P-LAN] Updating lastSeen for ${discoveredPeers.size} peer(s)`)
+        for (const [peerId, peer] of discoveredPeers) {
+            try {
+                updatePeerLastSeen(peerId)
+            } catch (err) {
+                // DB might be closed during shutdown - ignore errors
+                console.log(`[P2P-LAN] Could not update lastSeen for ${peer.displayName} (DB may be closed)`)
+            }
+        }
+    }
     
     // Close all TCP connections
     for (const [peerId, peer] of connectedPeers) {
@@ -923,7 +938,10 @@ function handleDiscoveryMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
         const msgType = data.type === "discovery" ? "Discovery" : "Discovery-Response"
         console.log(`[P2P-LAN] ${msgType} from ${data.displayName} (${rinfo.address}:${data.tcpPort})`)
         
-        // Update discovered peers
+        // Check if this is a NEW peer (not yet in discoveredPeers)
+        const isNewPeer = !discoveredPeers.has(data.peerId)
+        
+        // Update discovered peers (in memory)
         discoveredPeers.set(data.peerId, {
             displayName: data.displayName,
             address: rinfo.address,
@@ -931,11 +949,15 @@ function handleDiscoveryMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
             lastSeen: Date.now()
         })
         
-        // Persist peer to database (for offline sharing)
-        try {
-            upsertKnownPeer(data.peerId, data.displayName, data.roomCode)
-        } catch (err) {
-            console.error("[P2P-LAN] Error persisting peer:", err)
+        // Only persist NEW peers to database (avoids constant DB writes)
+        // lastSeen is updated when leaving the room
+        if (isNewPeer) {
+            try {
+                upsertKnownPeer(data.peerId, data.displayName, data.roomCode)
+                console.log(`[P2P-LAN] New peer persisted: ${data.displayName}`)
+            } catch (err) {
+                console.error("[P2P-LAN] Error persisting peer:", err)
+            }
         }
         
         // If not already connected, try to connect
