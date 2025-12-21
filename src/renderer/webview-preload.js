@@ -607,14 +607,42 @@ try {
       scrollByPage(direction);
       return true;
     } else {
-      // Backward: Find the last image whose target is above current scroll position
-      for (let i = targets.length - 1; i >= 0; i--) {
+      // Backward: Find the previous image/target to scroll to
+      // We need to find the target that is just above the current viewport position
+      // First, find which target is currently at the top of the viewport
+      let currentIndex = -1;
+      for (let i = 0; i < targets.length; i++) {
         const targetTop = targets[i].target.offsetTop;
-        if (targetTop < viewportTop - 10) {
-          // This target is above current view - scroll to it
-          targets[i].target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          currentImageIndex = i;
-          return true;
+        // If this target is at or near the current scroll position, it's the "current" one
+        if (targetTop >= viewportTop - 50 && targetTop <= viewportTop + visibilityThreshold) {
+          currentIndex = i;
+          break;
+        }
+        // If this target is below our current position, the previous one was "current"
+        if (targetTop > viewportTop + visibilityThreshold) {
+          currentIndex = i - 1;
+          break;
+        }
+      }
+      
+      // If we found a current index, go to the previous one
+      if (currentIndex > 0) {
+        targets[currentIndex - 1].target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        currentImageIndex = currentIndex - 1;
+        return true;
+      } else if (currentIndex === 0) {
+        // Already at first image, scroll to top
+        container.scrollTo({ top: 0, behavior: 'smooth' });
+        return true;
+      } else {
+        // No current index found - find the last target that is above viewport
+        for (let i = targets.length - 1; i >= 0; i--) {
+          const targetTop = targets[i].target.offsetTop;
+          if (targetTop < viewportTop - 10) {
+            targets[i].target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            currentImageIndex = i;
+            return true;
+          }
         }
       }
       // No image above - use page scroll to go up
