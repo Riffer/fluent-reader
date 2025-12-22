@@ -8,7 +8,7 @@ import { ipcMain, BrowserWindow, powerMonitor } from "electron"
 import * as dgram from "dgram"
 import * as net from "net"
 import * as crypto from "crypto"
-import { getKnownPeers, addPeer, updatePeerLastSeen, KnownPeer, generatePeerHash } from "./p2p-share"
+import { getKnownPeers, addPeer, KnownPeer, generatePeerHash } from "./p2p-share"
 import { 
     getStoredP2PRoom, 
     setStoredP2PRoom, 
