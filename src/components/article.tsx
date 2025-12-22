@@ -210,6 +210,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     // KEIN userAgent - behalte Desktop User-Agent
                 });
                 console.log('[VisualZoom] Emulation enabled:', result, 'viewport:', viewportWidth, 'x', viewportHeight);
+                
+                // WICHTIG: Informiere das Webview-Preload, dass Visual Zoom aktiv ist
+                // Damit werden die Touch-Event-Handler im Preload deaktiviert
+                try {
+                    this.webview.send('set-visual-zoom-mode', true);
+                } catch {}
+                
                 return result;
             }
             return false;
@@ -223,6 +230,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private disableVisualZoomEmulation = async () => {
         if (!this.webview) return false;
         try {
+            // WICHTIG: Informiere das Webview-Preload zuerst
+            try {
+                this.webview.send('set-visual-zoom-mode', false);
+            } catch {}
+            
             const webContentsId = (this.webview as any).getWebContentsId();
             if (!webContentsId) return false;
             const ipcRenderer = (window as any).ipcRenderer;
@@ -964,7 +976,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const targetZoom = this.props.source.defaultZoom || 0;
         // Synchronisiere currentZoom mit dem Feed-Zoom
         this.currentZoom = targetZoom;
-        console.log('[Article] dom-ready: Sending zoom:', targetZoom, 'overlay:', this.state.showZoomOverlay, 'mobileMode:', currentMobileMode);
+        console.log('[Article] dom-ready: Sending zoom:', targetZoom, 'overlay:', this.state.showZoomOverlay, 'mobileMode:', currentMobileMode, 'visualZoom:', this.state.visualZoomEnabled);
         try {
             // Verwende echten Zoom-Level statt Skalierung
             this.webview.send('set-webview-zoom', targetZoom);
@@ -972,6 +984,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.webview.send('set-zoom-overlay-setting', this.state.showZoomOverlay);
             // Sende Mobile-Mode-Status für Overlay
             this.webview.send('set-mobile-mode', currentMobileMode);
+            // Sende Visual Zoom Status (wichtig für Touch-Event-Handling im Preload)
+            this.webview.send('set-visual-zoom-mode', this.state.visualZoomEnabled);
         } catch {}
         if (!this.state.webviewVisible) this.setState({ webviewVisible: true });
     }

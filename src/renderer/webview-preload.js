@@ -12,6 +12,10 @@ try {
   
   // Mobile Mode Status
   let mobileMode = false;
+  
+  // Visual Zoom Mode: Wenn aktiviert, werden Touch-Events NICHT abgefangen
+  // damit der native Browser-Pinch-Zoom funktioniert
+  let visualZoomEnabled = false;
 
   // Overlay für Debug-Anzeige (Zoom, NSFW-Cleanup, etc.)
   let infoOverlay = null;
@@ -349,6 +353,20 @@ try {
     }
   });
 
+  // Listener für Visual Zoom Mode (aktiviert nativen Browser-Pinch-Zoom)
+  ipcRenderer.on('set-visual-zoom-mode', (event, enabled) => {
+    const wasEnabled = visualZoomEnabled;
+    visualZoomEnabled = !!enabled;
+    console.log('[Preload] Visual Zoom mode changed:', wasEnabled ? 'ON' : 'OFF', '->', visualZoomEnabled ? 'ON' : 'OFF');
+    if (wasEnabled !== visualZoomEnabled) {
+      // Zeige Statusmeldung
+      const wasOverlayEnabled = showZoomOverlayEnabled;
+      showZoomOverlayEnabled = true;
+      updateOverlay(visualZoomEnabled ? 'Visual Zoom: ON (Pinch-to-Zoom aktiv)' : 'Visual Zoom: OFF');
+      showZoomOverlayEnabled = wasOverlayEnabled;
+    }
+  });
+
   // Listener für Input Mode Status (deaktiviert Keyboard-Navigation für Login-Formulare etc.)
   let inputModeEnabled = false;
   ipcRenderer.on('set-input-mode', (event, enabled) => {
@@ -390,6 +408,9 @@ try {
   window.addEventListener('wheel', (e) => {
     try {
       if (e.ctrlKey) {
+        // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
+        if (visualZoomEnabled) return;
+        
         e.preventDefault();
         const delta = -e.deltaY;
         // Touchpad-Kontrolle: Mit größeren Schritten (höhere Empfindlichkeit)
@@ -414,6 +435,8 @@ try {
   }, { passive: false });
 
   // Touch Pinch-Zoom - zoomt vom Mittelpunkt der beiden Finger
+  // WICHTIG: Bei aktiviertem Visual Zoom werden diese Events NICHT abgefangen,
+  // damit der native Browser-Pinch-Zoom (via enableDeviceEmulation) funktioniert
   let lastDistance = 0;
   let touchStartZoomLevel = zoomLevel;
   let lastTouchMidpointX = 0;
@@ -421,6 +444,9 @@ try {
 
   window.addEventListener('touchstart', (e) => {
     try {
+      // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
+      if (visualZoomEnabled) return;
+      
       if (e.touches.length === 2) {
         const touch1 = e.touches[0];
         const touch2 = e.touches[1];
@@ -439,6 +465,9 @@ try {
 
   window.addEventListener('touchmove', (e) => {
     try {
+      // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
+      if (visualZoomEnabled) return;
+      
       if (e.touches.length === 2 && lastDistance > 0) {
         e.preventDefault();
         const touch1 = e.touches[0];
@@ -480,6 +509,9 @@ try {
   // macOS Gesture-Events
   window.addEventListener('gesturechange', (e) => {
     try {
+      // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
+      if (visualZoomEnabled) return;
+      
       e.preventDefault();
       const scale = typeof e.scale === 'number' ? e.scale : 1;
       const newFactor = zoomLevelToFactor(zoomLevel) * scale;
