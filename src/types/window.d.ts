@@ -7,8 +7,10 @@ import type { createArticleExtractorBridge } from "../bridges/article-extractor"
 import type { DbBridge } from "../bridges/db"
 import type { P2PBridge } from "../bridges/p2p"
 import type { P2PLanBridge } from "../bridges/p2p-lan"
+import type { contentViewBridge } from "../bridges/content-view"
 
 type ArticleExtractorBridge = ReturnType<typeof createArticleExtractorBridge>
+type ContentViewBridge = typeof contentViewBridge
 
 declare global {
     /**
@@ -75,12 +77,18 @@ declare global {
         p2pLan: P2PLanBridge
 
         /**
+         * Content View bridge - WebContentsView for article display with visual zoom
+         */
+        contentView: ContentViewBridge
+
+        /**
          * Limited IPC renderer for specific channels
          */
         ipcRenderer: {
             send(channel: string, ...args: any[]): void
             on(channel: string, listener: Function): void
             removeAllListeners(channel: string): void
+            removeListener(channel: string, listener: Function): void
             invoke(channel: string, ...args: any[]): Promise<any>
         }
     }

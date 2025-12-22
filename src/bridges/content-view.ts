@@ -1,0 +1,172 @@
+/**
+ * Content View Bridge - IPC communication with WebContentsView
+ * 
+ * This bridge provides a React-friendly API for controlling the
+ * WebContentsView that displays article content.
+ */
+import { ipcRenderer } from "electron"
+
+export interface ContentViewBounds {
+    x: number
+    y: number
+    width: number
+    height: number
+}
+
+export interface ContentViewContextMenu {
+    x: number
+    y: number
+    selectionText: string
+    linkURL: string
+    srcURL: string
+    mediaType: string
+}
+
+export const contentViewBridge = {
+    /**
+     * Navigate content view to URL
+     */
+    navigate: (url: string): Promise<boolean> => {
+        return ipcRenderer.invoke("content-view-navigate", url)
+    },
+    
+    /**
+     * Update content view bounds (position and size)
+     */
+    setBounds: (bounds: ContentViewBounds): void => {
+        ipcRenderer.send("content-view-set-bounds", bounds)
+    },
+    
+    /**
+     * Show or hide content view
+     */
+    setVisible: (visible: boolean): void => {
+        ipcRenderer.send("content-view-set-visible", visible)
+    },
+    
+    /**
+     * Send message to content view's preload script
+     */
+    send: (channel: string, ...args: any[]): void => {
+        ipcRenderer.send("content-view-send", channel, ...args)
+    },
+    
+    /**
+     * Execute JavaScript in content view
+     */
+    executeJavaScript: (code: string): Promise<any> => {
+        return ipcRenderer.invoke("content-view-execute-js", code)
+    },
+    
+    /**
+     * Enable visual zoom (pinch-to-zoom)
+     */
+    setVisualZoom: (enabled: boolean): void => {
+        ipcRenderer.send("content-view-set-visual-zoom", enabled)
+    },
+    
+    /**
+     * Get content view webContents ID
+     */
+    getId: (): Promise<number | null> => {
+        return ipcRenderer.invoke("content-view-get-id")
+    },
+    
+    /**
+     * Open DevTools for content view
+     */
+    openDevTools: (): Promise<void> => {
+        return ipcRenderer.invoke("content-view-open-devtools")
+    },
+    
+    /**
+     * Reload content view
+     */
+    reload: (): Promise<void> => {
+        return ipcRenderer.invoke("content-view-reload")
+    },
+    
+    /**
+     * Go back in navigation history
+     */
+    goBack: (): Promise<boolean> => {
+        return ipcRenderer.invoke("content-view-go-back")
+    },
+    
+    /**
+     * Go forward in navigation history
+     */
+    goForward: (): Promise<boolean> => {
+        return ipcRenderer.invoke("content-view-go-forward")
+    },
+    
+    /**
+     * Set user agent for content view
+     */
+    setUserAgent: (userAgent: string): void => {
+        ipcRenderer.send("content-view-set-user-agent", userAgent)
+    },
+    
+    // ===== Event Listeners =====
+    
+    /**
+     * Listen for loading state changes
+     */
+    onLoading: (callback: (loading: boolean) => void): () => void => {
+        const handler = (_event: any, loading: boolean) => callback(loading)
+        ipcRenderer.on("content-view-loading", handler)
+        return () => ipcRenderer.removeListener("content-view-loading", handler)
+    },
+    
+    /**
+     * Listen for page loaded events
+     */
+    onLoaded: (callback: (url: string) => void): () => void => {
+        const handler = (_event: any, url: string) => callback(url)
+        ipcRenderer.on("content-view-loaded", handler)
+        return () => ipcRenderer.removeListener("content-view-loaded", handler)
+    },
+    
+    /**
+     * Listen for load errors
+     */
+    onError: (callback: (error: { errorCode: number, errorDescription: string, url: string }) => void): () => void => {
+        const handler = (_event: any, error: any) => callback(error)
+        ipcRenderer.on("content-view-error", handler)
+        return () => ipcRenderer.removeListener("content-view-error", handler)
+    },
+    
+    /**
+     * Listen for navigation events
+     */
+    onNavigated: (callback: (url: string) => void): () => void => {
+        const handler = (_event: any, url: string) => callback(url)
+        ipcRenderer.on("content-view-navigated", handler)
+        return () => ipcRenderer.removeListener("content-view-navigated", handler)
+    },
+    
+    /**
+     * Listen for title updates
+     */
+    onTitleUpdate: (callback: (title: string) => void): () => void => {
+        const handler = (_event: any, title: string) => callback(title)
+        ipcRenderer.on("content-view-title", handler)
+        return () => ipcRenderer.removeListener("content-view-title", handler)
+    },
+    
+    /**
+     * Listen for context menu events
+     */
+    onContextMenu: (callback: (params: ContentViewContextMenu) => void): () => void => {
+        const handler = (_event: any, params: ContentViewContextMenu) => callback(params)
+        ipcRenderer.on("content-view-context-menu", handler)
+        return () => ipcRenderer.removeListener("content-view-context-menu", handler)
+    },
+    
+    /**
+     * Remove all listeners for a specific channel
+     */
+    removeAllListeners: (channel: string): void => {
+        ipcRenderer.removeAllListeners(`content-view-${channel}`)
+    },
+}
