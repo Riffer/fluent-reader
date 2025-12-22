@@ -28,6 +28,7 @@ type ArticleProps = {
     source: RSSSource
     locale: string
     menuOpen: boolean
+    overlayActive: boolean  // Any major overlay (menu, settings, context menu, log menu)
     shortcuts: (item: RSSItem, e: KeyboardEvent) => void
     dismiss: () => void
     offsetItem: (offset: number) => void
@@ -97,7 +98,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private contentViewPlaceholderRef: HTMLDivElement | null = null
     private contentViewCleanup: (() => void)[] = []
     private resizeObserver: ResizeObserver | null = null
-    private menuHoverListener: ((e: MouseEvent) => void) | null = null
     private contentViewHiddenForMenu: boolean = false  // Track if we hid ContentView for menu access
 
     constructor(props: ArticleProps) {
@@ -331,6 +331,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.resizeObserver = null;
         }
         
+        // Remove window resize listener
+        if (this.windowResizeListener) {
+            window.removeEventListener('resize', this.windowResizeListener);
+            this.windowResizeListener = null;
+        }
+        
+        // Reset bounds cache
+        this.lastContentViewBounds = null;
+        
         // Hide ContentView (with null check)
         if (window.contentView) {
             window.contentView.setVisible(false);
@@ -344,6 +353,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (!this.contentViewPlaceholderRef) return;
         if (!window.contentView) return;
         
+        // Don't update bounds if ContentView is hidden for overlay
+        if (this.contentViewHiddenForMenu) return;
+        
         const rect = this.contentViewPlaceholderRef.getBoundingClientRect();
         const bounds = {
             x: Math.round(rect.x),
@@ -352,9 +364,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             height: Math.round(rect.height),
         };
         
+        // Only update if bounds actually changed (avoid unnecessary IPC)
+        if (this.lastContentViewBounds &&
+            this.lastContentViewBounds.x === bounds.x &&
+            this.lastContentViewBounds.y === bounds.y &&
+            this.lastContentViewBounds.width === bounds.width &&
+            this.lastContentViewBounds.height === bounds.height) {
+            return;
+        }
+        
+        this.lastContentViewBounds = bounds;
         console.log('[ContentView] Updating bounds:', bounds);
         window.contentView.setBounds(bounds);
     }
+    
+    private lastContentViewBounds: { x: number, y: number, width: number, height: number } | null = null;
+    private windowResizeListener: (() => void) | null = null;
     
     /**
      * Initialize ContentView for displaying article content
@@ -387,6 +412,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 this.resizeObserver.observe(this.contentViewPlaceholderRef);
             }
             
+            // Setup window resize listener (ResizeObserver doesn't catch window resizes that only change position)
+            if (!this.windowResizeListener) {
+                this.windowResizeListener = () => {
+                    requestAnimationFrame(() => this.updateContentViewBounds());
+                };
+                window.addEventListener('resize', this.windowResizeListener);
+            }
+            
             // Enable visual zoom
             window.contentView.setVisualZoom(true);
             
@@ -401,9 +434,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Show ContentView
             window.contentView.setVisible(true);
             
-            // Setup menu hover detection to temporarily hide ContentView
-            // This allows access to the left menu which is under the native ContentView
-            this.setupMenuHoverDetection();
+            // Note: Menu access is now handled via explicit overlay detection
+            // (handleOverlayVisibilityChange, handleFluentMenuOpened/Dismissed)
+            // and click-to-restore on blur placeholder
             
             // Focus
             window.contentView.focus();
@@ -414,43 +447,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
     
-    /**
-     * Setup mouse listener to detect when user hovers over menu area
-     * Temporarily hides ContentView so menu can be accessed
-     */
-    private setupMenuHoverDetection = () => {
-        if (this.menuHoverListener) return;  // Already setup
-        
-        const MENU_AREA_WIDTH = 50;  // pixels from left edge that trigger menu access
-        
-        this.menuHoverListener = (e: MouseEvent) => {
-            if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return;
-            if (!window.contentView) return;
-            
-            const inMenuArea = e.clientX < MENU_AREA_WIDTH;
-            
-            if (inMenuArea && !this.contentViewHiddenForMenu) {
-                // Mouse entered menu area - hide ContentView
-                this.contentViewHiddenForMenu = true;
-                window.contentView.setVisible(false);
-                console.log('[ContentView] Hidden for menu access');
-            } else if (!inMenuArea && this.contentViewHiddenForMenu) {
-                // Mouse left menu area - show ContentView again
-                this.contentViewHiddenForMenu = false;
-                window.contentView.setVisible(true);
-                console.log('[ContentView] Shown after menu access');
-            }
-        };
-        
-        document.addEventListener('mousemove', this.menuHoverListener);
-        this.contentViewCleanup.push(() => {
-            if (this.menuHoverListener) {
-                document.removeEventListener('mousemove', this.menuHoverListener);
-                this.menuHoverListener = null;
-            }
-        });
-    }
-
     // Input Mode: Sendet Status an WebView um Keyboard-Navigation zu deaktivieren
     private setInputMode = (enabled: boolean) => {
         this.setState({ inputModeEnabled: enabled });
@@ -985,6 +981,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         return {
             items: items,
+            onMenuOpened: () => this.handleFluentMenuOpened(),
+            onMenuDismissed: () => this.handleFluentMenuDismissed(),
         }
     }
 
@@ -1276,6 +1274,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.setupContentViewListeners()
         }
         
+        // Note: ContentView restoration is handled by explicit click on blur placeholder
+        
         // Persistierte Cookies laden beim ersten Mount
         if (this.props.source.persistCookies) {
             console.log("[CookiePersist] Article: Loading cookies on mount")
@@ -1486,33 +1486,35 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             })
         }
         
-        // Handle menu open/close for ContentView visibility
-        if (this.state.visualZoomEnabled && prevProps.menuOpen !== this.props.menuOpen) {
-            this.handleMenuVisibilityChange(this.props.menuOpen)
+        // Handle overlay visibility changes for ContentView (Redux-based overlays only)
+        // This covers: hamburger menu, settings, log menu, context menus
+        // Note: Fluent UI dropdowns (Tools, View) are handled by mouse events on the placeholder
+        if (this.state.visualZoomEnabled && prevProps.overlayActive !== this.props.overlayActive) {
+            this.handleOverlayVisibilityChange(this.props.overlayActive)
         }
     }
     
     /**
-     * Handle menu visibility change for ContentView
-     * When menu opens: capture screenshot, show blur placeholder, hide ContentView
-     * When menu closes: show ContentView, clear screenshot
+     * Handle Redux overlay visibility change for ContentView
+     * Only handles Redux-based overlays (menu, settings, log menu, context menu)
+     * Fluent UI dropdowns are handled by onMenuOpened/onMenuDismissed callbacks
      */
-    private handleMenuVisibilityChange = async (menuOpen: boolean) => {
+    private handleOverlayVisibilityChange = async (overlayActive: boolean) => {
         if (!window.contentView) return
         
-        if (menuOpen) {
-            // Menu is opening - capture screenshot and hide ContentView
-            console.log('[Article] Menu opening - capturing screenshot for blur placeholder')
+        if (overlayActive) {
+            // Redux overlay is opening - capture screenshot and hide ContentView
+            console.log('[Article] Redux overlay opening - capturing screenshot')
             try {
                 const screenshot = await window.contentView.captureScreen()
                 if (screenshot && this._isMounted) {
                     this.setState({ menuBlurScreenshot: screenshot })
                     // Small delay to ensure React renders the placeholder before hiding ContentView
                     setTimeout(() => {
-                        if (this._isMounted && this.props.menuOpen) {
+                        if (this._isMounted && this.props.overlayActive) {
                             window.contentView.setVisible(false)
                             this.contentViewHiddenForMenu = true
-                            console.log('[Article] ContentView hidden for menu access')
+                            console.log('[Article] ContentView hidden for Redux overlay')
                         }
                     }, 16)
                 }
@@ -1522,21 +1524,203 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 window.contentView.setVisible(false)
                 this.contentViewHiddenForMenu = true
             }
-        } else {
-            // Menu is closing - show ContentView and clear screenshot
-            console.log('[Article] Menu closing - restoring ContentView')
-            if (this.contentViewHiddenForMenu) {
-                window.contentView.setVisible(true)
-                this.contentViewHiddenForMenu = false
+        }
+        // Note: We do NOT auto-restore when overlay closes!
+        // User must click on blur placeholder to restore ContentView
+    }
+    
+    // Track if a Fluent UI dropdown menu is open
+    private fluentMenuOpen = false
+    
+    /**
+     * Handle Fluent UI dropdown menu opening
+     * Called by onMenuOpened callback in menu props
+     */
+    private handleFluentMenuOpened = async () => {
+        console.log('[Article] Fluent UI menu opening')
+        this.fluentMenuOpen = true
+        
+        if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return
+        if (!window.contentView) return
+        if (this.contentViewHiddenForMenu) return  // Already hidden
+        
+        try {
+            const screenshot = await window.contentView.captureScreen()
+            if (screenshot && this._isMounted) {
+                this.setState({ menuBlurScreenshot: screenshot })
             }
-            // Clear screenshot after a short delay (for smooth transition)
-            setTimeout(() => {
-                if (this._isMounted && !this.props.menuOpen) {
-                    this.setState({ menuBlurScreenshot: null })
-                }
-            }, 100)
+        } catch (e) {
+            console.error('[Article] Error capturing screenshot for Fluent menu:', e)
+        }
+        
+        window.contentView.setVisible(false)
+        this.contentViewHiddenForMenu = true
+        console.log('[Article] ContentView hidden for Fluent UI menu')
+    }
+    
+    /**
+     * Handle Fluent UI dropdown menu closing
+     * Called by onMenuDismissed callback in menu props
+     */
+    private handleFluentMenuDismissed = () => {
+        console.log('[Article] Fluent UI menu dismissed')
+        this.fluentMenuOpen = false
+        
+        if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return
+        if (!window.contentView) return
+        if (!this.contentViewHiddenForMenu) return  // Not hidden, nothing to do
+        
+        // Check if Redux overlay is still active
+        if (this.props.overlayActive) {
+            console.log('[Article] Fluent menu dismissed but Redux overlay active - staying hidden')
+            return
+        }
+        
+        // Note: We do NOT auto-restore when menu closes!
+        // User must click on blur placeholder to restore ContentView
+    }
+    
+    // Timer for auto-restore when mouse hovers over blur placeholder
+    private blurHoverTimer: NodeJS.Timeout | null = null;
+    private readonly BLUR_HOVER_DELAY = 250; // ms before auto-restore
+    
+    /**
+     * Handle click on blur placeholder to restore ContentView
+     */
+    private handleBlurPlaceholderClick = () => {
+        console.log('[Article] Blur placeholder clicked - restoring ContentView')
+        this.restoreContentView()
+    }
+    
+    /**
+     * Handle mouse move over blur placeholder - starts timer for auto-restore
+     */
+    private handleBlurPlaceholderMouseMove = () => {
+        // Reset timer on each mouse move
+        if (this.blurHoverTimer) {
+            clearTimeout(this.blurHoverTimer)
+        }
+        
+        this.blurHoverTimer = setTimeout(() => {
+            console.log('[Article] Blur hover timeout - auto-restoring ContentView')
+            this.restoreContentView()
+        }, this.BLUR_HOVER_DELAY)
+    }
+    
+    /**
+     * Handle mouse leaving blur placeholder - cancel auto-restore timer
+     */
+    private handleBlurPlaceholderMouseLeave = () => {
+        if (this.blurHoverTimer) {
+            clearTimeout(this.blurHoverTimer)
+            this.blurHoverTimer = null
         }
     }
+    
+    /**
+     * Restore ContentView after overlay interaction
+     */
+    private restoreContentView = () => {
+        if (!window.contentView) return
+        if (!this.contentViewHiddenForMenu) return
+        
+        // Clear hover timer
+        if (this.blurHoverTimer) {
+            clearTimeout(this.blurHoverTimer)
+            this.blurHoverTimer = null
+        }
+        
+        window.contentView.setVisible(true)
+        this.contentViewHiddenForMenu = false
+        this.setState({ menuBlurScreenshot: null })
+    }
+    
+    /**
+     * Handle mouse leaving the ContentView area
+     * Capture screenshot and hide ContentView to allow overlay interaction
+     */
+    private handleContentViewMouseLeave = async () => {
+        if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return
+        if (!window.contentView) return
+        if (this.contentViewHiddenForMenu) return  // Already hidden
+        
+        console.log('[Article] Mouse left ContentView area - hiding for overlay access')
+        try {
+            const screenshot = await window.contentView.captureScreen()
+            if (screenshot && this._isMounted) {
+                this.setState({ menuBlurScreenshot: screenshot })
+                console.log('[Article] Screenshot captured, length:', screenshot?.length)
+            }
+        } catch (e) {
+            console.error('[Article] Error capturing screenshot:', e)
+        }
+        
+        window.contentView.setVisible(false)
+        this.contentViewHiddenForMenu = true
+    }
+    
+    /**
+     * Handle mouse entering the ContentView area
+     * Restore ContentView when mouse returns to the area
+     */
+    private handleContentViewMouseEnter = () => {
+        if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return
+        if (!window.contentView) return
+        if (!this.contentViewHiddenForMenu) return  // Not hidden, nothing to do
+        
+        // Check if any Redux overlay is still active (menu, settings, etc.)
+        if (this.props.overlayActive) {
+            console.log('[Article] Mouse entered but Redux overlay active - staying hidden')
+            return
+        }
+        
+        // Check if any Fluent UI overlay is still visible
+        const fluentOverlay = document.querySelector('.ms-Layer:not(:empty), .ms-ContextualMenu, [role="menu"]')
+        if (fluentOverlay) {
+            console.log('[Article] Mouse entered but Fluent UI overlay active - staying hidden')
+            return
+        }
+        
+        console.log('[Article] Mouse entered ContentView area - restoring')
+        window.contentView.setVisible(true)
+        this.contentViewHiddenForMenu = false
+        
+        // Clear screenshot after a short delay
+        setTimeout(() => {
+            if (this._isMounted && !this.contentViewHiddenForMenu) {
+                this.setState({ menuBlurScreenshot: null })
+            }
+        }, 50)
+    }
+    
+    /**
+     * Global mouse move handler to detect when mouse enters/leaves ContentView area
+     * This is needed because the ContentView (native) sits above the placeholder div
+     * and captures mouse events when visible
+     */
+    private handleGlobalMouseMove = (e: MouseEvent) => {
+        if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return
+        if (!this.contentViewPlaceholderRef) return
+        
+        const rect = this.contentViewPlaceholderRef.getBoundingClientRect()
+        const isInsideContentView = 
+            e.clientX >= rect.left && 
+            e.clientX <= rect.right && 
+            e.clientY >= rect.top && 
+            e.clientY <= rect.bottom
+        
+        // Only act when ContentView is hidden (for overlay access)
+        // When ContentView is visible, it captures mouse events and we don't receive them here
+        if (this.contentViewHiddenForMenu && isInsideContentView) {
+            // Mouse moved into ContentView area while hidden - try to restore
+            this.handleContentViewMouseEnter()
+        }
+        
+        // Note: We can't detect mouse leaving when ContentView is visible
+        // because the native view captures mouse events
+    }
+    
+    private contentViewRestoreTimeout: NodeJS.Timeout | null = null
     
     // Focus webview after full content is loaded
     private focusWebviewAfterLoad = () => {
@@ -1561,6 +1745,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             window.contentView.setVisible(true)
             this.contentViewHiddenForMenu = false
         }
+        
+        // Clear any pending restore timeout
+        if (this.contentViewRestoreTimeout) {
+            clearTimeout(this.contentViewRestoreTimeout)
+            this.contentViewRestoreTimeout = null
+        }
+        
+        // Note: No global listeners to clean up - restoration is click-based
         
         // Cookies speichern bevor die Komponente zerstört wird
         if (this.props.source.persistCookies) {
@@ -2462,7 +2654,8 @@ window.__articleData = ${JSON.stringify({
                         flex: 1, 
                         width: "100%",
                         position: "relative",
-                        visibility: this.state.webviewVisible ? "visible" : "hidden",
+                        // Show placeholder when either webview is visible OR we have a blur screenshot
+                        visibility: (this.state.webviewVisible || this.state.menuBlurScreenshot) ? "visible" : "hidden",
                         background: "var(--neutralLighter, #f3f2f1)"
                     }}
                     ref={(el) => {
@@ -2472,8 +2665,11 @@ window.__articleData = ${JSON.stringify({
                             this.initializeContentView();
                         }
                     }}
+                    // Note: onMouseEnter/Leave don't work here because the native ContentView 
+                    // sits ABOVE this div and captures mouse events. We use a global mousemove
+                    // listener instead (see handleGlobalMouseMove)
                 >
-                    {/* Blur placeholder shown when menu is open */}
+                    {/* Blur placeholder shown when overlay is active - click or hover to restore */}
                     {this.state.menuBlurScreenshot && (
                         <div
                             id="article-blur-placeholder"
@@ -2484,11 +2680,17 @@ window.__articleData = ${JSON.stringify({
                                 right: 0,
                                 bottom: 0,
                                 backgroundImage: `url(${this.state.menuBlurScreenshot})`,
-                                backgroundSize: "cover",
-                                backgroundPosition: "center",
+                                backgroundSize: "100% 100%",
+                                backgroundPosition: "top left",
+                                backgroundRepeat: "no-repeat",
                                 filter: "blur(8px) brightness(0.9)",
                                 zIndex: 10,
+                                cursor: "pointer",
                             }}
+                            onClick={this.handleBlurPlaceholderClick}
+                            onMouseMove={this.handleBlurPlaceholderMouseMove}
+                            onMouseLeave={this.handleBlurPlaceholderMouseLeave}
+                            title="Klicken oder kurz warten zum Zurückkehren"
                         />
                     )}
                 </div>

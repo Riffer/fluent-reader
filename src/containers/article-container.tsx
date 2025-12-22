@@ -34,15 +34,23 @@ const getSource = (state: RootState, props: ArticleContainerProps) =>
     state.sources[state.items[props.itemId].source]
 const getLocale = (state: RootState) => state.app.locale
 const getMenuOpen = (state: RootState) => state.app.menu
+const getSettingsOpen = (state: RootState) => state.app.settings.display
+const getLogMenuOpen = (state: RootState) => state.app.logMenu.display
+const getContextMenuType = (state: RootState) => state.app.contextMenu.type
+
+// Import ContextMenuType for comparison
+import { ContextMenuType } from "../scripts/models/app"
 
 const makeMapStateToProps = () => {
     return createSelector(
-        [getItem, getSource, getLocale, getMenuOpen],
-        (item, source, locale, menuOpen) => ({
+        [getItem, getSource, getLocale, getMenuOpen, getSettingsOpen, getLogMenuOpen, getContextMenuType],
+        (item, source, locale, menuOpen, settingsOpen, logMenuOpen, contextMenuType) => ({
             item: item,
             source: source,
             locale: locale,
             menuOpen: menuOpen,
+            // Combined flag: any major overlay is active
+            overlayActive: menuOpen || settingsOpen || logMenuOpen || contextMenuType !== ContextMenuType.Hidden,
         })
     )
 }
