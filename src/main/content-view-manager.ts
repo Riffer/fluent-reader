@@ -323,6 +323,32 @@ export class ContentViewManager {
                 this.contentView.webContents.focus()
             }
         })
+        
+        // Capture screenshot of content view
+        ipcMain.handle("content-view-capture-screen", async () => {
+            return await this.captureScreen()
+        })
+    }
+    
+    /**
+     * Capture screenshot of content view
+     * Returns base64 data URL or null if not available
+     */
+    public async captureScreen(): Promise<string | null> {
+        if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
+            return null
+        }
+        
+        try {
+            const image = await this.contentView.webContents.capturePage()
+            if (image.isEmpty()) {
+                return null
+            }
+            return image.toDataURL()
+        } catch (e) {
+            console.error("[ContentViewManager] captureScreen error:", e)
+            return null
+        }
     }
 
     /**

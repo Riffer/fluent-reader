@@ -27,6 +27,7 @@ type ArticleProps = {
     item: RSSItem
     source: RSSSource
     locale: string
+    menuOpen: boolean
     shortcuts: (item: RSSItem, e: KeyboardEvent) => void
     dismiss: () => void
     offsetItem: (offset: number) => void
@@ -79,6 +80,7 @@ type ArticleState = {
     inputModeEnabled: boolean  // Eingabe-Modus: Shortcuts deaktiviert für Login etc.
     showP2PShareDialog: boolean
     visualZoomEnabled: boolean  // Visual Zoom (Pinch-to-Zoom) ohne Mobile-Modus
+    menuBlurScreenshot: string | null  // Screenshot for blur placeholder when menu is open
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -95,6 +97,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private contentViewPlaceholderRef: HTMLDivElement | null = null
     private contentViewCleanup: (() => void)[] = []
     private resizeObserver: ResizeObserver | null = null
+    private menuHoverListener: ((e: MouseEvent) => void) | null = null
+    private contentViewHiddenForMenu: boolean = false  // Track if we hid ContentView for menu access
 
     constructor(props: ArticleProps) {
         super(props)
@@ -122,6 +126,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             inputModeEnabled: false,
             showP2PShareDialog: false,
             visualZoomEnabled: window.settings.getVisualZoom(),
+            menuBlurScreenshot: null,
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -396,6 +401,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Show ContentView
             window.contentView.setVisible(true);
             
+            // Setup menu hover detection to temporarily hide ContentView
+            // This allows access to the left menu which is under the native ContentView
+            this.setupMenuHoverDetection();
+            
             // Focus
             window.contentView.focus();
             
@@ -403,6 +412,43 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         } catch (e) {
             console.error('[ContentView] Error initializing:', e);
         }
+    }
+    
+    /**
+     * Setup mouse listener to detect when user hovers over menu area
+     * Temporarily hides ContentView so menu can be accessed
+     */
+    private setupMenuHoverDetection = () => {
+        if (this.menuHoverListener) return;  // Already setup
+        
+        const MENU_AREA_WIDTH = 50;  // pixels from left edge that trigger menu access
+        
+        this.menuHoverListener = (e: MouseEvent) => {
+            if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return;
+            if (!window.contentView) return;
+            
+            const inMenuArea = e.clientX < MENU_AREA_WIDTH;
+            
+            if (inMenuArea && !this.contentViewHiddenForMenu) {
+                // Mouse entered menu area - hide ContentView
+                this.contentViewHiddenForMenu = true;
+                window.contentView.setVisible(false);
+                console.log('[ContentView] Hidden for menu access');
+            } else if (!inMenuArea && this.contentViewHiddenForMenu) {
+                // Mouse left menu area - show ContentView again
+                this.contentViewHiddenForMenu = false;
+                window.contentView.setVisible(true);
+                console.log('[ContentView] Shown after menu access');
+            }
+        };
+        
+        document.addEventListener('mousemove', this.menuHoverListener);
+        this.contentViewCleanup.push(() => {
+            if (this.menuHoverListener) {
+                document.removeEventListener('mousemove', this.menuHoverListener);
+                this.menuHoverListener = null;
+            }
+        });
     }
 
     // Input Mode: Sendet Status an WebView um Keyboard-Navigation zu deaktivieren
@@ -1439,6 +1485,57 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 loadFull: loadFull,
             })
         }
+        
+        // Handle menu open/close for ContentView visibility
+        if (this.state.visualZoomEnabled && prevProps.menuOpen !== this.props.menuOpen) {
+            this.handleMenuVisibilityChange(this.props.menuOpen)
+        }
+    }
+    
+    /**
+     * Handle menu visibility change for ContentView
+     * When menu opens: capture screenshot, show blur placeholder, hide ContentView
+     * When menu closes: show ContentView, clear screenshot
+     */
+    private handleMenuVisibilityChange = async (menuOpen: boolean) => {
+        if (!window.contentView) return
+        
+        if (menuOpen) {
+            // Menu is opening - capture screenshot and hide ContentView
+            console.log('[Article] Menu opening - capturing screenshot for blur placeholder')
+            try {
+                const screenshot = await window.contentView.captureScreen()
+                if (screenshot && this._isMounted) {
+                    this.setState({ menuBlurScreenshot: screenshot })
+                    // Small delay to ensure React renders the placeholder before hiding ContentView
+                    setTimeout(() => {
+                        if (this._isMounted && this.props.menuOpen) {
+                            window.contentView.setVisible(false)
+                            this.contentViewHiddenForMenu = true
+                            console.log('[Article] ContentView hidden for menu access')
+                        }
+                    }, 16)
+                }
+            } catch (e) {
+                console.error('[Article] Error capturing screenshot:', e)
+                // Even without screenshot, hide ContentView
+                window.contentView.setVisible(false)
+                this.contentViewHiddenForMenu = true
+            }
+        } else {
+            // Menu is closing - show ContentView and clear screenshot
+            console.log('[Article] Menu closing - restoring ContentView')
+            if (this.contentViewHiddenForMenu) {
+                window.contentView.setVisible(true)
+                this.contentViewHiddenForMenu = false
+            }
+            // Clear screenshot after a short delay (for smooth transition)
+            setTimeout(() => {
+                if (this._isMounted && !this.props.menuOpen) {
+                    this.setState({ menuBlurScreenshot: null })
+                }
+            }, 100)
+        }
     }
     
     // Focus webview after full content is loaded
@@ -1458,6 +1555,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Cleanup ContentView
         this.cleanupContentView()
+        
+        // Restore ContentView visibility if hidden for menu
+        if (this.contentViewHiddenForMenu && window.contentView) {
+            window.contentView.setVisible(true)
+            this.contentViewHiddenForMenu = false
+        }
         
         // Cookies speichern bevor die Komponente zerstört wird
         if (this.props.source.persistCookies) {
@@ -2358,6 +2461,7 @@ window.__articleData = ${JSON.stringify({
                     style={{ 
                         flex: 1, 
                         width: "100%",
+                        position: "relative",
                         visibility: this.state.webviewVisible ? "visible" : "hidden",
                         background: "var(--neutralLighter, #f3f2f1)"
                     }}
@@ -2368,7 +2472,26 @@ window.__articleData = ${JSON.stringify({
                             this.initializeContentView();
                         }
                     }}
-                />
+                >
+                    {/* Blur placeholder shown when menu is open */}
+                    {this.state.menuBlurScreenshot && (
+                        <div
+                            id="article-blur-placeholder"
+                            style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                backgroundImage: `url(${this.state.menuBlurScreenshot})`,
+                                backgroundSize: "cover",
+                                backgroundPosition: "center",
+                                filter: "blur(8px) brightness(0.9)",
+                                zIndex: 10,
+                            }}
+                        />
+                    )}
+                </div>
             ) : ((!this.state.loadFull && !this.state.loadWebpage) || (this.state.loadFull && this.state.fullContent) || this.state.loadWebpage) ? (
                 <webview
                     id="article"

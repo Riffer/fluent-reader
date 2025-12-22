@@ -155,6 +155,14 @@ export const contentViewBridge = {
     focus: (): void => {
         ipcRenderer.send("content-view-focus")
     },
+    
+    /**
+     * Capture screenshot of content view
+     * Returns base64 data URL of the screenshot
+     */
+    captureScreen: (): Promise<string | null> => {
+        return ipcRenderer.invoke("content-view-capture-screen")
+    },
 
     // ===== Event Listeners =====
     

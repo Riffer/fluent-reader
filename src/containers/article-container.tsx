@@ -33,14 +33,16 @@ const getItem = (state: RootState, props: ArticleContainerProps) =>
 const getSource = (state: RootState, props: ArticleContainerProps) =>
     state.sources[state.items[props.itemId].source]
 const getLocale = (state: RootState) => state.app.locale
+const getMenuOpen = (state: RootState) => state.app.menu
 
 const makeMapStateToProps = () => {
     return createSelector(
-        [getItem, getSource, getLocale],
-        (item, source, locale) => ({
+        [getItem, getSource, getLocale, getMenuOpen],
+        (item, source, locale, menuOpen) => ({
             item: item,
             source: source,
             locale: locale,
+            menuOpen: menuOpen,
         })
     )
 }
