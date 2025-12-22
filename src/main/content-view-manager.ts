@@ -9,7 +9,7 @@
  * - Article content runs in WebContentsView (attached to main window)
  * - Communication via IPC between renderer and content view
  */
-import { WebContentsView, ipcMain, app, session } from "electron"
+import { WebContentsView, ipcMain, app, session, Input } from "electron"
 import type { BrowserWindow } from "electron"
 import path from "path"
 
@@ -28,12 +28,17 @@ export class ContentViewManager {
     private isVisible: boolean = false
     private bounds: ContentViewBounds = { x: 0, y: 0, width: 800, height: 600 }
     private visualZoomEnabled: boolean = false
+    private mobileMode: boolean = false
+    private pageLoaded: boolean = false  // Track if a page has been loaded (for safe device emulation)
+    private mobileUserAgent: string = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     
     // Preload script path
+    // In dev mode, webpack puts electron.js in dist/, so app.getAppPath() = fluent-reader/dist
+    // In packaged mode, app.getAppPath() = resources/app, and preload is in dist/
     private get preloadPath(): string {
         return path.join(
             app.getAppPath(),
-            app.isPackaged ? "dist/webview-preload.js" : "src/renderer/webview-preload.js"
+            app.isPackaged ? "dist/webview-preload.js" : "webview-preload.js"
         )
     }
     
@@ -60,37 +65,53 @@ export class ContentViewManager {
      * Create the WebContentsView with proper configuration
      */
     private createContentView(): void {
-        // Create sandbox session for content isolation
-        const sandboxSession = session.fromPartition("sandbox")
-        
-        this.contentView = new WebContentsView({
-            webPreferences: {
-                preload: this.preloadPath,
-                contextIsolation: true,
-                sandbox: true,
-                nodeIntegration: false,
-                spellcheck: false,
-                partition: "sandbox",
-                // Disable webview tag in content view (security)
-                webviewTag: false,
+        try {
+            console.log("[ContentViewManager] Creating WebContentsView...")
+            
+            // Create sandbox session for content isolation (same as webview tag uses)
+            const sandboxSession = session.fromPartition("sandbox")
+            console.log("[ContentViewManager] Sandbox session created")
+            
+            this.contentView = new WebContentsView({
+                webPreferences: {
+                    preload: this.preloadPath,
+                    contextIsolation: true,
+                    sandbox: true,
+                    nodeIntegration: false,
+                    spellcheck: false,
+                    session: sandboxSession,  // Use the sandbox session
+                    // Disable webview tag in content view (security)
+                    webviewTag: false,
+                }
+            })
+            console.log("[ContentViewManager] WebContentsView instance created")
+            
+            // Set initial bounds (hidden off-screen)
+            this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
+            console.log("[ContentViewManager] Initial bounds set")
+            
+            // Add to parent window's content view
+            if (this.parentWindow && !this.parentWindow.isDestroyed()) {
+                this.parentWindow.contentView.addChildView(this.contentView)
+                console.log("[ContentViewManager] Added to parent window")
             }
-        })
-        
-        // Set initial bounds (hidden off-screen)
-        this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
-        
-        // Add to parent window's content view
-        if (this.parentWindow && !this.parentWindow.isDestroyed()) {
-            this.parentWindow.contentView.addChildView(this.contentView)
+            
+            // Setup navigation events
+            this.setupNavigationEvents()
+            console.log("[ContentViewManager] Navigation events setup")
+            
+            // Setup context menu
+            this.setupContextMenu()
+            console.log("[ContentViewManager] Context menu setup")
+            
+            // Setup keyboard events forwarding
+            this.setupKeyboardEvents()
+            console.log("[ContentViewManager] Keyboard events setup")
+            
+            console.log("[ContentViewManager] WebContentsView created successfully")
+        } catch (e) {
+            console.error("[ContentViewManager] Error creating WebContentsView:", e)
         }
-        
-        // Setup navigation events
-        this.setupNavigationEvents()
-        
-        // Setup context menu
-        this.setupContextMenu()
-        
-        console.log("[ContentViewManager] WebContentsView created")
     }
     
     /**
@@ -111,12 +132,18 @@ export class ContentViewManager {
         
         wc.on("did-finish-load", () => {
             console.log("[ContentViewManager] Page loaded:", this.currentUrl)
+            this.pageLoaded = true  // Now safe to apply device emulation
             this.sendToRenderer("content-view-loaded", this.currentUrl)
             
-            // Re-enable visual zoom after navigation
+            // Send visual zoom status to preload BEFORE applying device emulation
+            // This ensures the preload doesn't create CSS zoom wrapper
             if (this.visualZoomEnabled) {
-                this.enableVisualZoom()
+                wc.send('set-visual-zoom-mode', true)
+                console.log("[ContentViewManager] Sent set-visual-zoom-mode after page load")
             }
+            
+            // Apply visual zoom AFTER page loads (like POC does)
+            this.applyVisualZoomIfEnabled()
         })
         
         wc.on("did-fail-load", (event, errorCode, errorDescription, validatedURL) => {
@@ -162,21 +189,41 @@ export class ContentViewManager {
     }
     
     /**
+     * Setup keyboard event forwarding to renderer
+     */
+    private setupKeyboardEvents(): void {
+        if (!this.contentView) return
+        
+        const wc = this.contentView.webContents
+        
+        // Forward keyboard events to renderer for shortcut handling
+        wc.on("before-input-event", (event, input) => {
+            // Forward to renderer for processing
+            this.sendToRenderer("content-view-input", input)
+        })
+    }
+    
+    /**
      * Setup IPC handlers for renderer communication
      */
     private setupIpcHandlers(): void {
+        console.log("[ContentViewManager] Setting up IPC handlers...")
+        
         // Navigate to URL
         ipcMain.handle("content-view-navigate", async (event, url: string) => {
+            console.log("[ContentViewManager] IPC: navigate to", url)
             return this.navigate(url)
         })
         
         // Update bounds
         ipcMain.on("content-view-set-bounds", (event, bounds: ContentViewBounds) => {
+            console.log("[ContentViewManager] IPC: set bounds", bounds)
             this.setBounds(bounds)
         })
         
         // Show/hide content view
         ipcMain.on("content-view-set-visible", (event, visible: boolean) => {
+            console.log("[ContentViewManager] IPC: set visible", visible)
             this.setVisible(visible)
         })
         
@@ -192,12 +239,14 @@ export class ContentViewManager {
         
         // Enable/disable visual zoom
         ipcMain.on("content-view-set-visual-zoom", (event, enabled: boolean) => {
+            console.log("[ContentViewManager] IPC: set visual zoom", enabled)
             this.visualZoomEnabled = enabled
             if (enabled) {
                 this.enableVisualZoom()
             } else {
                 this.disableVisualZoom()
             }
+            console.log("[ContentViewManager] IPC: visual zoom done")
         })
         
         // Get webContents ID
@@ -238,28 +287,71 @@ export class ContentViewManager {
                 this.contentView.webContents.setUserAgent(userAgent)
             }
         })
+        
+        // Load HTML content
+        ipcMain.handle("content-view-load-html", async (event, html: string, baseURL?: string) => {
+            return this.loadHTML(html, baseURL)
+        })
+        
+        // Can go back/forward queries
+        ipcMain.handle("content-view-can-go-back", () => {
+            return this.contentView?.webContents?.canGoBack() ?? false
+        })
+        
+        ipcMain.handle("content-view-can-go-forward", () => {
+            return this.contentView?.webContents?.canGoForward() ?? false
+        })
+        
+        // Get current URL
+        ipcMain.handle("content-view-get-url", () => {
+            return this.contentView?.webContents?.getURL() ?? ""
+        })
+        
+        // Stop loading
+        ipcMain.handle("content-view-stop", () => {
+            this.contentView?.webContents?.stop()
+        })
+        
+        // Set mobile mode
+        ipcMain.on("content-view-set-mobile-mode", (event, enabled: boolean) => {
+            this.setMobileMode(enabled)
+        })
+        
+        // Focus content view
+        ipcMain.on("content-view-focus", () => {
+            if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
+                this.contentView.webContents.focus()
+            }
+        })
     }
-    
+
     /**
      * Navigate content view to URL
      */
     public navigate(url: string): boolean {
+        console.log("[ContentViewManager] navigate called:", url)
         if (!this.contentView) {
             console.error("[ContentViewManager] Cannot navigate - not initialized")
             return false
         }
         
-        this.currentUrl = url
-        console.log("[ContentViewManager] Navigating to:", url)
-        
-        this.contentView.webContents.loadURL(url).catch(err => {
-            // Ignore aborted navigations
-            if (err.code !== "ERR_ABORTED") {
-                console.error("[ContentViewManager] Navigation error:", err)
-            }
-        })
-        
-        return true
+        try {
+            this.currentUrl = url
+            console.log("[ContentViewManager] Navigating to:", url)
+            
+            this.contentView.webContents.loadURL(url).catch(err => {
+                // Ignore aborted navigations
+                if (err.code !== "ERR_ABORTED") {
+                    console.error("[ContentViewManager] Navigation error:", err)
+                }
+            })
+            
+            console.log("[ContentViewManager] loadURL called successfully")
+            return true
+        } catch (e) {
+            console.error("[ContentViewManager] navigate error:", e)
+            return false
+        }
     }
     
     /**
@@ -276,6 +368,8 @@ export class ContentViewManager {
     
     /**
      * Update content view bounds
+     * Also reapplies device emulation with new size (like POC's updateLayout)
+     * But ONLY if a page has been loaded (to avoid crashes)
      */
     public setBounds(bounds: ContentViewBounds): void {
         this.bounds = bounds
@@ -283,6 +377,11 @@ export class ContentViewManager {
         if (this.contentView && this.isVisible) {
             this.contentView.setBounds(bounds)
             console.log("[ContentViewManager] Bounds updated:", bounds)
+            
+            // Only reapply device emulation if page is loaded (like POC)
+            if (this.pageLoaded) {
+                this.applyDeviceEmulation()
+            }
         }
     }
     
@@ -290,41 +389,94 @@ export class ContentViewManager {
      * Show or hide content view
      */
     public setVisible(visible: boolean): void {
+        console.log("[ContentViewManager] setVisible called:", visible)
         this.isVisible = visible
         
-        if (!this.contentView) return
+        if (!this.contentView) {
+            console.log("[ContentViewManager] setVisible: no contentView!")
+            return
+        }
         
-        if (visible) {
-            this.contentView.setBounds(this.bounds)
-            console.log("[ContentViewManager] Shown at:", this.bounds)
-        } else {
-            // Move off-screen to hide
-            this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
-            console.log("[ContentViewManager] Hidden")
+        try {
+            if (visible) {
+                console.log("[ContentViewManager] setVisible: applying bounds", this.bounds)
+                this.contentView.setBounds(this.bounds)
+                console.log("[ContentViewManager] Shown at:", this.bounds)
+            } else {
+                // Move off-screen to hide
+                this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
+                console.log("[ContentViewManager] Hidden")
+            }
+        } catch (e) {
+            console.error("[ContentViewManager] setVisible error:", e)
         }
     }
     
     /**
      * Enable visual zoom (pinch-to-zoom) via device emulation
-     * This is the KEY feature that enables true Chrome-like zoom
+     * Only sets the flag - actual emulation is applied after did-finish-load
      */
     public enableVisualZoom(): void {
-        if (!this.contentView) return
+        console.log("[ContentViewManager] enableVisualZoom called - setting flag only")
+        this.visualZoomEnabled = true
+        
+        // Notify preload to disable CSS-based zoom wrapper
+        if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
+            this.contentView.webContents.send('set-visual-zoom-mode', true)
+            console.log("[ContentViewManager] Sent set-visual-zoom-mode to preload")
+        }
+        
+        // Device emulation will be applied in did-finish-load handler
+        // DO NOT call applyDeviceEmulation here - causes crash on empty webContents!
+    }
+    
+    /**
+     * Apply device emulation for visual zoom
+     * ONLY called after did-finish-load (like in POC)
+     * This is the KEY to enabling pinch-to-zoom!
+     */
+    private applyDeviceEmulation(): void {
+        if (!this.visualZoomEnabled || !this.contentView) {
+            return
+        }
         
         const wc = this.contentView.webContents
+        if (!wc || wc.isDestroyed()) {
+            console.log("[ContentViewManager] applyDeviceEmulation: webContents not ready or destroyed")
+            return
+        }
+        
         const { width, height } = this.bounds
         
-        wc.enableDeviceEmulation({
-            screenPosition: "mobile",  // THIS enables visual zoom!
-            screenSize: { width, height },
-            viewSize: { width, height },
-            viewPosition: { x: 0, y: 0 },
-            deviceScaleFactor: 1,
-            scale: 1,
-        })
+        // Skip if bounds are invalid (hidden off-screen)
+        if (width <= 0 || height <= 0) {
+            console.log("[ContentViewManager] applyDeviceEmulation: invalid bounds, skipping")
+            return
+        }
         
-        this.visualZoomEnabled = true
-        console.log("[ContentViewManager] Visual zoom enabled:", width, "x", height)
+        try {
+            console.log("[ContentViewManager] applyDeviceEmulation:", width, "x", height)
+            
+            wc.enableDeviceEmulation({
+                screenPosition: 'mobile',  // THIS is what enables visual zoom!
+                screenSize: { width, height },
+                viewSize: { width, height },
+                viewPosition: { x: 0, y: 0 },
+                deviceScaleFactor: 1,
+                scale: 1,
+            })
+            
+            console.log("[ContentViewManager] Device emulation enabled:", width, "x", height)
+        } catch (e) {
+            console.error("[ContentViewManager] applyDeviceEmulation error:", e)
+        }
+    }
+    
+    /**
+     * Called after page load - reapply device emulation (like POC does)
+     */
+    private applyVisualZoomIfEnabled(): void {
+        this.applyDeviceEmulation()
     }
     
     /**
@@ -336,6 +488,51 @@ export class ContentViewManager {
         this.contentView.webContents.disableDeviceEmulation()
         this.visualZoomEnabled = false
         console.log("[ContentViewManager] Visual zoom disabled")
+    }
+    
+    /**
+     * Set mobile mode (changes viewport + user agent)
+     */
+    public setMobileMode(enabled: boolean): void {
+        if (!this.contentView) return
+        
+        this.mobileMode = enabled
+        const wc = this.contentView.webContents
+        const { width, height } = this.bounds
+        
+        if (enabled) {
+            // Set mobile user agent
+            wc.setUserAgent(this.mobileUserAgent)
+            
+            // Use fixed mobile viewport (768px width like iPhone)
+            const mobileWidth = Math.min(768, width)
+            
+            wc.enableDeviceEmulation({
+                screenPosition: "mobile",
+                screenSize: { width: mobileWidth, height },
+                viewSize: { width: mobileWidth, height },
+                viewPosition: { x: 0, y: 0 },
+                deviceScaleFactor: 1,
+                scale: 1,
+            })
+            
+            console.log("[ContentViewManager] Mobile mode enabled:", mobileWidth, "x", height)
+        } else {
+            // Reset to desktop
+            wc.setUserAgent("")
+            
+            if (this.visualZoomEnabled) {
+                // Keep visual zoom if enabled
+                this.enableVisualZoom()
+            } else {
+                wc.disableDeviceEmulation()
+            }
+            
+            console.log("[ContentViewManager] Mobile mode disabled")
+        }
+        
+        // Inform preload script
+        this.sendToContentView("set-mobile-mode", enabled)
     }
     
     /**

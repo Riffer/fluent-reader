@@ -217,8 +217,59 @@ try {
     return wrapper.querySelector('#fr-zoom-container');
   }
 
+  /**
+   * Entfernt den Zoom-Container und stellt die originale DOM-Struktur wieder her
+   * Wird aufgerufen wenn Visual Zoom aktiviert wird
+   */
+  function removeZoomContainer() {
+    const wrapper = document.getElementById('fr-zoom-wrapper');
+    const container = document.getElementById('fr-zoom-container');
+    const style = document.getElementById('fr-zoom-style');
+    
+    if (!wrapper || !container) {
+      console.log('[Preload] removeZoomContainer: no container found');
+      return;
+    }
+    
+    console.log('[Preload] Removing zoom container for Visual Zoom mode');
+    
+    // Bewege alle Children zurück zum Body
+    while (container.firstChild) {
+      document.body.appendChild(container.firstChild);
+    }
+    
+    // Entferne Wrapper und Style
+    wrapper.remove();
+    if (style) style.remove();
+    
+    // Reset HTML und Body Styles
+    document.documentElement.style.margin = '';
+    document.documentElement.style.padding = '';
+    document.documentElement.style.overflow = '';
+    document.documentElement.style.width = '';
+    document.documentElement.style.height = '';
+    
+    document.body.style.margin = '';
+    document.body.style.padding = '';
+    document.body.style.overflow = '';
+    document.body.style.width = '';
+    document.body.style.height = '';
+    document.body.style.display = '';
+    
+    console.log('[Preload] Zoom container removed - native Visual Zoom should work now');
+  }
+
   // Wende Zoom auf Container an - Zoom kann von einem beliebigen Punkt aus erfolgen
+  // WICHTIG: Bei Visual Zoom (Device Emulation) wird diese Funktion NICHT ausgeführt,
+  // damit der native Browser-Pinch-Zoom funktioniert!
   function applyZoom(newZoomLevel, options = { notify: true, zoomPointX: null, zoomPointY: null, preserveScroll: true }) {
+    // Bei Visual Zoom: KEINE CSS-basierte Zoom-Manipulation!
+    // Der native Browser-Zoom (via enableDeviceEmulation) übernimmt.
+    if (visualZoomEnabled) {
+      console.log('[Preload] applyZoom skipped - Visual Zoom is enabled');
+      return;
+    }
+    
     // Stelle sicher, dass der Container existiert
     const container = ensureZoomContainer();
     const wrapper = container.parentElement;
@@ -358,6 +409,13 @@ try {
     const wasEnabled = visualZoomEnabled;
     visualZoomEnabled = !!enabled;
     console.log('[Preload] Visual Zoom mode changed:', wasEnabled ? 'ON' : 'OFF', '->', visualZoomEnabled ? 'ON' : 'OFF');
+    
+    // Wenn Visual Zoom aktiviert wird, entferne den CSS Zoom-Container
+    // damit der native Browser-Pinch-Zoom (via enableDeviceEmulation) funktioniert
+    if (visualZoomEnabled) {
+      removeZoomContainer();
+    }
+    
     if (wasEnabled !== visualZoomEnabled) {
       // Zeige Statusmeldung
       const wasOverlayEnabled = showZoomOverlayEnabled;

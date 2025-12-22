@@ -29,6 +29,8 @@ const limitedIpcRenderer = {
             "content-view-send",
             "content-view-set-visual-zoom",
             "content-view-set-user-agent",
+            "content-view-set-mobile-mode",
+            "content-view-focus",
         ]
         if (allowedSendChannels.includes(channel)) {
             ipcRenderer.send(channel, ...args)
@@ -48,6 +50,7 @@ const limitedIpcRenderer = {
             "content-view-navigated",
             "content-view-title",
             "content-view-context-menu",
+            "content-view-input",
         ]
         if (allowedOnChannels.includes(channel)) {
             ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
@@ -76,6 +79,11 @@ const limitedIpcRenderer = {
             "content-view-reload",
             "content-view-go-back",
             "content-view-go-forward",
+            "content-view-load-html",
+            "content-view-can-go-back",
+            "content-view-can-go-forward",
+            "content-view-get-url",
+            "content-view-stop",
         ]
         if (allowedInvokeChannels.includes(channel)) {
             return ipcRenderer.invoke(channel, ...args)

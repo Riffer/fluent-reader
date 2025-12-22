@@ -1,10 +1,37 @@
-import { app, ipcMain, Menu, nativeTheme, powerMonitor } from "electron"
+import { app, ipcMain, Menu, nativeTheme, powerMonitor, crashReporter } from "electron"
 import { ThemeSettings, SchemaTypes } from "./schema-types"
 import { store } from "./main/settings"
 import performUpdate from "./main/update-scripts"
 import { WindowManager } from "./main/window"
 import { initP2P, registerP2PIpcHandlers } from "./main/p2p-share"
 import { initP2PLan, registerP2PLanIpcHandlers, shutdownP2P, onSystemSuspend, onSystemResume } from "./main/p2p-lan"
+
+// ===== Chromium-Flags für Visual Zoom (Pinch-to-Zoom) =====
+// WICHTIG: Diese müssen VOR app.whenReady() gesetzt werden!
+app.commandLine.appendSwitch('enable-pinch');
+app.commandLine.appendSwitch('enable-viewport');
+app.commandLine.appendSwitch('enable-features', 'PinchToZoom,TouchpadAndWheelScrollLatching');
+console.log('[Electron] Visual Zoom Chromium flags enabled');
+
+// ===== Crash Handler und Debugging =====
+// Fange unerwartete Exceptions ab
+process.on('uncaughtException', (error) => {
+    console.error('[CRASH] Uncaught Exception:', error)
+    console.error('[CRASH] Stack:', error.stack)
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[CRASH] Unhandled Rejection at:', promise, 'reason:', reason)
+})
+
+// Aktiviere Crash Reporter für detaillierte Crash-Dumps
+crashReporter.start({
+    productName: 'FluentReader',
+    submitURL: '', // Keine URL - speichert nur lokal
+    uploadToServer: false,
+    compress: false,
+})
+console.log('[CrashReporter] Crash dumps will be saved to:', app.getPath('crashDumps'))
 
 if (!process.mas) {
     const locked = app.requestSingleInstanceLock()

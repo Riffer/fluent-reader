@@ -90,6 +90,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private _isMounted = false
     private cookieSaveTimeout: NodeJS.Timeout | null = null  // Debounce für Cookie-Speicherung
     private lastCookieSaveTime: number = 0  // Timestamp der letzten Cookie-Speicherung
+    
+    // ContentView references and cleanup
+    private contentViewPlaceholderRef: HTMLDivElement | null = null
+    private contentViewCleanup: (() => void)[] = []
+    private resizeObserver: ResizeObserver | null = null
 
     constructor(props: ArticleProps) {
         super(props)
@@ -247,6 +252,156 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         } catch (e) {
             console.error('[VisualZoom] Error disabling emulation:', e);
             return false;
+        }
+    }
+
+    // ===== ContentView Methods (WebContentsView for Visual Zoom) =====
+    
+    /**
+     * Setup ContentView event listeners
+     */
+    private setupContentViewListeners = () => {
+        console.log('[ContentView] Setting up listeners');
+        
+        // Loading state
+        const unsubLoading = window.contentView.onLoading((loading) => {
+            if (!loading) {
+                this.setState({ loaded: true });
+            }
+        });
+        this.contentViewCleanup.push(unsubLoading);
+        
+        // Error handling
+        const unsubError = window.contentView.onError((error) => {
+            console.error('[ContentView] Load error:', error);
+            this.setState({ 
+                error: true, 
+                errorDescription: error.errorDescription 
+            });
+        });
+        this.contentViewCleanup.push(unsubError);
+        
+        // Context menu
+        const unsubContextMenu = window.contentView.onContextMenu((params) => {
+            const pos: [number, number] = [params.x, params.y];
+            if (params.selectionText) {
+                this.props.textMenu(pos, params.selectionText, params.linkURL);
+            } else if (params.srcURL && params.mediaType === "image") {
+                this.props.imageMenu(pos);
+            } else {
+                this.props.dismissContextMenu();
+            }
+        });
+        this.contentViewCleanup.push(unsubContextMenu);
+        
+        // Keyboard input forwarding
+        const unsubInput = window.contentView.onInput((input) => {
+            this.keyDownHandler(input);
+        });
+        this.contentViewCleanup.push(unsubInput);
+        
+        // Navigation (for cookie persistence)
+        const unsubNavigated = window.contentView.onNavigated((url) => {
+            if (this.props.source.persistCookies && this.state.loadWebpage) {
+                console.log("[CookiePersist] ContentView: Navigation to:", url);
+                this.savePersistedCookiesDebounced();
+            }
+        });
+        this.contentViewCleanup.push(unsubNavigated);
+    }
+    
+    /**
+     * Cleanup ContentView listeners and hide it
+     */
+    private cleanupContentView = () => {
+        console.log('[ContentView] Cleaning up');
+        
+        // Remove all event listeners
+        this.contentViewCleanup.forEach(cleanup => cleanup());
+        this.contentViewCleanup = [];
+        
+        // Stop ResizeObserver
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+            this.resizeObserver = null;
+        }
+        
+        // Hide ContentView (with null check)
+        if (window.contentView) {
+            window.contentView.setVisible(false);
+        }
+    }
+    
+    /**
+     * Update ContentView bounds based on placeholder position
+     */
+    private updateContentViewBounds = () => {
+        if (!this.contentViewPlaceholderRef) return;
+        if (!window.contentView) return;
+        
+        const rect = this.contentViewPlaceholderRef.getBoundingClientRect();
+        const bounds = {
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+        };
+        
+        console.log('[ContentView] Updating bounds:', bounds);
+        window.contentView.setBounds(bounds);
+    }
+    
+    /**
+     * Initialize ContentView for displaying article content
+     */
+    private initializeContentView = async () => {
+        if (!this.contentViewPlaceholderRef) return;
+        
+        // Check if contentView bridge is available
+        if (!window.contentView) {
+            console.error('[ContentView] contentView bridge not available!');
+            return;
+        }
+        
+        console.log('[ContentView] Initializing for URL:', this.props.item.link);
+        
+        try {
+            // Setup listeners if not already done
+            if (this.contentViewCleanup.length === 0) {
+                this.setupContentViewListeners();
+            }
+            
+            // Update bounds
+            this.updateContentViewBounds();
+            
+            // Setup ResizeObserver for dynamic bounds updates
+            if (!this.resizeObserver) {
+                this.resizeObserver = new ResizeObserver(() => {
+                    this.updateContentViewBounds();
+                });
+                this.resizeObserver.observe(this.contentViewPlaceholderRef);
+            }
+            
+            // Enable visual zoom
+            window.contentView.setVisualZoom(true);
+            
+            // Set mobile mode if needed
+            if (this.localMobileMode) {
+                window.contentView.setMobileMode(true);
+            }
+            
+            // Navigate to URL
+            await window.contentView.navigate(this.props.item.link);
+            
+            // Show ContentView
+            window.contentView.setVisible(true);
+            
+            // Focus
+            window.contentView.focus();
+            
+            this.setState({ webviewVisible: true });
+        } catch (e) {
+            console.error('[ContentView] Error initializing:', e);
         }
     }
 
@@ -1070,6 +1225,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Globalen Mobile-Mode Status initial setzen (für den Fall dass bereits aktiviert)
         this.setGlobalMobileMode(this.localMobileMode);
         
+        // Setup ContentView listeners if Visual Zoom is enabled
+        if (this.state.visualZoomEnabled && this.state.loadWebpage) {
+            this.setupContentViewListeners()
+        }
+        
         // Persistierte Cookies laden beim ersten Mount
         if (this.props.source.persistCookies) {
             console.log("[CookiePersist] Article: Loading cookies on mount")
@@ -1296,6 +1456,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     componentWillUnmount = () => {
         this._isMounted = false
         
+        // Cleanup ContentView
+        this.cleanupContentView()
+        
         // Cookies speichern bevor die Komponente zerstört wird
         if (this.props.source.persistCookies) {
             console.log("[CookiePersist] Article: Saving cookies on unmount")
@@ -1332,6 +1495,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     toggleWebpage = () => {
         if (this.state.loadWebpage) {
+            // Switching FROM webpage mode - cleanup ContentView
+            if (this.state.visualZoomEnabled && window.contentView) {
+                this.cleanupContentView();
+            }
             this.setState({ loadWebpage: false }, () => {
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
@@ -1349,8 +1516,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.props.source,
                     SourceOpenTarget.Webpage
                 )
-                // Focus webview after switching to webpage mode
-                if (this.webview) {
+                // Focus webview/contentView after switching to webpage mode
+                if (this.state.visualZoomEnabled && window.contentView) {
+                    // Using ContentView - it will be focused in initializeContentView
+                } else if (this.webview) {
                     const focusOnReady = () => {
                         this.webview.focus()
                         this.webview.removeEventListener('dom-ready', focusOnReady)
@@ -2181,7 +2350,26 @@ window.__articleData = ${JSON.stringify({
                     />
                 </Stack>
             </Stack>
-            {(!this.state.loadFull && !this.state.loadWebpage) || (this.state.loadFull && this.state.fullContent) || this.state.loadWebpage ? (
+            {/* Use ContentView (WebContentsView) when Visual Zoom is enabled for webpages */}
+            {this.state.visualZoomEnabled && this.state.loadWebpage ? (
+                <div
+                    id="article-contentview-placeholder"
+                    className={this.state.error ? "error" : ""}
+                    style={{ 
+                        flex: 1, 
+                        width: "100%",
+                        visibility: this.state.webviewVisible ? "visible" : "hidden",
+                        background: "var(--neutralLighter, #f3f2f1)"
+                    }}
+                    ref={(el) => {
+                        if (el && el !== this.contentViewPlaceholderRef) {
+                            this.contentViewPlaceholderRef = el;
+                            // Initialize ContentView when placeholder is mounted
+                            this.initializeContentView();
+                        }
+                    }}
+                />
+            ) : ((!this.state.loadFull && !this.state.loadWebpage) || (this.state.loadFull && this.state.fullContent) || this.state.loadWebpage) ? (
                 <webview
                     id="article"
                     className={this.state.error ? "error" : ""}

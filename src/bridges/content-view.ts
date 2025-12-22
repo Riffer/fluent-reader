@@ -107,6 +107,55 @@ export const contentViewBridge = {
         ipcRenderer.send("content-view-set-user-agent", userAgent)
     },
     
+    /**
+     * Load HTML content directly
+     */
+    loadHTML: (html: string, baseURL?: string): Promise<void> => {
+        return ipcRenderer.invoke("content-view-load-html", html, baseURL)
+    },
+    
+    /**
+     * Check if can go back
+     */
+    canGoBack: (): Promise<boolean> => {
+        return ipcRenderer.invoke("content-view-can-go-back")
+    },
+    
+    /**
+     * Check if can go forward
+     */
+    canGoForward: (): Promise<boolean> => {
+        return ipcRenderer.invoke("content-view-can-go-forward")
+    },
+    
+    /**
+     * Get current URL
+     */
+    getURL: (): Promise<string> => {
+        return ipcRenderer.invoke("content-view-get-url")
+    },
+    
+    /**
+     * Stop loading
+     */
+    stop: (): Promise<void> => {
+        return ipcRenderer.invoke("content-view-stop")
+    },
+    
+    /**
+     * Set mobile mode
+     */
+    setMobileMode: (enabled: boolean): void => {
+        ipcRenderer.send("content-view-set-mobile-mode", enabled)
+    },
+    
+    /**
+     * Focus content view
+     */
+    focus: (): void => {
+        ipcRenderer.send("content-view-focus")
+    },
+
     // ===== Event Listeners =====
     
     /**
@@ -161,6 +210,15 @@ export const contentViewBridge = {
         const handler = (_event: any, params: ContentViewContextMenu) => callback(params)
         ipcRenderer.on("content-view-context-menu", handler)
         return () => ipcRenderer.removeListener("content-view-context-menu", handler)
+    },
+    
+    /**
+     * Listen for keyboard input events
+     */
+    onInput: (callback: (input: Electron.Input) => void): () => void => {
+        const handler = (_event: any, input: Electron.Input) => callback(input)
+        ipcRenderer.on("content-view-input", handler)
+        return () => ipcRenderer.removeListener("content-view-input", handler)
     },
     
     /**
