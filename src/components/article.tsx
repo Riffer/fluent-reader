@@ -78,6 +78,7 @@ type ArticleState = {
     autoCookieConsentEnabled: boolean
     inputModeEnabled: boolean  // Eingabe-Modus: Shortcuts deaktiviert für Login etc.
     showP2PShareDialog: boolean
+    visualZoomEnabled: boolean  // Visual Zoom (Pinch-to-Zoom) ohne Mobile-Modus
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -115,6 +116,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             autoCookieConsentEnabled: window.settings.getAutoCookieConsent(),
             inputModeEnabled: false,
             showP2PShareDialog: false,
+            visualZoomEnabled: window.settings.getVisualZoom(),
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -164,6 +166,76 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         window.settings.setZoomOverlay(newValue);
         this.setState({ showZoomOverlay: newValue });
         this.sendZoomOverlaySettingToPreload(newValue);
+    }
+
+    // Visual Zoom (Pinch-to-Zoom) - aktiviert nur screenPosition:"mobile" ohne User-Agent-Änderung
+    private toggleVisualZoom = async () => {
+        const newValue = !this.state.visualZoomEnabled;
+        window.settings.setVisualZoom(newValue);
+        this.setState({ visualZoomEnabled: newValue });
+        
+        console.log('[VisualZoom] Toggle:', newValue ? 'ON' : 'OFF');
+        
+        if (newValue) {
+            await this.enableVisualZoomEmulation();
+        } else {
+            await this.disableVisualZoomEmulation();
+        }
+    }
+
+    // Visual Zoom Emulation aktivieren (nur screenPosition: "mobile", kein User-Agent)
+    private enableVisualZoomEmulation = async () => {
+        if (!this.webview) return false;
+        try {
+            const webContentsId = (this.webview as any).getWebContentsId();
+            if (!webContentsId) {
+                console.error('[VisualZoom] Could not get webContentsId');
+                return false;
+            }
+            
+            // Hole die tatsächliche Webview-Größe
+            const webviewRect = this.webview.getBoundingClientRect();
+            const viewportWidth = webviewRect.width > 0 ? Math.round(webviewRect.width) : 800;
+            const viewportHeight = webviewRect.height > 0 ? Math.round(webviewRect.height) : 600;
+            
+            const ipcRenderer = (window as any).ipcRenderer;
+            if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
+                // KEIN userAgent parameter - behalte Original User-Agent bei
+                const result = await ipcRenderer.invoke('enable-device-emulation', webContentsId, {
+                    screenPosition: "mobile",  // Dies aktiviert Pinch-to-Zoom!
+                    screenSize: { width: viewportWidth, height: viewportHeight },
+                    deviceScaleFactor: 1,
+                    viewSize: { width: viewportWidth, height: viewportHeight },
+                    fitToView: false
+                    // KEIN userAgent - behalte Desktop User-Agent
+                });
+                console.log('[VisualZoom] Emulation enabled:', result, 'viewport:', viewportWidth, 'x', viewportHeight);
+                return result;
+            }
+            return false;
+        } catch (e) {
+            console.error('[VisualZoom] Error enabling emulation:', e);
+            return false;
+        }
+    }
+
+    // Visual Zoom Emulation deaktivieren
+    private disableVisualZoomEmulation = async () => {
+        if (!this.webview) return false;
+        try {
+            const webContentsId = (this.webview as any).getWebContentsId();
+            if (!webContentsId) return false;
+            const ipcRenderer = (window as any).ipcRenderer;
+            if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
+                const result = await ipcRenderer.invoke('disable-device-emulation', webContentsId);
+                console.log('[VisualZoom] Emulation disabled:', result);
+                return result;
+            }
+            return false;
+        } catch (e) {
+            console.error('[VisualZoom] Error disabling emulation:', e);
+            return false;
+        }
     }
 
     // Input Mode: Sendet Status an WebView um Keyboard-Navigation zu deaktivieren
@@ -620,6 +692,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             onClick: this.toggleMobileMode,
                         },
                         {
+                            key: "toggleVisualZoom",
+                            text: "Visual Zoom (Pinch-to-Zoom)",
+                            iconProps: { iconName: this.state.visualZoomEnabled ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.state.visualZoomEnabled,
+                            disabled: !this.state.loadWebpage,
+                            onClick: this.toggleVisualZoom,
+                        },
+                        {
                             key: "toggleNsfwCleanup",
                             text: "NSFW-Cleanup (experimentell)",
                             iconProps: { iconName: this.state.nsfwCleanupEnabled ? "CheckMark" : "" },
@@ -911,6 +992,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 console.log('[Article] did-stop-loading: Enabling mobile emulation');
                 this.enableMobileEmulation().catch(e => {
                     console.warn('[Article] did-stop-loading: Failed to enable mobile emulation:', e.message);
+                });
+            } else if (this.state.visualZoomEnabled) {
+                // Visual Zoom ohne Mobile Mode: nur screenPosition: "mobile" aktivieren
+                console.log('[Article] did-stop-loading: Enabling visual zoom (without mobile mode)');
+                this.enableVisualZoomEmulation().catch(e => {
+                    console.warn('[Article] did-stop-loading: Failed to enable visual zoom:', e.message);
                 });
             } else {
                 console.log('[Article] did-stop-loading: Disabling mobile emulation');

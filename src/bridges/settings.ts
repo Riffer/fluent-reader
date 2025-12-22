@@ -159,6 +159,13 @@ const settingsBridge = {
         ipcRenderer.invoke("set-p2p-collect-links", flag)
     },
 
+    getVisualZoom: (): boolean => {
+        return ipcRenderer.sendSync("get-visual-zoom")
+    },
+    setVisualZoom: (flag: boolean) => {
+        ipcRenderer.invoke("set-visual-zoom", flag)
+    },
+
     getAll: () => {
         return ipcRenderer.sendSync("get-all-settings") as Object
     },

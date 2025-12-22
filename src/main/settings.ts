@@ -247,6 +247,15 @@ ipcMain.handle("set-p2p-collect-links", (_, flag: boolean) => {
     store.set(P2P_COLLECT_LINKS_STORE_KEY, flag)
 })
 
+// Visual Zoom (Pinch-to-Zoom) setting
+const VISUAL_ZOOM_STORE_KEY = "visualZoomEnabled"
+ipcMain.on("get-visual-zoom", event => {
+    event.returnValue = store.get(VISUAL_ZOOM_STORE_KEY, false)
+})
+ipcMain.handle("set-visual-zoom", (_, flag: boolean) => {
+    store.set(VISUAL_ZOOM_STORE_KEY, flag)
+})
+
 // P2P Room persistence
 const P2P_ROOM_CODE_STORE_KEY = "p2pRoomCode"
 const P2P_DISPLAY_NAME_STORE_KEY = "p2pDisplayName"
