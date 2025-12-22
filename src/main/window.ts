@@ -14,6 +14,7 @@ import {
     extractHost,
     listSavedHosts
 } from "./cookie-persist"
+import { getContentViewManager, destroyContentViewManager } from "./content-view-manager"
 
 /**
  * Set up cookies to bypass consent dialogs and age gates
@@ -94,6 +95,8 @@ export class WindowManager {
 
         // Close database cleanly on app quit
         app.on("before-quit", () => {
+            // Destroy content view manager first
+            destroyContentViewManager()
             closeDatabase()
         })
     }
@@ -306,6 +309,10 @@ export class WindowManager {
                 this.mainWindow.show()
                 this.mainWindow.focus()
                 if (!app.isPackaged) this.mainWindow.webContents.openDevTools()
+                
+                // Initialize ContentViewManager after window is ready
+                const contentViewManager = getContentViewManager()
+                contentViewManager.initialize(this.mainWindow)
             })
             this.mainWindow.loadFile(
                 (app.isPackaged ? "dist/" : "") + "index.html"
@@ -337,6 +344,11 @@ export class WindowManager {
                         params.selectionText
                     )
                 }
+            })
+            
+            // Cleanup content view manager when window closes
+            this.mainWindow.on("closed", () => {
+                destroyContentViewManager()
             })
         }
     }
