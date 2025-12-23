@@ -146,11 +146,17 @@ export class ContentViewManager {
             this.applyVisualZoomIfEnabled()
         })
         
-        wc.on("did-fail-load", (event, errorCode, errorDescription, validatedURL) => {
+        wc.on("did-fail-load", (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
             // Ignore aborted loads (user navigated away)
             if (errorCode === -3) return
             
-            console.error("[ContentViewManager] Load failed:", errorCode, errorDescription)
+            // Only report main frame errors, not subresource errors (ads, tracking, etc.)
+            if (!isMainFrame) {
+                console.log("[ContentViewManager] Subresource load failed (ignored):", validatedURL)
+                return
+            }
+            
+            console.error("[ContentViewManager] Main frame load failed:", errorCode, errorDescription)
             this.sendToRenderer("content-view-error", { errorCode, errorDescription, url: validatedURL })
         })
         
@@ -225,6 +231,12 @@ export class ContentViewManager {
         ipcMain.on("content-view-set-visible", (event, visible: boolean) => {
             console.log("[ContentViewManager] IPC: set visible", visible)
             this.setVisible(visible)
+        })
+        
+        // Clear content view (load about:blank)
+        ipcMain.on("content-view-clear", () => {
+            console.log("[ContentViewManager] IPC: clear")
+            this.clear()
         })
         
         // Send message to content view
@@ -429,12 +441,28 @@ export class ContentViewManager {
                 this.contentView.setBounds(this.bounds)
                 console.log("[ContentViewManager] Shown at:", this.bounds)
             } else {
-                // Move off-screen to hide
+                // Move off-screen to hide (keep content for blur-div restore)
                 this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
                 console.log("[ContentViewManager] Hidden")
             }
         } catch (e) {
             console.error("[ContentViewManager] setVisible error:", e)
+        }
+    }
+    
+    /**
+     * Clear content view by loading about:blank
+     * Use this when switching articles or cleaning up, not for blur-div hiding
+     */
+    public clear(): void {
+        if (!this.contentView) return
+        
+        try {
+            this.contentView.webContents.loadURL('about:blank')
+            this.pageLoaded = false
+            console.log("[ContentViewManager] Content cleared")
+        } catch (e) {
+            console.error("[ContentViewManager] clear error:", e)
         }
     }
     

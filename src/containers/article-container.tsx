@@ -50,7 +50,8 @@ const makeMapStateToProps = () => {
             locale: locale,
             menuOpen: menuOpen,
             // Combined flag: any major overlay is active
-            overlayActive: menuOpen || settingsOpen || logMenuOpen || contextMenuType !== ContextMenuType.Hidden,
+            // Note: menuOpen (hamburger) excluded - it only changes layout, doesn't overlap ContentView
+            overlayActive: /* menuOpen || */ settingsOpen || logMenuOpen || contextMenuType !== ContextMenuType.Hidden,
         })
     )
 }

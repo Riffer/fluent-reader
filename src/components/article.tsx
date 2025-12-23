@@ -99,6 +99,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private contentViewCleanup: (() => void)[] = []
     private resizeObserver: ResizeObserver | null = null
     private contentViewHiddenForMenu: boolean = false  // Track if we hid ContentView for menu access
+    private contentViewCurrentUrl: string | null = null  // Track current URL to avoid double navigation
 
     constructor(props: ArticleProps) {
         super(props)
@@ -337,13 +338,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.windowResizeListener = null;
         }
         
-        // Reset bounds cache
+        // Reset bounds cache and current URL
         this.lastContentViewBounds = null;
+        this.contentViewCurrentUrl = null;
         
-        // Hide ContentView (with null check)
+        // Hide ContentView, clear content, and reset bounds (with null check)
         if (window.contentView) {
             window.contentView.setVisible(false);
+            window.contentView.clear(); // Load about:blank to clear old content
+            // Set bounds to 0 to ensure it's completely out of the way
+            window.contentView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
         }
+        
+        // Clear blur screenshot (only if mounted)
+        if (this._isMounted) {
+            this.setState({ menuBlurScreenshot: null });
+        }
+        this.contentViewHiddenForMenu = false;
     }
     
     /**
@@ -428,8 +439,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 window.contentView.setMobileMode(true);
             }
             
-            // Navigate to URL
-            await window.contentView.navigate(this.props.item.link);
+            // Navigate to URL (only if URL changed)
+            const targetUrl = this.props.item.link;
+            if (this.contentViewCurrentUrl !== targetUrl) {
+                console.log('[ContentView] Navigating to:', targetUrl);
+                this.contentViewCurrentUrl = targetUrl;
+                await window.contentView.navigate(targetUrl);
+            } else {
+                console.log('[ContentView] URL unchanged, skipping navigation');
+            }
             
             // Show ContentView
             window.contentView.setVisible(true);
@@ -1462,8 +1480,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.setState({ isLoadingFull: true })
                     this.loadFull()
                 } else if (this.state.loadWebpage) {
-                    // For webpage: focus after dom-ready
-                    if (this.webview) {
+                    // For webpage mode
+                    if (this.state.visualZoomEnabled && window.contentView) {
+                        // ContentView mode: navigate to new article (only if URL changed)
+                        const targetUrl = this.props.item.link;
+                        if (this.contentViewCurrentUrl !== targetUrl) {
+                            console.log('[ContentView] Article changed - navigating to:', targetUrl);
+                            this.contentViewCurrentUrl = targetUrl;
+                            window.contentView.navigate(targetUrl);
+                        }
+                    } else if (this.webview) {
+                        // WebView mode: focus after dom-ready
                         const focusOnReady = () => {
                             this.webview.focus()
                             this.webview.removeEventListener('dom-ready', focusOnReady)
@@ -1487,10 +1514,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         
         // Handle overlay visibility changes for ContentView (Redux-based overlays only)
-        // This covers: hamburger menu, settings, log menu, context menus
-        // Note: Fluent UI dropdowns (Tools, View) are handled by mouse events on the placeholder
+        // This covers: settings, log menu, context menus (not hamburger menu)
+        // Note: Fluent UI dropdowns (Tools, View) are handled by onMenuOpened/onMenuDismissed callbacks
         if (this.state.visualZoomEnabled && prevProps.overlayActive !== this.props.overlayActive) {
             this.handleOverlayVisibilityChange(this.props.overlayActive)
+        }
+        
+        // Handle hamburger menu layout changes - update ContentView bounds
+        // The hamburger menu doesn't overlap but changes the layout position
+        if (this.state.visualZoomEnabled && this.state.loadWebpage && prevProps.menuOpen !== this.props.menuOpen) {
+            // Small delay to let the CSS transition complete
+            setTimeout(() => {
+                if (this._isMounted) {
+                    console.log('[Article] Menu state changed - updating ContentView bounds')
+                    this.updateContentViewBounds()
+                }
+            }, 300) // Match the CSS transition duration
         }
     }
     
@@ -1524,9 +1563,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 window.contentView.setVisible(false)
                 this.contentViewHiddenForMenu = true
             }
+        } else {
+            // Redux overlay closed - check if we can restore
+            if (this.contentViewHiddenForMenu && !this.fluentMenuOpen) {
+                console.log('[Article] Redux overlay closed - restoring ContentView')
+                this.restoreContentView()
+            }
         }
-        // Note: We do NOT auto-restore when overlay closes!
-        // User must click on blur placeholder to restore ContentView
     }
     
     // Track if a Fluent UI dropdown menu is open
@@ -1576,8 +1619,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             return
         }
         
-        // Note: We do NOT auto-restore when menu closes!
-        // User must click on blur placeholder to restore ContentView
+        // Menu closed and no other overlay open - restore immediately
+        console.log('[Article] Fluent menu dismissed - restoring ContentView')
+        this.restoreContentView()
     }
     
     // Timer for auto-restore when mouse hovers over blur placeholder
@@ -1602,6 +1646,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         
         this.blurHoverTimer = setTimeout(() => {
+            // Don't auto-restore if a menu is still open
+            if (this.props.overlayActive || this.fluentMenuOpen) {
+                console.log('[Article] Blur hover timeout - menu still open, not restoring')
+                return
+            }
             console.log('[Article] Blur hover timeout - auto-restoring ContentView')
             this.restoreContentView()
         }, this.BLUR_HOVER_DELAY)
@@ -1630,9 +1679,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.blurHoverTimer = null
         }
         
+        // Clear screenshot FIRST to prevent flash on article switch
+        this.setState({ menuBlurScreenshot: null })
+        
         window.contentView.setVisible(true)
         this.contentViewHiddenForMenu = false
-        this.setState({ menuBlurScreenshot: null })
     }
     
     /**
@@ -1846,6 +1897,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.props.item.link.startsWith("https://") ||
             this.props.item.link.startsWith("http://")
         ) {
+            // Switching TO full mode - cleanup ContentView if it was active
+            if (this.state.loadWebpage && this.state.visualZoomEnabled && window.contentView) {
+                this.cleanupContentView();
+            }
             this.setState({ loadFull: true, loadWebpage: false, webviewVisible: true }, () => {
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
@@ -2660,6 +2715,11 @@ window.__articleData = ${JSON.stringify({
                     }}
                     ref={(el) => {
                         if (el && el !== this.contentViewPlaceholderRef) {
+                            // Cleanup old ResizeObserver if element changed
+                            if (this.resizeObserver && this.contentViewPlaceholderRef) {
+                                this.resizeObserver.disconnect();
+                                this.resizeObserver = null;
+                            }
                             this.contentViewPlaceholderRef = el;
                             // Initialize ContentView when placeholder is mounted
                             this.initializeContentView();

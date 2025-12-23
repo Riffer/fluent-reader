@@ -45,6 +45,14 @@ export const contentViewBridge = {
     },
     
     /**
+     * Clear content view (load about:blank)
+     * Use when switching articles or cleaning up, not for blur-div hiding
+     */
+    clear: (): void => {
+        ipcRenderer.send("content-view-clear")
+    },
+    
+    /**
      * Send message to content view's preload script
      */
     send: (channel: string, ...args: any[]): void => {

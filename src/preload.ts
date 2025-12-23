@@ -26,6 +26,7 @@ const limitedIpcRenderer = {
             // Content View channels
             "content-view-set-bounds",
             "content-view-set-visible",
+            "content-view-clear",
             "content-view-send",
             "content-view-set-visual-zoom",
             "content-view-set-user-agent",
