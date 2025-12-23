@@ -465,14 +465,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
     
-    // Input Mode: Sendet Status an WebView um Keyboard-Navigation zu deaktivieren
+    // Input Mode: Sendet Status an WebView/ContentView um Keyboard-Navigation zu deaktivieren
     private setInputMode = (enabled: boolean) => {
         this.setState({ inputModeEnabled: enabled });
+        // Send to WebView
         if (this.webview) {
             try {
                 this.webview.send('set-input-mode', enabled);
             } catch (e) {
-                console.warn('[InputMode] Could not send to webview:', e);
+                // WebView not ready - ignore
+            }
+        }
+        // Send to ContentView
+        if (window.contentView) {
+            try {
+                window.contentView.send('set-input-mode', enabled);
+            } catch (e) {
+                // ContentView not ready - ignore
             }
         }
     }
@@ -1026,7 +1035,20 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
+    // Track last processed key event to prevent duplicates (WebView + ContentView both send events)
+    private lastKeyEventTime: number = 0;
+    private lastKeyEventKey: string = '';
+
     keyDownHandler = (input: Electron.Input) => {
+        // Debounce duplicate events (both WebView and ContentView can send keyboard events)
+        const now = Date.now();
+        const eventKey = `${input.type}-${input.key}-${input.control}-${input.shift}-${input.alt}`;
+        if (now - this.lastKeyEventTime < 50 && eventKey === this.lastKeyEventKey) {
+            return; // Ignore duplicate event within 50ms
+        }
+        this.lastKeyEventTime = now;
+        this.lastKeyEventKey = eventKey;
+
         if (input.type === "keyDown")
         {
             if(input.control && !input.isAutoRepeat)
@@ -2582,23 +2604,26 @@ window.__articleData = ${JSON.stringify({
                     horizontal
                     tokens={{ childrenGap: 12 }}>
                     <Stack.Item grow>
-                        <span className="source-name">
-                            {this.state.loaded ? (
-                                this.props.source.iconurl && (
-                                    <img
-                                        className="favicon"
-                                        src={this.props.source.iconurl}
-                                    />
-                                )
-                            ) : (
-                                <Spinner size={1} />
-                            )}
-                            {this.props.source.name}
-                            {this.props.item.creator && (
-                                <span className="creator">
-                                    {this.props.item.creator}
-                                </span>
-                            )}
+                        <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                            <span className="source-name">
+                                {this.state.loaded ? (
+                                    this.props.source.iconurl && (
+                                        <img
+                                            className="favicon"
+                                            src={this.props.source.iconurl}
+                                        />
+                                    )
+                                ) : (
+                                    <Spinner size={1} />
+                                )}
+                                {this.props.source.name}
+                                {this.props.item.creator && (
+                                    <span className="creator">
+                                        {this.props.item.creator}
+                                    </span>
+                                )}
+                            </span>
+                            {/* Input Mode Badge - outside source-name to avoid overflow:hidden */}
                             {this.state.inputModeEnabled && (
                                 <span 
                                     className="input-mode-badge"
@@ -2610,13 +2635,14 @@ window.__articleData = ${JSON.stringify({
                                         borderRadius: 3,
                                         fontSize: 11,
                                         fontWeight: 600,
+                                        whiteSpace: 'nowrap',
                                     }}
                                     title="Eingabe-Modus aktiv - Shortcuts deaktiviert (Escape oder Ctrl+I zum Beenden)"
                                 >
                                     ⌨ EINGABE
                                 </span>
                             )}
-                        </span>
+                        </div>
                     </Stack.Item>
                     <CommandBarButton
                         title={
