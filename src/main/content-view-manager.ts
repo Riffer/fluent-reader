@@ -249,6 +249,17 @@ export class ContentViewManager {
             return this.executeJavaScript(code)
         })
         
+        // Set zoom factor (for +/- keyboard shortcuts)
+        ipcMain.on("content-view-set-zoom-factor", (event, factor: number) => {
+            console.log("[ContentViewManager] IPC: set zoom factor", factor)
+            this.setZoomFactor(factor)
+        })
+        
+        // Get current zoom factor
+        ipcMain.handle("content-view-get-zoom-factor", () => {
+            return this.getZoomFactor()
+        })
+        
         // Enable/disable visual zoom
         ipcMain.on("content-view-set-visual-zoom", (event, enabled: boolean) => {
             console.log("[ContentViewManager] IPC: set visual zoom", enabled)
@@ -326,6 +337,7 @@ export class ContentViewManager {
         
         // Set mobile mode
         ipcMain.on("content-view-set-mobile-mode", (event, enabled: boolean) => {
+            console.log("[ContentViewManager] IPC: content-view-set-mobile-mode received, enabled:", enabled)
             this.setMobileMode(enabled)
         })
         
@@ -451,6 +463,66 @@ export class ContentViewManager {
     }
     
     /**
+     * Current keyboard zoom factor (separate from device emulation scale)
+     */
+    private keyboardZoomFactor: number = 1.0
+    
+    /**
+     * Set zoom factor for keyboard +/- shortcuts
+     * Uses Device Emulation scale parameter when visual zoom is enabled
+     */
+    public setZoomFactor(factor: number): void {
+        if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
+            console.log("[ContentViewManager] setZoomFactor: webContents not ready")
+            return
+        }
+        
+        // Clamp factor to reasonable range (0.25 to 5.0)
+        const clampedFactor = Math.max(0.25, Math.min(5.0, factor))
+        this.keyboardZoomFactor = clampedFactor
+        
+        try {
+            if (this.visualZoomEnabled) {
+                // With Device Emulation, use scale parameter
+                this.applyDeviceEmulationWithScale(clampedFactor)
+                console.log("[ContentViewManager] Zoom via Device Emulation scale:", clampedFactor)
+            } else {
+                // Without Device Emulation, use webContents.setZoomFactor
+                this.contentView.webContents.setZoomFactor(clampedFactor)
+                console.log("[ContentViewManager] Zoom via setZoomFactor:", clampedFactor)
+            }
+        } catch (e) {
+            console.error("[ContentViewManager] setZoomFactor error:", e)
+        }
+    }
+    
+    /**
+     * Apply device emulation with custom scale for keyboard zoom
+     * Uses the central method that respects mobile mode viewport
+     */
+    private applyDeviceEmulationWithScale(scale: number): void {
+        // keyboardZoomFactor is already set by setZoomFactor()
+        // Just call the central method
+        this.applyDeviceEmulationForCurrentMode()
+    }
+    
+    /**
+     * Get current zoom factor
+     */
+    public getZoomFactor(): number {
+        if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
+            return 1.0
+        }
+        
+        try {
+            return this.contentView.webContents.getZoomFactor()
+        } catch (e) {
+            console.error("[ContentViewManager] getZoomFactor error:", e)
+            return 1.0
+        }
+    }
+    
+    /**
      * Clear content view by loading about:blank
      * Use this when switching articles or cleaning up, not for blur-div hiding
      */
@@ -494,36 +566,8 @@ export class ContentViewManager {
             return
         }
         
-        const wc = this.contentView.webContents
-        if (!wc || wc.isDestroyed()) {
-            console.log("[ContentViewManager] applyDeviceEmulation: webContents not ready or destroyed")
-            return
-        }
-        
-        const { width, height } = this.bounds
-        
-        // Skip if bounds are invalid (hidden off-screen)
-        if (width <= 0 || height <= 0) {
-            console.log("[ContentViewManager] applyDeviceEmulation: invalid bounds, skipping")
-            return
-        }
-        
-        try {
-            console.log("[ContentViewManager] applyDeviceEmulation:", width, "x", height)
-            
-            wc.enableDeviceEmulation({
-                screenPosition: 'mobile',  // THIS is what enables visual zoom!
-                screenSize: { width, height },
-                viewSize: { width, height },
-                viewPosition: { x: 0, y: 0 },
-                deviceScaleFactor: 1,
-                scale: 1,
-            })
-            
-            console.log("[ContentViewManager] Device emulation enabled:", width, "x", height)
-        } catch (e) {
-            console.error("[ContentViewManager] applyDeviceEmulation error:", e)
-        }
+        // Use the central method that handles all modes
+        this.applyDeviceEmulationForCurrentMode()
     }
     
     /**
@@ -545,48 +589,111 @@ export class ContentViewManager {
     }
     
     /**
-     * Set mobile mode (changes viewport + user agent)
+     * Set mobile mode (changes user agent, optionally viewport)
+     * Works alongside Visual Zoom - just adds mobile user agent
      */
     public setMobileMode(enabled: boolean): void {
         if (!this.contentView) return
         
         this.mobileMode = enabled
         const wc = this.contentView.webContents
-        const { width, height } = this.bounds
         
         if (enabled) {
             // Set mobile user agent
             wc.setUserAgent(this.mobileUserAgent)
-            
-            // Use fixed mobile viewport (768px width like iPhone)
-            const mobileWidth = Math.min(768, width)
-            
-            wc.enableDeviceEmulation({
-                screenPosition: "mobile",
-                screenSize: { width: mobileWidth, height },
-                viewSize: { width: mobileWidth, height },
-                viewPosition: { x: 0, y: 0 },
-                deviceScaleFactor: 1,
-                scale: 1,
-            })
-            
-            console.log("[ContentViewManager] Mobile mode enabled:", mobileWidth, "x", height)
+            console.log("[ContentViewManager] Mobile user agent set")
         } else {
-            // Reset to desktop
+            // Reset to desktop user agent
             wc.setUserAgent("")
-            
+            console.log("[ContentViewManager] Desktop user agent set")
+        }
+        
+        // Only apply device emulation if a page has been loaded
+        // Device emulation on empty webContents causes crashes!
+        if (this.pageLoaded) {
+            // Re-apply device emulation with current settings
+            // This ensures Visual Zoom keeps working with the correct scale
             if (this.visualZoomEnabled) {
-                // Keep visual zoom if enabled
-                this.enableVisualZoom()
-            } else {
+                this.applyDeviceEmulationForCurrentMode()
+            } else if (!enabled) {
+                // Only disable emulation if both visual zoom and mobile mode are off
                 wc.disableDeviceEmulation()
             }
-            
-            console.log("[ContentViewManager] Mobile mode disabled")
+        } else {
+            console.log("[ContentViewManager] Skipping device emulation - page not loaded yet")
         }
+        
+        console.log("[ContentViewManager] Mobile mode:", enabled, "Visual zoom:", this.visualZoomEnabled)
         
         // Inform preload script
         this.sendToContentView("set-mobile-mode", enabled)
+        
+        // Reload page so the server sees the new User-Agent
+        if (this.pageLoaded) {
+            console.log("[ContentViewManager] Reloading page for User-Agent change...")
+            wc.reload()
+        } else {
+            console.log("[ContentViewManager] Page not loaded, skipping reload")
+        }
+    }
+    
+    /**
+     * Apply device emulation based on current mode (Visual Zoom + Mobile Mode)
+     * Combines all settings: viewport size, scale, and screen position
+     * ONLY safe to call after did-finish-load!
+     */
+    private applyDeviceEmulationForCurrentMode(): void {
+        const wc = this.contentView?.webContents
+        if (!wc || wc.isDestroyed()) return
+        
+        // Safety check: don't apply device emulation before page is loaded
+        if (!this.pageLoaded) {
+            console.log("[ContentViewManager] applyDeviceEmulationForCurrentMode: page not loaded yet, skipping")
+            return
+        }
+        
+        const { width, height } = this.bounds
+        if (width <= 0 || height <= 0) {
+            console.log("[ContentViewManager] applyDeviceEmulationForCurrentMode: invalid bounds")
+            return
+        }
+        
+        // Calculate viewport and scale based on mode
+        let viewportWidth = width
+        let effectiveScale = this.keyboardZoomFactor
+        
+        if (this.mobileMode) {
+            // Mobile viewport is fixed at 768px (or less if screen is smaller)
+            const mobileViewport = Math.min(768, width)
+            viewportWidth = mobileViewport
+            
+            // Auto-scale to fill available width, then apply keyboard zoom on top
+            // Example: width=1086, mobileViewport=768 → baseScale = 1086/768 ≈ 1.41
+            const baseScale = width / mobileViewport
+            effectiveScale = baseScale * this.keyboardZoomFactor
+            
+            console.log("[ContentViewManager] Mobile auto-scale:",
+                "baseScale:", baseScale.toFixed(2),
+                "keyboardZoom:", this.keyboardZoomFactor,
+                "effectiveScale:", effectiveScale.toFixed(2))
+        }
+        
+        try {
+            wc.enableDeviceEmulation({
+                screenPosition: 'mobile',  // Always 'mobile' for pinch-to-zoom
+                screenSize: { width: viewportWidth, height },
+                viewSize: { width: viewportWidth, height },
+                viewPosition: { x: 0, y: 0 },
+                deviceScaleFactor: 1,
+                scale: effectiveScale,
+            })
+            console.log("[ContentViewManager] Device emulation applied:",
+                "viewport:", viewportWidth, "x", height,
+                "scale:", effectiveScale.toFixed(2),
+                "mobile:", this.mobileMode)
+        } catch (e) {
+            console.error("[ContentViewManager] applyDeviceEmulationForCurrentMode error:", e)
+        }
     }
     
     /**

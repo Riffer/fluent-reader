@@ -32,6 +32,7 @@ const limitedIpcRenderer = {
             "content-view-set-user-agent",
             "content-view-set-mobile-mode",
             "content-view-focus",
+            "content-view-set-zoom-factor",
         ]
         if (allowedSendChannels.includes(channel)) {
             ipcRenderer.send(channel, ...args)

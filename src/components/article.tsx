@@ -158,6 +158,32 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
+    // Track ContentView zoom factor (separate from CSS zoom level)
+    private contentViewZoomFactor: number = 1.0;
+    
+    /**
+     * Apply zoom to the current view (WebView or ContentView)
+     * For ContentView in Visual Zoom mode: uses webContents.setZoomFactor
+     * For WebView: uses CSS-based zoom via preload
+     */
+    private applyZoom = (zoomLevel: number) => {
+        // ContentView with Visual Zoom - use setZoomFactor
+        if (this.state.loadWebpage && this.state.visualZoomEnabled && window.contentView) {
+            // Convert zoomLevel to factor: level 0 = 1.0, level 1 = 1.1, level -1 = 0.9
+            const factor = 1.0 + (zoomLevel * 0.1);
+            this.contentViewZoomFactor = factor;
+            window.contentView.setZoomFactor(factor);
+            console.log('[Zoom] ContentView zoom factor:', factor, 'from level:', zoomLevel);
+        } else if (this.webview) {
+            // WebView - use CSS-based zoom
+            this.sendZoomToPreload(zoomLevel);
+        }
+        
+        // Update state and persist
+        this.setState({ zoom: zoomLevel });
+        this.updateDefaultZoom(zoomLevel);
+    }
+
     private sendZoomOverlaySettingToPreload = (show: boolean) => {
         if (!this.webview) return;
         try {
@@ -499,15 +525,24 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Globalen Mobile-Mode Status setzen (für neue WebViews bei Artikelwechsel)
         this.setGlobalMobileMode(newMobileMode);
         
-        // Emulation sofort aktivieren/deaktivieren
-        if (newMobileMode) {
-            await this.enableMobileEmulation();
-        } else {
-            await this.disableMobileEmulation();
-        }
+        // Check if we're using ContentView (Visual Zoom mode + Webpage mode)
+        const usingContentView = this.state.loadWebpage && this.state.visualZoomEnabled && window.contentView;
         
-        // Webview neu laden damit die Seite mit korrektem User-Agent/Viewport lädt
-        this.reloadWebview();
+        if (usingContentView) {
+            // Use ContentView bridge - this handles User-Agent, Device Emulation, and reload
+            console.log('[Article] Setting ContentView mobile mode:', newMobileMode);
+            window.contentView.setMobileMode(newMobileMode);
+        } else {
+            // Legacy WebView path - Emulation sofort aktivieren/deaktivieren
+            if (newMobileMode) {
+                await this.enableMobileEmulation();
+            } else {
+                await this.disableMobileEmulation();
+            }
+            
+            // Webview neu laden damit die Seite mit korrektem User-Agent/Viewport lädt
+            this.reloadWebview();
+        }
     }
 
     private togglePersistCookies = () => {
@@ -1112,38 +1147,24 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.toggleWebpage()
                     break
                 case "+":
-                    const newZoomUp = (this.state.zoom || 0) + 1;
-                    this.setState({ zoom: newZoomUp });
-                    this.sendZoomToPreload(newZoomUp);
-                    this.updateDefaultZoom(newZoomUp);
+                    this.applyZoom((this.state.zoom || 0) + 1);
                     break;
                 case "-":
-                    const newZoomDown = (this.state.zoom || 0) - 1;
-                    this.setState({ zoom: newZoomDown });
-                    this.sendZoomToPreload(newZoomDown);
-                    this.updateDefaultZoom(newZoomDown);
+                    this.applyZoom((this.state.zoom || 0) - 1);
                     break;
                 case "#":
-                    this.setState({ zoom: 0 });
-                    this.sendZoomToPreload(0);
-                    this.updateDefaultZoom(0);
+                    this.applyZoom(0);
                     break;
                 case "*":
                     // Strg+Shift+8: Zoom vergrößern
                     if (input.shift) {
-                        const newZoomUp = (this.state.zoom || 0) + 1;
-                        this.setState({ zoom: newZoomUp });
-                        this.sendZoomToPreload(newZoomUp);
-                        this.updateDefaultZoom(newZoomUp);
+                        this.applyZoom((this.state.zoom || 0) + 1);
                     }
                     break;
                 case "_":
                     // Strg+Shift+Minus: Zoom verkleinern
                     if (input.shift) {
-                        const newZoomDown = (this.state.zoom || 0) - 1;
-                        this.setState({ zoom: newZoomDown });
-                        this.sendZoomToPreload(newZoomDown);
-                        this.updateDefaultZoom(newZoomDown);
+                        this.applyZoom((this.state.zoom || 0) - 1);
                     }
                     break;
                 case "w":
@@ -1153,6 +1174,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "m":
                 case "M":
                     // Toggle Mobile Mode
+                    console.log('[Article] M key pressed - toggling mobile mode, usingContentView:', 
+                        this.state.loadWebpage && this.state.visualZoomEnabled && !!window.contentView);
                     this.toggleMobileMode()
                     break
                 case "H":
@@ -2769,7 +2792,7 @@ window.__articleData = ${JSON.stringify({
                                 backgroundSize: "100% 100%",
                                 backgroundPosition: "top left",
                                 backgroundRepeat: "no-repeat",
-                                filter: "blur(8px) brightness(0.9)",
+                                filter: "blur(4px) brightness(0.9)",
                                 zIndex: 10,
                                 cursor: "pointer",
                             }}

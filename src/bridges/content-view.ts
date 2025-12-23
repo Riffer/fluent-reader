@@ -67,6 +67,21 @@ export const contentViewBridge = {
     },
     
     /**
+     * Set zoom factor (for +/- keyboard shortcuts)
+     * Works alongside device emulation
+     */
+    setZoomFactor: (factor: number): void => {
+        ipcRenderer.send("content-view-set-zoom-factor", factor)
+    },
+    
+    /**
+     * Get current zoom factor
+     */
+    getZoomFactor: (): Promise<number> => {
+        return ipcRenderer.invoke("content-view-get-zoom-factor")
+    },
+    
+    /**
      * Enable visual zoom (pinch-to-zoom)
      */
     setVisualZoom: (enabled: boolean): void => {
