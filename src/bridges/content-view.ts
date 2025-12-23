@@ -39,9 +39,12 @@ export const contentViewBridge = {
     
     /**
      * Show or hide content view
+     * @param visible - Whether to show or hide
+     * @param preserveContent - If true, keeps the page content when hiding (for blur-div situations)
+     *                          If false (default), clears the page when hiding
      */
-    setVisible: (visible: boolean): void => {
-        ipcRenderer.send("content-view-set-visible", visible)
+    setVisible: (visible: boolean, preserveContent: boolean = false): void => {
+        ipcRenderer.send("content-view-set-visible", visible, preserveContent)
     },
     
     /**

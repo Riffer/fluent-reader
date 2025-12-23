@@ -228,9 +228,10 @@ export class ContentViewManager {
         })
         
         // Show/hide content view
-        ipcMain.on("content-view-set-visible", (event, visible: boolean) => {
-            console.log("[ContentViewManager] IPC: set visible", visible)
-            this.setVisible(visible)
+        // Second parameter: preserveContent (default false) - set true for blur-div situations
+        ipcMain.on("content-view-set-visible", (event, visible: boolean, preserveContent: boolean = false) => {
+            console.log("[ContentViewManager] IPC: set visible", visible, "preserveContent:", preserveContent)
+            this.setVisible(visible, preserveContent)
         })
         
         // Clear content view (load about:blank)
@@ -437,9 +438,12 @@ export class ContentViewManager {
     
     /**
      * Show or hide content view
+     * @param visible - Whether to show or hide
+     * @param preserveContent - If false (default), clears the page when hiding. 
+     *                          Set to true for blur-div situations where content should be preserved.
      */
-    public setVisible(visible: boolean): void {
-        console.log("[ContentViewManager] setVisible called:", visible)
+    public setVisible(visible: boolean, preserveContent: boolean = false): void {
+        console.log("[ContentViewManager] setVisible called:", visible, "preserveContent:", preserveContent)
         this.isVisible = visible
         
         if (!this.contentView) {
@@ -453,13 +457,31 @@ export class ContentViewManager {
                 this.contentView.setBounds(this.bounds)
                 console.log("[ContentViewManager] Shown at:", this.bounds)
             } else {
-                // Move off-screen to hide (keep content for blur-div restore)
+                // Move off-screen to hide
                 this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
                 console.log("[ContentViewManager] Hidden")
+                
+                // Clear content unless preserveContent is true (blur-div situation)
+                if (!preserveContent) {
+                    this.clearContent()
+                }
             }
         } catch (e) {
             console.error("[ContentViewManager] setVisible error:", e)
         }
+    }
+    
+    /**
+     * Clear the content view (load blank page)
+     */
+    public clearContent(): void {
+        if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
+            return
+        }
+        console.log("[ContentViewManager] Clearing content")
+        this.currentUrl = ""
+        this.pageLoaded = false
+        this.contentView.webContents.loadURL("about:blank")
     }
     
     /**

@@ -100,6 +100,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private resizeObserver: ResizeObserver | null = null
     private contentViewHiddenForMenu: boolean = false  // Track if we hid ContentView for menu access
     private contentViewCurrentUrl: string | null = null  // Track current URL to avoid double navigation
+    private pendingWebViewFocus: boolean = false  // Flag to focus WebView after next did-stop-loading
 
     constructor(props: ArticleProps) {
         super(props)
@@ -211,12 +212,45 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         window.settings.setVisualZoom(newValue);
         this.setState({ visualZoomEnabled: newValue });
         
-        console.log('[VisualZoom] Toggle:', newValue ? 'ON' : 'OFF');
+        console.log('[VisualZoom] Toggle:', newValue ? 'ON (ContentView)' : 'OFF (WebView)');
         
-        if (newValue) {
-            await this.enableVisualZoomEmulation();
+        // When switching to ContentView, initialize it and set focus
+        if (newValue && this.state.loadWebpage) {
+            // Hide any existing WebView emulation (only if WebView is ready)
+            if (this.webview) {
+                try {
+                    const webContentsId = (this.webview as any).getWebContentsId?.();
+                    if (webContentsId) {
+                        await this.disableVisualZoomEmulation();
+                    }
+                } catch (e) {
+                    // WebView not ready, ignore
+                }
+            }
+            // Small delay to let state update, then initialize ContentView
+            setTimeout(() => {
+                this.initializeContentView();
+                // Focus after ContentView is shown (additional delay for rendering)
+                setTimeout(() => {
+                    if (window.contentView) {
+                        window.contentView.focus();
+                        console.log('[VisualZoom] ContentView focused');
+                    }
+                }, 100);
+            }, 50);
         } else {
-            await this.disableVisualZoomEmulation();
+            // Switching to WebView - hide ContentView
+            console.log('[VisualZoom] Switching to WebView mode...');
+            if (window.contentView) {
+                window.contentView.setVisible(false);
+            }
+            // Clear the tracked URL so next ContentView init will navigate again
+            this.contentViewCurrentUrl = null;
+            
+            // Set flag to focus WebView after it finishes loading
+            // This handles the case where the page does multiple reloads (ads etc.)
+            this.pendingWebViewFocus = true;
+            console.log('[VisualZoom] pendingWebViewFocus set - will focus after did-stop-loading');
         }
     }
 
@@ -1178,6 +1212,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         this.state.loadWebpage && this.state.visualZoomEnabled && !!window.contentView);
                     this.toggleMobileMode()
                     break
+                case "p":
+                case "P":
+                    // Toggle Visual Zoom (WebView <-> ContentView)
+                    console.log('[Article] P key pressed - toggling Visual Zoom (ContentView)');
+                    this.toggleVisualZoom()
+                    break
                 case "H":
                 case "h":
                     if (!input.meta) this.props.toggleHidden(this.props.item)
@@ -1534,6 +1574,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             this.contentViewCurrentUrl = targetUrl;
                             window.contentView.navigate(targetUrl);
                         }
+                        // Focus ContentView for keyboard input (with delay to ensure it's ready)
+                        setTimeout(() => {
+                            if (window.contentView) {
+                                window.contentView.focus();
+                            }
+                        }, 100);
                     } else if (this.webview) {
                         // WebView mode: focus after dom-ready
                         const focusOnReady = () => {
@@ -1596,7 +1642,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     // Small delay to ensure React renders the placeholder before hiding ContentView
                     setTimeout(() => {
                         if (this._isMounted && this.props.overlayActive) {
-                            window.contentView.setVisible(false)
+                            window.contentView.setVisible(false, true) // preserveContent for blur-div
                             this.contentViewHiddenForMenu = true
                             console.log('[Article] ContentView hidden for Redux overlay')
                         }
@@ -1605,7 +1651,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             } catch (e) {
                 console.error('[Article] Error capturing screenshot:', e)
                 // Even without screenshot, hide ContentView
-                window.contentView.setVisible(false)
+                window.contentView.setVisible(false, true) // preserveContent for blur-div
                 this.contentViewHiddenForMenu = true
             }
         } else {
@@ -1641,7 +1687,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             console.error('[Article] Error capturing screenshot for Fluent menu:', e)
         }
         
-        window.contentView.setVisible(false)
+        window.contentView.setVisible(false, true) // preserveContent for blur-div
         this.contentViewHiddenForMenu = true
         console.log('[Article] ContentView hidden for Fluent UI menu')
     }
@@ -1751,7 +1797,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             console.error('[Article] Error capturing screenshot:', e)
         }
         
-        window.contentView.setVisible(false)
+        window.contentView.setVisible(false, true) // preserveContent for blur-div
         this.contentViewHiddenForMenu = true
     }
     
@@ -1821,12 +1867,31 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     // Focus webview after full content is loaded
     private focusWebviewAfterLoad = () => {
         if (this.webview) {
-            // Kleiner Delay um sicherzustellen, dass das Webview bereit ist
-            setTimeout(() => {
-                if (this.webview && this._isMounted) {
-                    this.webview.focus()
-                }
-            }, 100)
+            // Check if we're waiting to focus WebView after mode switch
+            if (this.pendingWebViewFocus) {
+                console.log('[VisualZoom] pendingWebViewFocus: focusing WebView now');
+                this.pendingWebViewFocus = false;
+                // Multiple focus attempts to ensure it sticks
+                this.webview.focus();
+                setTimeout(() => {
+                    if (this.webview && this._isMounted) {
+                        this.webview.focus();
+                        console.log('[VisualZoom] ✅ WebView focused - press P to switch back');
+                    }
+                }, 50);
+                setTimeout(() => {
+                    if (this.webview && this._isMounted) {
+                        this.webview.focus();
+                    }
+                }, 200);
+            } else {
+                // Normal focus with small delay
+                setTimeout(() => {
+                    if (this.webview && this._isMounted) {
+                        this.webview.focus()
+                    }
+                }, 100)
+            }
         }
     }
 

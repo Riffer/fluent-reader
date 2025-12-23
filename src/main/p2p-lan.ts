@@ -145,9 +145,9 @@ export function initP2PLan(): void {
     if (!savedPeerId) {
         savedPeerId = crypto.randomBytes(8).toString("hex")
         setStoredP2PPeerId(savedPeerId)
-        console.log("[P2P-LAN] Generated new persistent peerId:", savedPeerId)
+        // console.log("[P2P-LAN] Generated new persistent peerId:", savedPeerId)
     } else {
-        console.log("[P2P-LAN] Loaded existing peerId:", savedPeerId)
+        // console.log("[P2P-LAN] Loaded existing peerId:", savedPeerId)
     }
     localPeerId = savedPeerId
     
@@ -163,12 +163,12 @@ export function initP2PLan(): void {
 async function autoRejoinSavedRoom(): Promise<void> {
     const stored = getStoredP2PRoom()
     if (stored.roomCode) {
-        console.log(`[P2P-LAN] Auto-rejoining saved room: ${stored.roomCode}`)
+        // console.log(`[P2P-LAN] Auto-rejoining saved room: ${stored.roomCode}`)
         const success = await joinRoom(stored.roomCode, stored.displayName, false) // Don't re-save
         if (success) {
-            console.log(`[P2P-LAN] Successfully rejoined room ${stored.roomCode}`)
+            // console.log(`[P2P-LAN] Successfully rejoined room ${stored.roomCode}`)
         } else {
-            console.log(`[P2P-LAN] Failed to rejoin room, clearing stored room`)
+            // console.log(`[P2P-LAN] Failed to rejoin room, clearing stored room`)
             clearStoredP2PRoom()
         }
     }
@@ -193,19 +193,19 @@ export async function joinRoom(roomCode: string, displayName: string, saveToStor
         activeRoomCode = roomCode.toUpperCase()
         localDisplayName = displayName || "Fluent Reader"
         
-        console.log(`[P2P-LAN] Joining room: ${activeRoomCode} as "${localDisplayName}"`)
+        // console.log(`[P2P-LAN] Joining room: ${activeRoomCode} as "${localDisplayName}"`)
         
         // Save to persistent store
         if (saveToStore) {
             setStoredP2PRoom(activeRoomCode, localDisplayName)
-            console.log(`[P2P-LAN] Room saved to store`)
+            // console.log(`[P2P-LAN] Room saved to store`)
         }
         
         // Clean up old peers and their pending shares (7 days)
         try {
             const removed = removeOldKnownPeers(PEER_MAX_AGE_DAYS)
             if (removed > 0) {
-                console.log(`[P2P-LAN] Cleaned up ${removed} old peers`)
+                // console.log(`[P2P-LAN] Cleaned up ${removed} old peers`)
             }
         } catch (err) {
             console.error("[P2P-LAN] Error cleaning up old peers:", err)
@@ -237,7 +237,7 @@ export async function joinRoom(roomCode: string, displayName: string, saveToStor
  * @param sendGoodbye - Whether to send goodbye message to peers (default: true)
  */
 export async function leaveRoom(clearStore: boolean = true, sendGoodbye: boolean = true): Promise<void> {
-    console.log("[P2P-LAN] Leaving room")
+    // console.log("[P2P-LAN] Leaving room")
     
     // Send goodbye to all connected peers before closing connections
     if (sendGoodbye && connectedPeers.size > 0) {
@@ -247,7 +247,7 @@ export async function leaveRoom(clearStore: boolean = true, sendGoodbye: boolean
             timestamp: Date.now()
         }
         broadcast(goodbyeMsg)
-        console.log(`[P2P-LAN] Sent goodbye to ${connectedPeers.size} peer(s)`)
+        // console.log(`[P2P-LAN] Sent goodbye to ${connectedPeers.size} peer(s)`)
         
         // Small delay to ensure message is sent before closing sockets
         await new Promise(resolve => setTimeout(resolve, 100))
@@ -256,7 +256,7 @@ export async function leaveRoom(clearStore: boolean = true, sendGoodbye: boolean
     // Clear stored room if requested
     if (clearStore) {
         clearStoredP2PRoom()
-        console.log("[P2P-LAN] Cleared stored room")
+        // console.log("[P2P-LAN] Cleared stored room")
     }
     
     // Stop broadcasting
@@ -271,13 +271,13 @@ export async function leaveRoom(clearStore: boolean = true, sendGoodbye: boolean
     // Update lastSeen in database for all discovered peers before clearing
     // This ensures the 7-day cleanup logic has accurate timestamps
     if (discoveredPeers.size > 0) {
-        console.log(`[P2P-LAN] Updating lastSeen for ${discoveredPeers.size} peer(s)`)
+        // console.log(`[P2P-LAN] Updating lastSeen for ${discoveredPeers.size} peer(s)`)
         for (const [peerId, peer] of discoveredPeers) {
             try {
                 updatePeerLastSeen(peerId)
             } catch (err) {
                 // DB might be closed during shutdown - ignore errors
-                console.log(`[P2P-LAN] Could not update lastSeen for ${peer.displayName} (DB may be closed)`)
+                // console.log(`[P2P-LAN] Could not update lastSeen for ${peer.displayName} (DB may be closed)`)
             }
         }
     }
@@ -312,7 +312,7 @@ export async function leaveRoom(clearStore: boolean = true, sendGoodbye: boolean
  * Sends goodbye to peers but keeps the room stored for next startup
  */
 export async function shutdownP2P(): Promise<void> {
-    console.log("[P2P-LAN] Shutting down P2P (app closing)")
+    // console.log("[P2P-LAN] Shutting down P2P (app closing)")
     // Don't clear stored room (false), but do send goodbye (true)
     await leaveRoom(false, true)
 }
@@ -324,7 +324,7 @@ export async function shutdownP2P(): Promise<void> {
 export async function onSystemSuspend(): Promise<void> {
     if (!activeRoomCode) return
     
-    console.log("[P2P-LAN] System suspending - sending goodbye to peers")
+    // console.log("[P2P-LAN] System suspending - sending goodbye to peers")
     
     // Send goodbye but don't clear stored room or close connections fully
     // (they'll be dead anyway after resume)
@@ -343,7 +343,7 @@ export async function onSystemSuspend(): Promise<void> {
 export async function onSystemResume(): Promise<void> {
     if (!activeRoomCode) return
     
-    console.log("[P2P-LAN] System resumed - re-announcing presence")
+    // console.log("[P2P-LAN] System resumed - re-announcing presence")
     
     // Reset lastSeen for all peers (we don't know their state after resume)
     const now = Date.now()
@@ -385,7 +385,7 @@ function sendImmediateDiscovery(): void {
     
     udpSocket.send(data, DISCOVERY_PORT, "255.255.255.255", (err) => {
         if (err) console.error("[P2P-LAN] Immediate discovery broadcast error:", err)
-        else console.log("[P2P-LAN] Sent immediate discovery broadcast after resume")
+        // else console.log("[P2P-LAN] Sent immediate discovery broadcast after resume")
     })
 }
 
@@ -408,7 +408,7 @@ function sendImmediateHeartbeat(): void {
             console.error(`[P2P-LAN] Failed to send immediate heartbeat to ${peerId}:`, err)
         }
     }
-    console.log(`[P2P-LAN] Sent immediate heartbeat to ${connectedPeers.size} peers after resume`)
+    // console.log(`[P2P-LAN] Sent immediate heartbeat to ${connectedPeers.size} peers after resume`)
 }
 
 /**
@@ -427,7 +427,7 @@ export function broadcast(message: P2PMessage): number {
         }
     }
     
-    console.log(`[P2P-LAN] Broadcast to ${sentCount} peers`)
+    // console.log(`[P2P-LAN] Broadcast to ${sentCount} peers`)
     return sentCount
 }
 
@@ -444,7 +444,7 @@ export function sendToPeer(peerId: string, message: P2PMessage): boolean {
     try {
         const data = JSON.stringify(message)
         peer.socket.write(data + "\n")
-        console.log(`[P2P-LAN] Sent ${message.type} to ${peer.displayName}`)
+        // console.log(`[P2P-LAN] Sent ${message.type} to ${peer.displayName}`)
         return true
     } catch (err) {
         console.error(`[P2P-LAN] Failed to send to ${peerId}:`, err)
@@ -499,7 +499,7 @@ export function sendArticlesWithAck(
                 for (const article of articles) {
                     try {
                         addPendingShare(peerId, peerName, article.url, article.title, article.feedName, article.feedUrl, article.feedIconUrl)
-                        console.log(`[P2P-LAN] Queued share for offline peer ${peerName}: ${article.title}`)
+                        // console.log(`[P2P-LAN] Queued share for offline peer ${peerName}: ${article.title}`)
                     } catch (err) {
                         console.error(`[P2P-LAN] Failed to queue share:`, err)
                     }
@@ -531,14 +531,14 @@ export function sendArticlesWithAck(
             const pending = pendingAcks.get(messageId)
             if (pending) {
                 pendingAcks.delete(messageId)
-                console.log(`[P2P-LAN] ACK timeout for message ${messageId}`)
+                // console.log(`[P2P-LAN] ACK timeout for message ${messageId}`)
                 
                 // Queue the failed articles if requested
                 if (queueOnFailure) {
                     for (const article of articles) {
                         try {
                             addPendingShare(peerId, pending.peerName, article.url, article.title, article.feedName, article.feedUrl, article.feedIconUrl)
-                            console.log(`[P2P-LAN] Queued share after timeout: ${article.title}`)
+                            // console.log(`[P2P-LAN] Queued share after timeout: ${article.title}`)
                         } catch (err) {
                             console.error(`[P2P-LAN] Failed to queue share:`, err)
                         }
@@ -628,7 +628,7 @@ export async function shareToAllKnownPeers(
             const shareId = addPendingShare(peer.peerId, peer.peerName, url, title, feedName, feedUrl, feedIconUrl)
             const isOnline = connectedPeers.has(peer.peerId)
             queuedItems.push({ peerId: peer.peerId, peerName: peer.peerName, shareId, isOnline })
-            console.log(`[P2P-LAN] Pipeline: Queued for ${peer.peerName} (id: ${shareId}, online: ${isOnline})`)
+            // console.log(`[P2P-LAN] Pipeline: Queued for ${peer.peerName} (id: ${shareId}, online: ${isOnline})`)
         } catch (err) {
             console.error(`[P2P-LAN] Pipeline: Failed to queue for ${peer.peerName}:`, err)
             // Continue with other peers even if one fails
@@ -648,16 +648,16 @@ export async function shareToAllKnownPeers(
                 // Success! Remove from queue
                 removePendingShare(item.shareId)
                 sent++
-                console.log(`[P2P-LAN] Pipeline: Sent & removed from queue for ${item.peerName}`)
+                // console.log(`[P2P-LAN] Pipeline: Sent & removed from queue for ${item.peerName}`)
             } catch (err) {
                 // Failed - stays in queue (already there)
                 queued++
-                console.log(`[P2P-LAN] Pipeline: Send failed for ${item.peerName}, staying in queue`)
+                // console.log(`[P2P-LAN] Pipeline: Send failed for ${item.peerName}, staying in queue`)
             }
         } else {
             // Offline - already queued
             queued++
-            console.log(`[P2P-LAN] Pipeline: ${item.peerName} offline, staying in queue`)
+            // console.log(`[P2P-LAN] Pipeline: ${item.peerName} offline, staying in queue`)
         }
     }
     
@@ -684,9 +684,9 @@ export async function broadcastArticlesWithAck(
 ): Promise<Map<string, { success: boolean, error?: string }>> {
     const results = new Map<string, { success: boolean, error?: string }>()
     
-    console.log(`[P2P-LAN] broadcastArticlesWithAck called, connectedPeers.size: ${connectedPeers.size}`)
+    // console.log(`[P2P-LAN] broadcastArticlesWithAck called, connectedPeers.size: ${connectedPeers.size}`)
     for (const [peerId, peer] of connectedPeers) {
-        console.log(`[P2P-LAN]   - Peer: ${peer.displayName} (${peerId})`)
+        // console.log(`[P2P-LAN]   - Peer: ${peer.displayName} (${peerId})`)
     }
     
     const promises = Array.from(connectedPeers.keys()).map(async (peerId) => {
@@ -702,7 +702,7 @@ export async function broadcastArticlesWithAck(
     })
     
     await Promise.all(promises)
-    console.log(`[P2P-LAN] broadcastArticlesWithAck results:`, Array.from(results.entries()))
+    // console.log(`[P2P-LAN] broadcastArticlesWithAck results:`, Array.from(results.entries()))
     return results
 }
 
@@ -720,7 +720,7 @@ async function processPendingSharesForPeer(peerId: string, peerName: string): Pr
         
         if (pendingShares.length === 0) return
         
-        console.log(`[P2P-LAN] Processing ${pendingShares.length} pending shares for ${peerName}`)
+        // console.log(`[P2P-LAN] Processing ${pendingShares.length} pending shares for ${peerName}`)
         
         // Build articles array for batch send
         const articles = pendingShares.map(share => ({
@@ -739,7 +739,7 @@ async function processPendingSharesForPeer(peerId: string, peerName: string): Pr
             for (const share of pendingShares) {
                 removePendingShare(share.id)
             }
-            console.log(`[P2P-LAN] Successfully sent batch of ${articles.length} queued shares to ${peerName}`)
+            // console.log(`[P2P-LAN] Successfully sent batch of ${articles.length} queued shares to ${peerName}`)
         } catch (err) {
             // Batch failed - increment attempts for all
             for (const share of pendingShares) {
@@ -747,11 +747,11 @@ async function processPendingSharesForPeer(peerId: string, peerName: string): Pr
                 
                 // If too many attempts, give up
                 if (share.attempts >= 5) {
-                    console.log(`[P2P-LAN] Giving up on share after ${share.attempts + 1} attempts: ${share.title}`)
+                    // console.log(`[P2P-LAN] Giving up on share after ${share.attempts + 1} attempts: ${share.title}`)
                     removePendingShare(share.id)
                 }
             }
-            console.log(`[P2P-LAN] Failed to send batch to ${peerName}:`, err)
+            // console.log(`[P2P-LAN] Failed to send batch to ${peerName}:`, err)
         }
         
         notifyPendingSharesChanged()
@@ -793,7 +793,7 @@ function startHeartbeat(): void {
         for (const [peerId, peer] of connectedPeers) {
             // Check if peer timed out
             if (now - peer.lastSeen > HEARTBEAT_TIMEOUT) {
-                console.log(`[P2P-LAN] Peer ${peer.displayName} timed out (last seen ${Math.round((now - peer.lastSeen) / 1000)}s ago)`)
+                // console.log(`[P2P-LAN] Peer ${peer.displayName} timed out (last seen ${Math.round((now - peer.lastSeen) / 1000)}s ago)`)
                 disconnectedPeers.push(peerId)
                 continue
             }
@@ -817,7 +817,7 @@ function startHeartbeat(): void {
         for (const peerId of disconnectedPeers) {
             const peer = connectedPeers.get(peerId)
             if (peer) {
-                console.log(`[P2P-LAN] Removing timed out peer: ${peer.displayName}`)
+                // console.log(`[P2P-LAN] Removing timed out peer: ${peer.displayName}`)
                 notifyPeerDisconnected(peerId, peer.displayName, "Timeout - no response")
                 try {
                     peer.socket.destroy()
@@ -854,11 +854,11 @@ function stopHeartbeat(): void {
 export function getConnectedPeers(): Array<{ peerId: string, displayName: string, connected: boolean }> {
     const peers: Array<{ peerId: string, displayName: string, connected: boolean }> = []
     
-    console.log(`[P2P-LAN] getConnectedPeers called - connectedPeers.size: ${connectedPeers.size}, discoveredPeers.size: ${discoveredPeers.size}`)
+    // console.log(`[P2P-LAN] getConnectedPeers called - connectedPeers.size: ${connectedPeers.size}, discoveredPeers.size: ${discoveredPeers.size}`)
     
     // Add connected peers
     for (const [peerId, peer] of connectedPeers) {
-        console.log(`[P2P-LAN]   - Connected: ${peer.displayName} (${peerId})`)
+        // console.log(`[P2P-LAN]   - Connected: ${peer.displayName} (${peerId})`)
         peers.push({
             peerId,
             displayName: peer.displayName,
@@ -869,7 +869,7 @@ export function getConnectedPeers(): Array<{ peerId: string, displayName: string
     // Add discovered but not connected peers
     for (const [peerId, peer] of discoveredPeers) {
         if (!connectedPeers.has(peerId)) {
-            console.log(`[P2P-LAN]   - Discovered (not connected): ${peer.displayName} (${peerId})`)
+            // console.log(`[P2P-LAN]   - Discovered (not connected): ${peer.displayName} (${peerId})`)
             peers.push({
                 peerId,
                 displayName: peer.displayName,
@@ -914,7 +914,7 @@ async function startUdpDiscovery(): Promise<void> {
         
         udpSocket.on("listening", () => {
             const addr = udpSocket!.address()
-            console.log(`[P2P-LAN] UDP listening on ${addr.address}:${addr.port}`)
+            // console.log(`[P2P-LAN] UDP listening on ${addr.address}:${addr.port}`)
             
             // Enable broadcast
             udpSocket!.setBroadcast(true)
@@ -936,7 +936,7 @@ function handleDiscoveryMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
         if (data.roomCode !== activeRoomCode) return
         
         const msgType = data.type === "discovery" ? "Discovery" : "Discovery-Response"
-        console.log(`[P2P-LAN] ${msgType} from ${data.displayName} (${rinfo.address}:${data.tcpPort})`)
+        // console.log(`[P2P-LAN] ${msgType} from ${data.displayName} (${rinfo.address}:${data.tcpPort})`)
         
         // Check if this is a NEW peer (not yet in discoveredPeers)
         const isNewPeer = !discoveredPeers.has(data.peerId)
@@ -954,7 +954,7 @@ function handleDiscoveryMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
         if (isNewPeer) {
             try {
                 upsertKnownPeer(data.peerId, data.displayName, data.roomCode)
-                console.log(`[P2P-LAN] New peer persisted: ${data.displayName}`)
+                // console.log(`[P2P-LAN] New peer persisted: ${data.displayName}`)
             } catch (err) {
                 console.error("[P2P-LAN] Error persisting peer:", err)
             }
@@ -1047,7 +1047,7 @@ async function startTcpServer(): Promise<void> {
         tcpServer.on("listening", () => {
             const addr = tcpServer!.address() as net.AddressInfo
             tcpPort = addr.port
-            console.log(`[P2P-LAN] TCP server listening on port ${tcpPort}`)
+            // console.log(`[P2P-LAN] TCP server listening on port ${tcpPort}`)
             resolve()
         })
         
@@ -1058,7 +1058,7 @@ async function startTcpServer(): Promise<void> {
 }
 
 function handleIncomingConnection(socket: net.Socket): void {
-    console.log(`[P2P-LAN] Incoming connection from ${socket.remoteAddress}`)
+    // console.log(`[P2P-LAN] Incoming connection from ${socket.remoteAddress}`)
     
     let buffer = ""
     let peerId: string | null = null
@@ -1088,7 +1088,7 @@ function handleIncomingConnection(socket: net.Socket): void {
                         lastHeartbeat: Date.now()
                     })
                     
-                    console.log(`[P2P-LAN] Connected to ${displayName} (${peerId})`)
+                    // console.log(`[P2P-LAN] Connected to ${displayName} (${peerId})`)
                     
                     // Send handshake response
                     socket.write(JSON.stringify({
@@ -1112,7 +1112,7 @@ function handleIncomingConnection(socket: net.Socket): void {
     
     socket.on("close", () => {
         if (peerId) {
-            console.log(`[P2P-LAN] Disconnected from ${peerId}`)
+            // console.log(`[P2P-LAN] Disconnected from ${peerId}`)
             connectedPeers.delete(peerId)
             notifyConnectionState()
         }
@@ -1130,10 +1130,10 @@ function handleIncomingConnection(socket: net.Socket): void {
 function connectToPeer(peerId: string, address: string, port: number, displayName: string): void {
     if (connectedPeers.has(peerId)) return
     
-    console.log(`[P2P-LAN] Connecting to ${displayName} at ${address}:${port}`)
+    // console.log(`[P2P-LAN] Connecting to ${displayName} at ${address}:${port}`)
     
     const socket = net.createConnection({ host: address, port }, () => {
-        console.log(`[P2P-LAN] TCP connected to ${displayName}`)
+        // console.log(`[P2P-LAN] TCP connected to ${displayName}`)
         
         // Send handshake
         socket.write(JSON.stringify({
@@ -1168,7 +1168,7 @@ function connectToPeer(peerId: string, address: string, port: number, displayNam
                         lastHeartbeat: Date.now()
                     })
                     
-                    console.log(`[P2P-LAN] Handshake complete with ${displayName}`)
+                    // console.log(`[P2P-LAN] Handshake complete with ${displayName}`)
                     notifyConnectionState()
                     
                     // Process any pending shares for this peer
@@ -1183,7 +1183,7 @@ function connectToPeer(peerId: string, address: string, port: number, displayNam
     })
     
     socket.on("close", () => {
-        console.log(`[P2P-LAN] Disconnected from ${displayName}`)
+        // console.log(`[P2P-LAN] Disconnected from ${displayName}`)
         connectedPeers.delete(peerId)
         notifyConnectionState()
     })
@@ -1206,19 +1206,19 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
     
     // Don't log heartbeats to reduce noise
     if (msg.type !== "heartbeat" && msg.type !== "heartbeat-ack") {
-        console.log(`[P2P-LAN] Received ${msg.type} from ${peer.displayName}`)
+        // console.log(`[P2P-LAN] Received ${msg.type} from ${peer.displayName}`)
     }
     
     switch (msg.type) {
         case "article-link-batch":
             // Unified handler for all article shares (1 or more)
             if (msg.articles && msg.articles.length > 0) {
-                console.log(`[P2P-LAN] Received ${msg.articles.length} article(s) from ${peer.displayName}`)
-                console.log(`[P2P-LAN] Article titles: ${msg.articles.map(a => a.title).join(", ")}`)
+                // console.log(`[P2P-LAN] Received ${msg.articles.length} article(s) from ${peer.displayName}`)
+                // console.log(`[P2P-LAN] Article titles: ${msg.articles.map(a => a.title).join(", ")}`)
                 
                 if (msg.articles.length === 1) {
                     // Single article - store and show dialog
-                    console.log(`[P2P-LAN] Single article mode - will show dialog`)
+                    // console.log(`[P2P-LAN] Single article mode - will show dialog`)
                     const a = msg.articles[0]
                     
                     // Store the article (will return existing articleId if duplicate)
@@ -1316,7 +1316,7 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
             if (msg.ackId) {
                 const pending = pendingAcks.get(msg.ackId)
                 if (pending) {
-                    console.log(`[P2P-LAN] Received ACK for message ${msg.ackId} from ${peer.displayName}`)
+                    // console.log(`[P2P-LAN] Received ACK for message ${msg.ackId} from ${peer.displayName}`)
                     pendingAcks.delete(msg.ackId)
                     pending.onSuccess?.()
                 }
@@ -1356,7 +1356,7 @@ function handlePeerMessage(peerId: string, msg: P2PMessage): void {
             
         case "goodbye":
             // Peer is leaving gracefully - remove from connected peers
-            console.log(`[P2P-LAN] Received goodbye from ${peer.displayName}`)
+            // console.log(`[P2P-LAN] Received goodbye from ${peer.displayName}`)
             connectedPeers.delete(peerId)
             discoveredPeers.delete(peerId)
             notifyPeerDisconnected(peerId, peer.displayName, "Peer left the room")
@@ -1424,7 +1424,7 @@ function storeP2PArticle(article: P2PArticleData): {
         // Step 1: Search globally for article by link
         const existingArticle = findArticleByLink(article.url)
         if (existingArticle) {
-            console.log(`[P2P-LAN] Article already exists globally: "${article.title}" (id=${existingArticle.articleId}, source=${existingArticle.sourceId})`)
+            // console.log(`[P2P-LAN] Article already exists globally: "${article.title}" (id=${existingArticle.articleId}, source=${existingArticle.sourceId})`)
             return { 
                 sourceId: existingArticle.sourceId, 
                 articleId: existingArticle.articleId, 
@@ -1445,7 +1445,7 @@ function storeP2PArticle(article: P2PArticleData): {
             if (existingSource) {
                 // Feed exists - use it
                 sid = existingSource.sid
-                console.log(`[P2P-LAN] Using existing feed: "${existingSource.name}" (sid=${sid})`)
+                // console.log(`[P2P-LAN] Using existing feed: "${existingSource.name}" (sid=${sid})`)
             } else {
                 // Step 3: Create new P2P feed
                 const feedName = article.feedName || new URL(article.feedUrl).hostname
@@ -1454,14 +1454,14 @@ function storeP2PArticle(article: P2PArticleData): {
                 feedCreated = result.created
                 
                 if (feedCreated) {
-                    console.log(`[P2P-LAN] New P2P feed created (sid=${sid}), adding to P2P group`)
+                    // console.log(`[P2P-LAN] New P2P feed created (sid=${sid}), adding to P2P group`)
                     addSourceToP2PGroup(sid)
                     groupsUpdated = true
                 }
             }
         } else {
             // No feedUrl - create a generic P2P feed
-            console.log(`[P2P-LAN] Article "${article.title}" has no feedUrl - creating generic P2P feed`)
+            // console.log(`[P2P-LAN] Article "${article.title}" has no feedUrl - creating generic P2P feed`)
             const genericUrl = "p2p://shared-articles"
             const result = getOrCreateP2PFeed(genericUrl, "P2P Shared Articles", undefined, undefined, undefined)
             sid = result.sid
@@ -1495,7 +1495,7 @@ function storeP2PArticle(article: P2PArticleData): {
         }
         
         const articleId = insertItem(itemRow)
-        console.log(`[P2P-LAN] Stored P2P article "${article.title}" (id=${articleId}) in feed ${sid}`)
+        // console.log(`[P2P-LAN] Stored P2P article "${article.title}" (id=${articleId}) in feed ${sid}`)
         
         // Create article data for Renderer (with proper boolean types for Lovefield)
         const articleData: P2PArticleForRenderer = {
@@ -1562,7 +1562,7 @@ function storeP2PArticles(articles: P2PArticleData[]): {
         }
     }
     
-    console.log(`[P2P-LAN] Batch store result: ${stored} stored, ${duplicates} duplicates, ${errors} errors`)
+    // console.log(`[P2P-LAN] Batch store result: ${stored} stored, ${duplicates} duplicates, ${errors} errors`)
     return { stored, duplicates, errors, groupsUpdated, newFeeds, newArticles }
 }
 
@@ -1611,14 +1611,14 @@ function notifyArticleReceived(
     articleId?: number,
     sourceId?: number
 ): void {
-    console.log(`[P2P-LAN] notifyArticleReceived called for "${title}" from ${peerName}`)
+    // console.log(`[P2P-LAN] notifyArticleReceived called for "${title}" from ${peerName}`)
     const mainWindow = getMainWindow()
     if (!mainWindow) {
-        console.log(`[P2P-LAN] WARNING: No main window found, cannot send notification!`)
+        // console.log(`[P2P-LAN] WARNING: No main window found, cannot send notification!`)
         return
     }
     
-    console.log(`[P2P-LAN] Sending p2p:articleReceived to renderer`)
+    // console.log(`[P2P-LAN] Sending p2p:articleReceived to renderer`)
     mainWindow.webContents.send("p2p:articleReceived", {
         peerId,
         peerName,
@@ -1632,7 +1632,7 @@ function notifyArticleReceived(
         articleId,
         sourceId
     })
-    console.log(`[P2P-LAN] p2p:articleReceived sent successfully`)
+    // console.log(`[P2P-LAN] p2p:articleReceived sent successfully`)
 }
 
 /**
@@ -1655,7 +1655,7 @@ function notifyArticlesReceivedBatch(
     const mainWindow = getMainWindow()
     if (!mainWindow) return
     
-    console.log(`[P2P-LAN] Sending batch of ${articles.length} articles from ${peerName} (${storedCount ?? 0} stored)`)
+    // console.log(`[P2P-LAN] Sending batch of ${articles.length} articles from ${peerName} (${storedCount ?? 0} stored)`)
     mainWindow.webContents.send("p2p:articlesReceivedBatch", {
         peerId,
         peerName,
@@ -1681,7 +1681,7 @@ function notifyP2PFeedsChanged(
     // Get complete feed data for new feeds
     const newFeeds = newFeedIds.map(sid => getSourceById(sid)).filter(Boolean)
     
-    console.log(`[P2P-LAN] Notifying feeds changed: ${newFeedIds.length} new feeds, ${newArticles?.length ?? 0} articles, groups updated: ${groupsUpdated}`)
+    // console.log(`[P2P-LAN] Notifying feeds changed: ${newFeedIds.length} new feeds, ${newArticles?.length ?? 0} articles, groups updated: ${groupsUpdated}`)
     mainWindow.webContents.send("p2p:feedsChanged", {
         newFeedIds,
         newFeeds, // Complete feed data for Lovefield insertion
@@ -1814,5 +1814,5 @@ export function registerP2PLanIpcHandlers(): void {
         return await shareToAllKnownPeers(title, url, feedName, feedUrl, feedIconUrl)
     })
     
-    console.log("[P2P-LAN] IPC handlers registered")
+    // console.log("[P2P-LAN] IPC handlers registered")
 }

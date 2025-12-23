@@ -589,8 +589,15 @@ try {
       scrollAnimationFrame = null;
       return;
     }
-    const container = document.getElementById('fr-zoom-container') || document.body;
-    container.scrollTop += scrollSpeed * scrollDirection;
+    
+    // In Visual Zoom mode (Device Emulation), use native window scrolling
+    // Otherwise use the zoom container
+    if (visualZoomEnabled) {
+      window.scrollBy(0, scrollSpeed * scrollDirection);
+    } else {
+      const container = document.getElementById('fr-zoom-container') || document.body;
+      container.scrollTop += scrollSpeed * scrollDirection;
+    }
     scrollAnimationFrame = requestAnimationFrame(smoothScroll);
   }
   
@@ -650,13 +657,52 @@ try {
     return null;
   }
   
+  // Helper to get scroll container and scroll position based on mode
+  function getScrollContext() {
+    if (visualZoomEnabled) {
+      // In Visual Zoom mode, use native window scrolling
+      return {
+        container: document.documentElement,
+        scrollTop: window.scrollY,
+        viewportHeight: window.innerHeight,
+        scrollTo: (top) => window.scrollTo({ top, behavior: 'smooth' }),
+        scrollBy: (amount) => window.scrollBy({ top: amount, behavior: 'smooth' })
+      };
+    } else {
+      // In CSS zoom mode, use the zoom container
+      const container = document.getElementById('fr-zoom-container') || document.body;
+      return {
+        container,
+        scrollTop: container.scrollTop,
+        viewportHeight: container.getBoundingClientRect().height,
+        scrollTo: (top) => container.scrollTo({ top, behavior: 'smooth' }),
+        scrollBy: (amount) => container.scrollBy({ top: amount, behavior: 'smooth' })
+      };
+    }
+  }
+  
   // Fallback: Scroll by page with overlap (like Page Down/Up but smoother)
   function scrollByPage(direction) {
-    const container = document.getElementById('fr-zoom-container') || document.body;
-    const viewportHeight = container.getBoundingClientRect().height;
+    const ctx = getScrollContext();
     // Keep 20% overlap to maintain reading context
-    const scrollAmount = viewportHeight * 0.8 * direction;
-    container.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+    const scrollAmount = ctx.viewportHeight * 0.8 * direction;
+    ctx.scrollBy(scrollAmount);
+  }
+  
+  // Check if an image extends beyond the viewport bottom
+  function getImageOverflow(img, viewportTop, viewportHeight) {
+    const imgTop = img.offsetTop;
+    const imgBottom = imgTop + img.offsetHeight;
+    const viewportBottom = viewportTop + viewportHeight;
+    
+    // Image is currently visible (at least partially in viewport)
+    const isVisible = imgTop < viewportBottom && imgBottom > viewportTop;
+    // Image extends below viewport
+    const overflowsBottom = imgBottom > viewportBottom;
+    // How much of the image is below the viewport
+    const overflowAmount = imgBottom - viewportBottom;
+    
+    return { isVisible, overflowsBottom, overflowAmount, imgTop, imgBottom };
   }
   
   function scrollToImage(direction) {
@@ -668,10 +714,9 @@ try {
       return true;
     }
     
-    const container = document.getElementById('fr-zoom-container') || document.body;
-    const containerRect = container.getBoundingClientRect();
-    const viewportTop = container.scrollTop;
-    const viewportHeight = containerRect.height;
+    const ctx = getScrollContext();
+    const viewportTop = ctx.scrollTop;
+    const viewportHeight = ctx.viewportHeight;
     // Threshold: image/heading must be at least this far into viewport to be "current"
     const visibilityThreshold = viewportHeight * 0.15; // 15% of viewport height
     
@@ -682,8 +727,26 @@ try {
     });
     
     if (direction > 0) {
-      // Forward: Find first image whose target is not yet properly visible
-      // (target top is below the visibility threshold from viewport top)
+      // Forward navigation (Space)
+      
+      // First, check if any currently visible image overflows the viewport
+      // If so, scroll to show more of that image instead of jumping to the next one
+      for (let i = 0; i < images.length; i++) {
+        const overflow = getImageOverflow(images[i], viewportTop, viewportHeight);
+        
+        if (overflow.isVisible && overflow.overflowsBottom) {
+          // This image is visible but extends below viewport
+          // Scroll by page to show more of it (with overlap for context)
+          const scrollAmount = Math.min(
+            overflow.overflowAmount + viewportHeight * 0.1, // Show rest of image + small margin
+            viewportHeight * 0.8 // But not more than 80% of viewport
+          );
+          ctx.scrollBy(scrollAmount);
+          return true;
+        }
+      }
+      
+      // No overflowing image - find next image/heading to scroll to
       for (let i = 0; i < targets.length; i++) {
         const targetTop = targets[i].target.offsetTop;
         if (targetTop > viewportTop + visibilityThreshold) {
@@ -697,9 +760,30 @@ try {
       scrollByPage(direction);
       return true;
     } else {
-      // Backward: Find the previous image/target to scroll to
-      // We need to find the target that is just above the current viewport position
-      // First, find which target is currently at the top of the viewport
+      // Backward navigation (Shift+Space)
+      
+      // Check if any currently visible image overflows the top of viewport
+      // (meaning we scrolled past its top, but it's still partially visible)
+      for (let i = images.length - 1; i >= 0; i--) {
+        const img = images[i];
+        const imgTop = img.offsetTop;
+        const imgBottom = imgTop + img.offsetHeight;
+        
+        // Image is visible and its top is above the viewport
+        const topIsAbove = imgTop < viewportTop;
+        const isStillVisible = imgBottom > viewportTop + visibilityThreshold;
+        
+        if (topIsAbove && isStillVisible) {
+          // We're in the middle of a tall image - scroll up to show its top
+          const scrollAmount = viewportTop - imgTop;
+          // But scroll by at least 80% of viewport for good navigation
+          const actualScroll = Math.max(scrollAmount, viewportHeight * 0.8);
+          ctx.scrollBy(-Math.min(actualScroll, viewportTop)); // Don't scroll past top
+          return true;
+        }
+      }
+      
+      // Find the previous image/target to scroll to
       let currentIndex = -1;
       for (let i = 0; i < targets.length; i++) {
         const targetTop = targets[i].target.offsetTop;
@@ -722,7 +806,7 @@ try {
         return true;
       } else if (currentIndex === 0) {
         // Already at first image, scroll to top
-        container.scrollTo({ top: 0, behavior: 'smooth' });
+        ctx.scrollTo(0);
         return true;
       } else {
         // No current index found - find the last target that is above viewport
