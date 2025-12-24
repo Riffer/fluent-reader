@@ -250,10 +250,21 @@ export class ContentViewManager {
             return this.executeJavaScript(code)
         })
         
-        // Set zoom factor (for +/- keyboard shortcuts)
+        // Set zoom factor (for +/- keyboard shortcuts - uses CSS zoom or Device Emulation)
         ipcMain.on("content-view-set-zoom-factor", (event, factor: number) => {
             console.log("[ContentViewManager] IPC: set zoom factor", factor)
             this.setZoomFactor(factor)
+        })
+        
+        // Set CSS zoom level directly (for preload-based zoom when Visual Zoom is OFF)
+        ipcMain.on("content-view-set-css-zoom", (event, level: number) => {
+            console.log("[ContentViewManager] IPC: set css zoom level", level)
+            this.setCssZoom(level)
+        })
+        
+        // Get current CSS zoom level
+        ipcMain.handle("content-view-get-css-zoom-level", () => {
+            return this.getCssZoomLevel()
         })
         
         // Get current zoom factor
@@ -490,6 +501,12 @@ export class ContentViewManager {
     private keyboardZoomFactor: number = 1.0
     
     /**
+     * Current CSS zoom level (for preload-based zoom when Visual Zoom is OFF)
+     * Level: 0 = 100%, 1 = 110%, -1 = 90%, etc.
+     */
+    private cssZoomLevel: number = 0
+    
+    /**
      * Set zoom factor for keyboard +/- shortcuts
      * Uses Device Emulation scale parameter when visual zoom is enabled
      */
@@ -509,13 +526,41 @@ export class ContentViewManager {
                 this.applyDeviceEmulationWithScale(clampedFactor)
                 console.log("[ContentViewManager] Zoom via Device Emulation scale:", clampedFactor)
             } else {
-                // Without Device Emulation, use webContents.setZoomFactor
-                this.contentView.webContents.setZoomFactor(clampedFactor)
-                console.log("[ContentViewManager] Zoom via setZoomFactor:", clampedFactor)
+                // Without Visual Zoom, use CSS zoom via preload
+                // Convert factor to zoom level: 1.0 = 0, 1.1 = 1, 0.9 = -1
+                const level = Math.round((clampedFactor - 1.0) / 0.1)
+                this.setCssZoom(level)
             }
         } catch (e) {
             console.error("[ContentViewManager] setZoomFactor error:", e)
         }
+    }
+    
+    /**
+     * Set CSS zoom level (for preload-based zoom when Visual Zoom is OFF)
+     * Level: 0 = 100%, 1 = 110%, -1 = 90%, etc.
+     * This matches the WebView preload zoom behavior
+     */
+    public setCssZoom(level: number): void {
+        if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
+            console.log("[ContentViewManager] setCssZoom: webContents not ready")
+            return
+        }
+        
+        // Clamp to reasonable range
+        const clampedLevel = Math.max(-6, Math.min(40, level))
+        this.cssZoomLevel = clampedLevel
+        
+        // Send to preload script (same message as WebView uses)
+        this.contentView.webContents.send('set-webview-zoom', clampedLevel)
+        console.log("[ContentViewManager] CSS Zoom via preload:", clampedLevel)
+    }
+    
+    /**
+     * Get current CSS zoom level
+     */
+    public getCssZoomLevel(): number {
+        return this.cssZoomLevel
     }
     
     /**

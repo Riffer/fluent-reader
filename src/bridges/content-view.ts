@@ -71,10 +71,27 @@ export const contentViewBridge = {
     
     /**
      * Set zoom factor (for +/- keyboard shortcuts)
-     * Works alongside device emulation
+     * Uses CSS zoom (via preload) when Visual Zoom is OFF
+     * Uses Device Emulation scale when Visual Zoom is ON
      */
     setZoomFactor: (factor: number): void => {
         ipcRenderer.send("content-view-set-zoom-factor", factor)
+    },
+    
+    /**
+     * Set CSS zoom level directly (for preload-based zoom)
+     * Level: 0 = 100%, 1 = 110%, -1 = 90%, etc.
+     * This matches the WebView preload zoom behavior
+     */
+    setCssZoom: (level: number): void => {
+        ipcRenderer.send("content-view-set-css-zoom", level)
+    },
+    
+    /**
+     * Get current CSS zoom level
+     */
+    getCssZoomLevel: (): Promise<number> => {
+        return ipcRenderer.invoke("content-view-get-css-zoom-level")
     },
     
     /**

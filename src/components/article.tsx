@@ -91,6 +91,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     pressedZoomKeys: Set<string>
     currentZoom: number = 0  // Track zoom locally to avoid state lag
     private _isMounted = false
+    private _isTogglingMode = false  // Flag to prevent componentDidUpdate from overriding state during toggle
     private cookieSaveTimeout: NodeJS.Timeout | null = null  // Debounce für Cookie-Speicherung
     private lastCookieSaveTime: number = 0  // Timestamp der letzten Cookie-Speicherung
     
@@ -163,165 +164,114 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private contentViewZoomFactor: number = 1.0;
     
     /**
-     * Apply zoom to the current view (WebView or ContentView)
-     * For ContentView in Visual Zoom mode: uses webContents.setZoomFactor
-     * For WebView: uses CSS-based zoom via preload
+     * Apply zoom to the current view (always ContentView now)
+     * - Visual Zoom ON: uses Device Emulation scale (native pinch-to-zoom works)
+     * - Visual Zoom OFF: uses CSS-based zoom via preload (like old WebView)
      */
     private applyZoom = (zoomLevel: number) => {
-        // ContentView with Visual Zoom - use setZoomFactor
-        if (this.state.loadWebpage && this.state.visualZoomEnabled && window.contentView) {
-            // Convert zoomLevel to factor: level 0 = 1.0, level 1 = 1.1, level -1 = 0.9
-            const factor = 1.0 + (zoomLevel * 0.1);
+        if (!window.contentView) {
+            console.log('[Zoom] ContentView not available');
+            return;
+        }
+        
+        // Clamp zoom level
+        const clampedLevel = Math.max(-6, Math.min(40, zoomLevel));
+        this.currentZoom = clampedLevel;
+        
+        if (this.state.visualZoomEnabled) {
+            // Visual Zoom ON: use Device Emulation scale (native zoom)
+            const factor = 1.0 + (clampedLevel * 0.1);
             this.contentViewZoomFactor = factor;
             window.contentView.setZoomFactor(factor);
-            console.log('[Zoom] ContentView zoom factor:', factor, 'from level:', zoomLevel);
-        } else if (this.webview) {
-            // WebView - use CSS-based zoom
-            this.sendZoomToPreload(zoomLevel);
+            console.log('[Zoom] Native zoom factor:', factor, 'from level:', clampedLevel);
+        } else {
+            // Visual Zoom OFF: use CSS-based zoom via preload
+            window.contentView.setCssZoom(clampedLevel);
+            console.log('[Zoom] CSS zoom level:', clampedLevel);
         }
         
         // Update state and persist
-        this.setState({ zoom: zoomLevel });
-        this.updateDefaultZoom(zoomLevel);
+        if (this._isMounted) {
+            this.setState({ zoom: clampedLevel });
+        }
+        this.updateDefaultZoom(clampedLevel);
     }
 
-    private sendZoomOverlaySettingToPreload = (show: boolean) => {
-        if (!this.webview) return;
-        try {
-            this.webview.send('set-zoom-overlay-setting', show);
-        } catch (e) {
-            // Falls das Webview noch nicht bereit ist, nach dom-ready einmalig senden
-            const once = () => {
-                try { this.webview.send('set-zoom-overlay-setting', show); } catch {}
-                this.webview.removeEventListener('dom-ready', once as any);
-            };
-            try { this.webview.addEventListener('dom-ready', once as any); } catch {}
+    /**
+     * Send settings to ContentView preload script
+     */
+    private sendSettingsToContentView = () => {
+        if (!window.contentView) return;
+        
+        const zoomLevel = this.currentZoom;
+        const showOverlay = this.state.showZoomOverlay;
+        const mobileMode = this.localMobileMode;
+        const visualZoom = this.state.visualZoomEnabled;
+        
+        console.log('[ContentView] Sending settings: zoom:', zoomLevel, 'overlay:', showOverlay, 'mobile:', mobileMode, 'visualZoom:', visualZoom);
+        
+        // Send all settings to preload
+        window.contentView.send('set-zoom-overlay-setting', showOverlay);
+        window.contentView.send('set-mobile-mode', mobileMode);
+        window.contentView.send('set-visual-zoom-mode', visualZoom);
+        
+        // Apply zoom based on mode
+        if (visualZoom) {
+            const factor = 1.0 + (zoomLevel * 0.1);
+            window.contentView.setZoomFactor(factor);
+        } else {
+            window.contentView.setCssZoom(zoomLevel);
         }
+    }
+
+    private sendZoomOverlaySettingToContentView = (show: boolean) => {
+        if (!window.contentView) return;
+        window.contentView.send('set-zoom-overlay-setting', show);
     }
 
     private toggleZoomOverlay = () => {
+        if (!this._isMounted) return;
         const newValue = !this.state.showZoomOverlay;
         window.settings.setZoomOverlay(newValue);
         this.setState({ showZoomOverlay: newValue });
-        this.sendZoomOverlaySettingToPreload(newValue);
+        this.sendZoomOverlaySettingToContentView(newValue);
     }
 
-    // Visual Zoom (Pinch-to-Zoom) - aktiviert nur screenPosition:"mobile" ohne User-Agent-Änderung
+    /**
+     * Toggle Visual Zoom mode
+     * - Visual Zoom ON: Native pinch-to-zoom via Device Emulation
+     * - Visual Zoom OFF: CSS-based zoom via preload (like old WebView)
+     * Both modes use ContentView now - no more switching between WebView and ContentView!
+     */
     private toggleVisualZoom = async () => {
         const newValue = !this.state.visualZoomEnabled;
         window.settings.setVisualZoom(newValue);
-        this.setState({ visualZoomEnabled: newValue });
         
-        console.log('[VisualZoom] Toggle:', newValue ? 'ON (ContentView)' : 'OFF (WebView)');
+        console.log('[VisualZoom] Toggle:', newValue ? 'ON (native zoom)' : 'OFF (CSS zoom)');
         
-        // When switching to ContentView, initialize it and set focus
-        if (newValue && this.state.loadWebpage) {
-            // Hide any existing WebView emulation (only if WebView is ready)
-            if (this.webview) {
-                try {
-                    const webContentsId = (this.webview as any).getWebContentsId?.();
-                    if (webContentsId) {
-                        await this.disableVisualZoomEmulation();
-                    }
-                } catch (e) {
-                    // WebView not ready, ignore
-                }
-            }
-            // Small delay to let state update, then initialize ContentView
-            setTimeout(() => {
-                this.initializeContentView();
-                // Focus after ContentView is shown (additional delay for rendering)
-                setTimeout(() => {
-                    if (window.contentView) {
-                        window.contentView.focus();
-                        console.log('[VisualZoom] ContentView focused');
-                    }
-                }, 100);
-            }, 50);
-        } else {
-            // Switching to WebView - hide ContentView
-            console.log('[VisualZoom] Switching to WebView mode...');
-            if (window.contentView) {
-                window.contentView.setVisible(false);
-            }
-            // Clear the tracked URL so next ContentView init will navigate again
-            this.contentViewCurrentUrl = null;
+        // Update ContentView settings
+        if (window.contentView) {
+            window.contentView.setVisualZoom(newValue);
+            window.contentView.send('set-visual-zoom-mode', newValue);
             
-            // Set flag to focus WebView after it finishes loading
-            // This handles the case where the page does multiple reloads (ads etc.)
-            this.pendingWebViewFocus = true;
-            console.log('[VisualZoom] pendingWebViewFocus set - will focus after did-stop-loading');
+            // Re-apply zoom with new mode
+            const zoomLevel = this.currentZoom;
+            if (newValue) {
+                // Switch to native zoom
+                const factor = 1.0 + (zoomLevel * 0.1);
+                window.contentView.setZoomFactor(factor);
+            } else {
+                // Switch to CSS zoom
+                window.contentView.setCssZoom(zoomLevel);
+            }
+        }
+        
+        if (this._isMounted) {
+            this.setState({ visualZoomEnabled: newValue });
         }
     }
 
-    // Visual Zoom Emulation aktivieren (nur screenPosition: "mobile", kein User-Agent)
-    private enableVisualZoomEmulation = async () => {
-        if (!this.webview) return false;
-        try {
-            const webContentsId = (this.webview as any).getWebContentsId();
-            if (!webContentsId) {
-                console.error('[VisualZoom] Could not get webContentsId');
-                return false;
-            }
-            
-            // Hole die tatsächliche Webview-Größe
-            const webviewRect = this.webview.getBoundingClientRect();
-            const viewportWidth = webviewRect.width > 0 ? Math.round(webviewRect.width) : 800;
-            const viewportHeight = webviewRect.height > 0 ? Math.round(webviewRect.height) : 600;
-            
-            const ipcRenderer = (window as any).ipcRenderer;
-            if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
-                // KEIN userAgent parameter - behalte Original User-Agent bei
-                const result = await ipcRenderer.invoke('enable-device-emulation', webContentsId, {
-                    screenPosition: "mobile",  // Dies aktiviert Pinch-to-Zoom!
-                    screenSize: { width: viewportWidth, height: viewportHeight },
-                    deviceScaleFactor: 1,
-                    viewSize: { width: viewportWidth, height: viewportHeight },
-                    fitToView: false
-                    // KEIN userAgent - behalte Desktop User-Agent
-                });
-                console.log('[VisualZoom] Emulation enabled:', result, 'viewport:', viewportWidth, 'x', viewportHeight);
-                
-                // WICHTIG: Informiere das Webview-Preload, dass Visual Zoom aktiv ist
-                // Damit werden die Touch-Event-Handler im Preload deaktiviert
-                try {
-                    this.webview.send('set-visual-zoom-mode', true);
-                } catch {}
-                
-                return result;
-            }
-            return false;
-        } catch (e) {
-            console.error('[VisualZoom] Error enabling emulation:', e);
-            return false;
-        }
-    }
-
-    // Visual Zoom Emulation deaktivieren
-    private disableVisualZoomEmulation = async () => {
-        if (!this.webview) return false;
-        try {
-            // WICHTIG: Informiere das Webview-Preload zuerst
-            try {
-                this.webview.send('set-visual-zoom-mode', false);
-            } catch {}
-            
-            const webContentsId = (this.webview as any).getWebContentsId();
-            if (!webContentsId) return false;
-            const ipcRenderer = (window as any).ipcRenderer;
-            if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
-                const result = await ipcRenderer.invoke('disable-device-emulation', webContentsId);
-                console.log('[VisualZoom] Emulation disabled:', result);
-                return result;
-            }
-            return false;
-        } catch (e) {
-            console.error('[VisualZoom] Error disabling emulation:', e);
-            return false;
-        }
-    }
-
-    // ===== ContentView Methods (WebContentsView for Visual Zoom) =====
+    // ===== ContentView Methods (WebContentsView - now used for ALL display modes) =====
     
     /**
      * Setup ContentView event listeners
@@ -331,7 +281,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Loading state
         const unsubLoading = window.contentView.onLoading((loading) => {
-            if (!loading) {
+            if (!loading && this._isMounted) {
                 this.setState({ loaded: true });
             }
         });
@@ -340,10 +290,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Error handling
         const unsubError = window.contentView.onError((error) => {
             console.error('[ContentView] Load error:', error);
-            this.setState({ 
-                error: true, 
-                errorDescription: error.errorDescription 
-            });
+            if (this._isMounted) {
+                this.setState({ 
+                    error: true, 
+                    errorDescription: error.errorDescription 
+                });
+            }
         });
         this.contentViewCleanup.push(unsubError);
         
@@ -455,6 +407,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     /**
      * Initialize ContentView for displaying article content
      */
+    /**
+     * Initialize ContentView for ALL content types
+     * - Webpage mode: navigate to URL
+     * - RSS/Full content: load HTML directly via data URL
+     * ContentView is now the ONLY display method (no more WebView!)
+     */
     private initializeContentView = async () => {
         if (!this.contentViewPlaceholderRef) return;
         
@@ -464,7 +422,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             return;
         }
         
-        console.log('[ContentView] Initializing for URL:', this.props.item.link);
+        const isWebpage = this.state.loadWebpage;
+        console.log('[ContentView] Initializing for:', isWebpage ? 'Webpage' : 'RSS/Full Content');
         
         try {
             // Setup listeners if not already done
@@ -491,35 +450,49 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 window.addEventListener('resize', this.windowResizeListener);
             }
             
-            // Enable visual zoom
-            window.contentView.setVisualZoom(true);
+            // Configure Visual Zoom mode
+            window.contentView.setVisualZoom(this.state.visualZoomEnabled);
+            window.contentView.send('set-visual-zoom-mode', this.state.visualZoomEnabled);
             
             // Set mobile mode if needed
             if (this.localMobileMode) {
                 window.contentView.setMobileMode(true);
             }
             
-            // Navigate to URL (only if URL changed)
-            const targetUrl = this.props.item.link;
-            if (this.contentViewCurrentUrl !== targetUrl) {
-                console.log('[ContentView] Navigating to:', targetUrl);
-                this.contentViewCurrentUrl = targetUrl;
-                await window.contentView.navigate(targetUrl);
+            // Send settings to ContentView preload
+            this.sendSettingsToContentView();
+            this.sendZoomOverlaySettingToContentView(this.state.showZoomOverlay);
+            
+            // Apply current zoom level
+            this.applyZoom(this.currentZoom);
+            
+            // Load content based on mode
+            if (isWebpage) {
+                // Webpage mode: Navigate to URL
+                const targetUrl = this.props.item.link;
+                if (this.contentViewCurrentUrl !== targetUrl) {
+                    console.log('[ContentView] Navigating to:', targetUrl);
+                    this.contentViewCurrentUrl = targetUrl;
+                    await window.contentView.navigate(targetUrl);
+                } else {
+                    console.log('[ContentView] URL unchanged, skipping navigation');
+                }
             } else {
-                console.log('[ContentView] URL unchanged, skipping navigation');
+                // RSS or Full content mode: Load HTML directly
+                const htmlDataUrl = this.articleView();
+                console.log('[ContentView] Loading HTML content');
+                // Navigate to data URL (articleView returns data:text/html;base64,...)
+                await window.contentView.navigate(htmlDataUrl);
+                this.contentViewCurrentUrl = htmlDataUrl;
             }
             
             // Show ContentView
             window.contentView.setVisible(true);
             
-            // Note: Menu access is now handled via explicit overlay detection
-            // (handleOverlayVisibilityChange, handleFluentMenuOpened/Dismissed)
-            // and click-to-restore on blur placeholder
-            
             // Focus
             window.contentView.focus();
             
-            this.setState({ webviewVisible: true });
+            this.setState({ webviewVisible: true, loaded: true });
         } catch (e) {
             console.error('[ContentView] Error initializing:', e);
         }
@@ -1305,35 +1278,26 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const currentMobileMode = this.localMobileMode;
         if (this.state.loadWebpage) {
             if (currentMobileMode) {
-                console.log('[Article] did-stop-loading: Enabling mobile emulation');
-                this.enableMobileEmulation().catch(e => {
-                    console.warn('[Article] did-stop-loading: Failed to enable mobile emulation:', e.message);
-                });
-            } else if (this.state.visualZoomEnabled) {
-                // Visual Zoom ohne Mobile Mode: nur screenPosition: "mobile" aktivieren
-                console.log('[Article] did-stop-loading: Enabling visual zoom (without mobile mode)');
-                this.enableVisualZoomEmulation().catch(e => {
-                    console.warn('[Article] did-stop-loading: Failed to enable visual zoom:', e.message);
-                });
+                console.log('[Article] did-stop-loading: Mobile emulation handled by ContentView');
+                // NOTE: With ContentView, mobile mode is handled via window.contentView.setMobileMode()
             } else {
-                console.log('[Article] did-stop-loading: Disabling mobile emulation');
-                this.disableMobileEmulation().catch(e => {
-                    console.warn('[Article] did-stop-loading: Failed to disable mobile emulation:', e.message);
-                });
+                console.log('[Article] did-stop-loading: Normal mode');
             }
         }
         
         const targetZoom = this.props.source.defaultZoom || 0;
         // Synchronisiere currentZoom mit dem Feed-Zoom
         this.currentZoom = targetZoom;
-        console.log('[Article] did-stop-loading: Sending zoom:', targetZoom, 'mobileMode:', currentMobileMode);
-        try {
-            this.sendZoomToPreload(targetZoom);
-            // Sende Zoom-Overlay-Einstellung nochmals
-            this.sendZoomOverlaySettingToPreload(this.state.showZoomOverlay);
-            // Sende Mobile-Mode-Status
-            this.webview.send('set-mobile-mode', currentMobileMode);
-        } catch {}
+        console.log('[Article] did-stop-loading: Applying zoom:', targetZoom, 'mobileMode:', currentMobileMode);
+        
+        // Apply zoom via ContentView (replaces old WebView logic)
+        this.applyZoom(targetZoom);
+        this.sendZoomOverlaySettingToContentView(this.state.showZoomOverlay);
+        
+        // Send mobile mode status to ContentView
+        if (window.contentView) {
+            window.contentView.send('set-mobile-mode', currentMobileMode);
+        }
         
         // Cookies speichern nach dem Laden (für Login-Flows)
         if (this.props.source.persistCookies && this.state.loadWebpage) {
@@ -1496,7 +1460,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             }
         }
     }
-    componentDidUpdate = (prevProps: ArticleProps) => {
+    componentDidUpdate = (prevProps: ArticleProps, prevState: ArticleState) => {
         if (prevProps.item._id != this.props.item._id) {
             // Fehler-State zurücksetzen bei Artikelwechsel
             if (this.state.error) {
@@ -1565,12 +1529,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.setState({ isLoadingFull: true })
                     this.loadFull()
                 } else if (this.state.loadWebpage) {
-                    // For webpage mode
-                    if (this.state.visualZoomEnabled && window.contentView) {
-                        // ContentView mode: navigate to new article (only if URL changed)
+                    // For webpage mode - ContentView navigates to URL
+                    if (window.contentView) {
                         const targetUrl = this.props.item.link;
                         if (this.contentViewCurrentUrl !== targetUrl) {
-                            console.log('[ContentView] Article changed - navigating to:', targetUrl);
+                            console.log('[ContentView] Article changed (webpage) - navigating to:', targetUrl);
                             this.contentViewCurrentUrl = targetUrl;
                             window.contentView.navigate(targetUrl);
                         }
@@ -1580,40 +1543,71 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                                 window.contentView.focus();
                             }
                         }, 100);
-                    } else if (this.webview) {
-                        // WebView mode: focus after dom-ready
-                        const focusOnReady = () => {
-                            this.webview.focus()
-                            this.webview.removeEventListener('dom-ready', focusOnReady)
-                        }
-                        this.webview.addEventListener('dom-ready', focusOnReady)
                     }
                 } else {
-                    // For regular feed content: focus webview
+                    // For regular RSS feed content - ContentView loads HTML data URL
+                    // ContentView is now used for ALL modes, so we need to update content
+                    if (window.contentView) {
+                        const htmlDataUrl = this.articleView();
+                        console.log('[ContentView] Article changed (RSS) - loading new content');
+                        this.contentViewCurrentUrl = htmlDataUrl;
+                        window.contentView.navigate(htmlDataUrl);
+                        // Focus ContentView
+                        setTimeout(() => {
+                            if (window.contentView) {
+                                window.contentView.focus();
+                            }
+                        }, 100);
+                    }
                     this.sendZoomToPreload(this.currentZoom)
-                    this.focusWebviewAfterLoad()
                 }
             })
         } else if (prevProps.source.openTarget !== this.props.source.openTarget) {
-            // If openTarget changes, update the state
-            const loadFull = this.props.source.openTarget === SourceOpenTarget.FullContent
-            this.setState({
-                loadWebpage:
-                    this.props.source.openTarget === SourceOpenTarget.Webpage,
-                loadFull: loadFull,
-            })
+            // If openTarget changes from OUTSIDE (not from toggleWebpage/toggleFull), update the state
+            // Skip if we're currently toggling mode (to prevent race conditions)
+            if (this._isTogglingMode) {
+                console.log('[Article] componentDidUpdate - openTarget changed but _isTogglingMode is true - IGNORING')
+                return
+            }
+            
+            const targetLoadWebpage = this.props.source.openTarget === SourceOpenTarget.Webpage
+            const targetLoadFull = this.props.source.openTarget === SourceOpenTarget.FullContent
+            
+            console.log('[Article] componentDidUpdate - openTarget changed:',
+                'prev:', prevProps.source.openTarget, 
+                'new:', this.props.source.openTarget,
+                'current state loadWebpage:', this.state.loadWebpage,
+                'target loadWebpage:', targetLoadWebpage)
+            
+            // Only update if state doesn't already match the target
+            if (this.state.loadWebpage !== targetLoadWebpage || this.state.loadFull !== targetLoadFull) {
+                console.log('[Article] openTarget changed from outside, syncing state:', 
+                    'loadWebpage:', targetLoadWebpage, 'loadFull:', targetLoadFull)
+                this.setState({
+                    loadWebpage: targetLoadWebpage,
+                    loadFull: targetLoadFull,
+                })
+            } else {
+                console.log('[Article] openTarget changed but state already matches - skipping setState')
+            }
         }
         
         // Handle overlay visibility changes for ContentView (Redux-based overlays only)
         // This covers: settings, log menu, context menus (not hamburger menu)
         // Note: Fluent UI dropdowns (Tools, View) are handled by onMenuOpened/onMenuDismissed callbacks
-        if (this.state.visualZoomEnabled && prevProps.overlayActive !== this.props.overlayActive) {
+        if (prevProps.overlayActive !== this.props.overlayActive) {
             this.handleOverlayVisibilityChange(this.props.overlayActive)
+        }
+        
+        // Handle local dialog state changes (P2P Share Dialog, etc.)
+        // These are not managed by Redux, so we need to handle them separately
+        if (prevState.showP2PShareDialog !== this.state.showP2PShareDialog) {
+            this.handleLocalDialogVisibilityChange(this.state.showP2PShareDialog)
         }
         
         // Handle hamburger menu layout changes - update ContentView bounds
         // The hamburger menu doesn't overlap but changes the layout position
-        if (this.state.visualZoomEnabled && this.state.loadWebpage && prevProps.menuOpen !== this.props.menuOpen) {
+        if (this.state.loadWebpage && prevProps.menuOpen !== this.props.menuOpen) {
             // Small delay to let the CSS transition complete
             setTimeout(() => {
                 if (this._isMounted) {
@@ -1656,8 +1650,51 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             }
         } else {
             // Redux overlay closed - check if we can restore
-            if (this.contentViewHiddenForMenu && !this.fluentMenuOpen) {
+            if (this.contentViewHiddenForMenu && !this.fluentMenuOpen && !this.localDialogOpen) {
                 console.log('[Article] Redux overlay closed - restoring ContentView')
+                this.restoreContentView()
+            }
+        }
+    }
+    
+    // Track if a local dialog (not Redux-managed) is open
+    private localDialogOpen = false
+    
+    /**
+     * Handle local dialog visibility change for ContentView
+     * Covers dialogs managed by local component state (P2P Share Dialog, etc.)
+     */
+    private handleLocalDialogVisibilityChange = async (dialogOpen: boolean) => {
+        if (!window.contentView) return
+        
+        if (dialogOpen) {
+            // Local dialog is opening - capture screenshot and hide ContentView
+            console.log('[Article] Local dialog opening - capturing screenshot')
+            this.localDialogOpen = true
+            try {
+                const screenshot = await window.contentView.captureScreen()
+                if (screenshot && this._isMounted) {
+                    this.setState({ menuBlurScreenshot: screenshot })
+                    // Small delay to ensure React renders the placeholder before hiding ContentView
+                    setTimeout(() => {
+                        if (this._isMounted && this.localDialogOpen) {
+                            window.contentView.setVisible(false, true) // preserveContent for blur-div
+                            this.contentViewHiddenForMenu = true
+                            console.log('[Article] ContentView hidden for local dialog')
+                        }
+                    }, 16)
+                }
+            } catch (e) {
+                console.error('[Article] Error capturing screenshot:', e)
+                // Even without screenshot, hide ContentView
+                window.contentView.setVisible(false, true) // preserveContent for blur-div
+                this.contentViewHiddenForMenu = true
+            }
+        } else {
+            // Local dialog closed - check if we can restore
+            this.localDialogOpen = false
+            if (this.contentViewHiddenForMenu && !this.fluentMenuOpen && !this.props.overlayActive) {
+                console.log('[Article] Local dialog closed - restoring ContentView')
                 this.restoreContentView()
             }
         }
@@ -1674,7 +1711,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         console.log('[Article] Fluent UI menu opening')
         this.fluentMenuOpen = true
         
-        if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return
+        // ContentView is now used for ALL modes (RSS, Full Content, Webpage)
+        // Hide it whenever a menu opens to allow interaction with the menu
         if (!window.contentView) return
         if (this.contentViewHiddenForMenu) return  // Already hidden
         
@@ -1700,13 +1738,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         console.log('[Article] Fluent UI menu dismissed')
         this.fluentMenuOpen = false
         
-        if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return
+        // ContentView is now used for ALL modes - restore if it was hidden
         if (!window.contentView) return
         if (!this.contentViewHiddenForMenu) return  // Not hidden, nothing to do
         
-        // Check if Redux overlay is still active
+        // Check if Redux overlay or local dialog is still active
         if (this.props.overlayActive) {
             console.log('[Article] Fluent menu dismissed but Redux overlay active - staying hidden')
+            return
+        }
+        if (this.localDialogOpen) {
+            console.log('[Article] Fluent menu dismissed but local dialog active - staying hidden')
             return
         }
         
@@ -1950,76 +1992,116 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     toggleWebpage = () => {
+        console.log('[Article] toggleWebpage called, current loadWebpage:', this.state.loadWebpage);
+        
+        // Set flag to prevent componentDidUpdate from overriding our state changes
+        this._isTogglingMode = true;
+        
         if (this.state.loadWebpage) {
-            // Switching FROM webpage mode - cleanup ContentView
-            if (this.state.visualZoomEnabled && window.contentView) {
-                this.cleanupContentView();
-            }
-            this.setState({ loadWebpage: false }, () => {
+            // Switching FROM webpage mode TO RSS mode
+            console.log('[Article] Switching FROM Webpage TO RSS mode');
+            // Clear tracked URL so ContentView will reload with new content
+            this.contentViewCurrentUrl = null;
+            
+            // Capture source BEFORE setState to avoid stale reference
+            const sourceSnapshot = this.props.source;
+            
+            this.setState({ loadWebpage: false, webviewVisible: false }, () => {
+                console.log('[Article] State set to loadWebpage: false');
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
-                    this.props.source,
+                    sourceSnapshot,
                     SourceOpenTarget.Local
                 )
+                // Re-initialize ContentView with RSS content
+                this.initializeContentView();
+                
+                // Clear toggle flag after a short delay to allow Redux updates to settle
+                setTimeout(() => { this._isTogglingMode = false; }, 500);
             })
         } else if (
             this.props.item.link.startsWith("https://") ||
             this.props.item.link.startsWith("http://")
         ) {
-            this.setState({ loadWebpage: true, loadFull: false }, () => {
+            // Switching TO webpage mode
+            console.log('[Article] Switching TO Webpage mode');
+            // Clear tracked URL so ContentView will load the webpage
+            this.contentViewCurrentUrl = null;
+            
+            // Capture source BEFORE setState to avoid stale reference
+            const sourceSnapshot = this.props.source;
+            console.log('[Article] Source snapshot openTarget:', sourceSnapshot.openTarget);
+            
+            this.setState({ loadWebpage: true, loadFull: false, webviewVisible: false }, () => {
+                console.log('[Article] State set to loadWebpage: true');
+                console.log('[Article] Current props.source.openTarget:', this.props.source.openTarget);
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
-                    this.props.source,
+                    sourceSnapshot,
                     SourceOpenTarget.Webpage
                 )
-                // Focus webview/contentView after switching to webpage mode
-                if (this.state.visualZoomEnabled && window.contentView) {
-                    // Using ContentView - it will be focused in initializeContentView
-                } else if (this.webview) {
-                    const focusOnReady = () => {
-                        this.webview.focus()
-                        this.webview.removeEventListener('dom-ready', focusOnReady)
-                    }
-                    this.webview.addEventListener('dom-ready', focusOnReady)
-                }
+                // Re-initialize ContentView with webpage URL
+                this.initializeContentView();
+                
+                // Clear toggle flag after a short delay to allow Redux updates to settle
+                setTimeout(() => { this._isTogglingMode = false; }, 500);
             })
+        } else {
+            // URL doesn't start with http/https, clear the flag
+            this._isTogglingMode = false;
         }
     }
 
     toggleFull = () => {
+        // Set flag to prevent componentDidUpdate from overriding our state changes
+        this._isTogglingMode = true;
+        
         if (this.state.loadFull) {
-            this.setState({ loadFull: false }, () => {
+            // Switching FROM Full Content TO RSS raw
+            // Clear tracked URL so ContentView will reload with new content
+            this.contentViewCurrentUrl = null;
+            
+            // Capture source BEFORE setState to avoid stale reference
+            const sourceSnapshot = this.props.source;
+            
+            this.setState({ loadFull: false, webviewVisible: false }, () => {
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
-                    this.props.source,
+                    sourceSnapshot,
                     SourceOpenTarget.Local
                 )
-                // Set focus to webview for RSS content
-                if (this.webview) {
-                    const focusOnReady = () => {
-                        this.webview.focus()
-                        this.webview.removeEventListener('dom-ready', focusOnReady)
-                    }
-                    this.webview.addEventListener('dom-ready', focusOnReady)
-                }
+                // Re-initialize ContentView with RSS content
+                this.initializeContentView();
+                
+                // Clear toggle flag after a short delay to allow Redux updates to settle
+                setTimeout(() => { this._isTogglingMode = false; }, 500);
             })
         } else if (
             this.props.item.link.startsWith("https://") ||
             this.props.item.link.startsWith("http://")
         ) {
-            // Switching TO full mode - cleanup ContentView if it was active
-            if (this.state.loadWebpage && this.state.visualZoomEnabled && window.contentView) {
-                this.cleanupContentView();
-            }
-            this.setState({ loadFull: true, loadWebpage: false, webviewVisible: true }, () => {
+            // Switching TO full mode
+            // Clear tracked URL so ContentView will reload
+            this.contentViewCurrentUrl = null;
+            
+            // Capture source BEFORE setState to avoid stale reference
+            const sourceSnapshot = this.props.source;
+            
+            this.setState({ loadFull: true, loadWebpage: false, webviewVisible: false }, () => {
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
-                    this.props.source,
+                    sourceSnapshot,
                     SourceOpenTarget.FullContent
                 )
-                // Focus webview after switching to full content mode
+                // Load and extract full content
                 this.loadFull()
+                
+                // Clear toggle flag after a short delay to allow Redux updates to settle
+                setTimeout(() => { this._isTogglingMode = false; }, 500);
             })
+        } else {
+            // URL doesn't start with http/https, clear the flag
+            this._isTogglingMode = false;
         }
     }
     loadFull = async () => {
@@ -2111,17 +2193,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 if (this._isMounted) {
                     this.setState({ 
                         fullContent: contentToUse, 
-                        loaded: true,
+                        loaded: false, // Will be set true after ContentView loads
                         isLoadingFull: false,
-                        webviewVisible: true,
+                        webviewVisible: false, // Will be set true after ContentView initializes
                         extractorTitle: extractorTitle,
                         extractorDate: extractorDate
                     }, () => {
-                        // Apply saved zoom level and focus webview after full content is rendered
+                        // Apply saved zoom level
                         const savedZoom = this.props.source.defaultZoom || 0
                         this.currentZoom = savedZoom
-                        this.sendZoomToPreload(savedZoom)
-                        this.focusWebviewAfterLoad()
+                        // Re-initialize ContentView with the new full content
+                        this.initializeContentView()
                     })
                 }
             }
@@ -2131,19 +2213,19 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 // Fallback to item content on error
                 this.setState({ 
                     fullContent: this.props.item.content,
-                    loaded: true,
+                    loaded: false,
                     error: true,
                     errorDescription: "ARTICLE_EXTRACTION_FAILURE",
                     isLoadingFull: false,
-                    webviewVisible: true,
+                    webviewVisible: false,
                     extractorTitle: undefined,
                     extractorDate: undefined
                 }, () => {
-                    // Apply saved zoom level and focus webview after fallback content is rendered
+                    // Apply saved zoom level
                     const savedZoom = this.props.source.defaultZoom || 0
                     this.currentZoom = savedZoom
-                    this.sendZoomToPreload(savedZoom)
-                    this.focusWebviewAfterLoad()
+                    // Re-initialize ContentView with fallback content
+                    this.initializeContentView()
                 })
             }
         }
@@ -2814,8 +2896,9 @@ window.__articleData = ${JSON.stringify({
                     />
                 </Stack>
             </Stack>
-            {/* Use ContentView (WebContentsView) when Visual Zoom is enabled for webpages */}
-            {this.state.visualZoomEnabled && this.state.loadWebpage ? (
+            {/* Use ContentView (WebContentsView) for ALL article display modes */}
+            {/* Show placeholder when: RSS content ready, Full content ready, or Webpage mode */}
+            {((!this.state.loadFull && !this.state.loadWebpage) || (this.state.loadFull && this.state.fullContent) || this.state.loadWebpage) ? (
                 <div
                     id="article-contentview-placeholder"
                     className={this.state.error ? "error" : ""}
@@ -2868,113 +2951,6 @@ window.__articleData = ${JSON.stringify({
                         />
                     )}
                 </div>
-            ) : ((!this.state.loadFull && !this.state.loadWebpage) || (this.state.loadFull && this.state.fullContent) || this.state.loadWebpage) ? (
-                <webview
-                    id="article"
-                    className={this.state.error ? "error" : ""}
-                    style={{ visibility: this.state.webviewVisible ? "visible" : "hidden" }}
-                    key={
-                        this.props.item._id +
-                        (this.state.loadWebpage ? "_" : "") +
-                        (this.state.loadFull ? "__" : "") +
-                        (this.state.fullContent ? "_content" : "") +
-                        (this.state.appPath ? "_app" : "")
-                    }
-                    src={
-                        // Für externe Webseiten im Mobile-Mode: about:blank laden,
-                        // dann URL erst nach Emulation setzen (in ref callback)
-                        (this.state.loadWebpage && this.localMobileMode)
-                            ? "about:blank"
-                            : (this.state.loadWebpage
-                                ? this.props.item.link
-                                : this.articleView())
-                    }
-                    preload={(window as any).webviewPreloadPath || 'webview-preload.js'}
-                    allowpopups={"true" as any}
-                    disableguestresize={"false" as any}
-                    webpreferences="contextIsolation,disableDialogs,autoplayPolicy=document-user-activation-required"
-                    partition={this.state.loadWebpage ? "sandbox" : undefined}
-                    allowFullScreen={true}
-                    ref={(webview) => {
-                        if (webview) {
-                            this.webview = webview as any
-                            // Set up event listeners
-                            try {
-                                webview.addEventListener('did-start-loading', this.webviewStartLoadingEarly)
-                                webview.addEventListener('did-stop-loading', this.webviewLoaded)
-                                webview.addEventListener('dom-ready', this.webviewStartLoading)
-                                // Cookie Persistence: Nach jeder Navigation speichern (z.B. nach Login)
-                                // Debounced wegen SPAs wie Reddit die viele navigate-Events auslösen
-                                webview.addEventListener('did-navigate', () => {
-                                    if (this.props.source.persistCookies && this.state.loadWebpage) {
-                                        console.log("[CookiePersist] Article: did-navigate event");
-                                        this.savePersistedCookiesDebounced();
-                                    }
-                                })
-                                webview.addEventListener('did-navigate-in-page', () => {
-                                    if (this.props.source.persistCookies && this.state.loadWebpage) {
-                                        console.log("[CookiePersist] Article: did-navigate-in-page event");
-                                        this.savePersistedCookiesDebounced();
-                                    }
-                                })
-                                // Close DevTools before navigation to prevent crash
-                                webview.addEventListener('will-navigate', () => {
-                                    try {
-                                        const wv = webview as Electron.WebviewTag
-                                        if (wv.isDevToolsOpened()) {
-                                            wv.closeDevTools()
-                                        }
-                                    } catch {}
-                                })
-                                
-                                // Mobile Mode: Emulation aktivieren BEVOR URL geladen wird
-                                if (this.state.loadWebpage && this.localMobileMode) {
-                                    console.log('[Article] ref: Mobile mode active, setting up emulation before loading URL');
-                                    
-                                    // Flag um doppelte URL-Loads zu verhindern
-                                    let urlLoaded = false;
-                                    const targetUrl = this.props.item.link;
-                                    
-                                    // Warte auf did-stop-loading von about:blank (zuverlässiger als dom-ready)
-                                    const loadUrlAfterEmulation = async () => {
-                                        // Verhindere doppelte Ausführung
-                                        if (urlLoaded) return;
-                                        
-                                        // Prüfe ob wir noch auf about:blank sind
-                                        try {
-                                            const currentUrl = (webview as any).getURL();
-                                            if (currentUrl && currentUrl !== 'about:blank') {
-                                                console.log('[Article] ref: URL already loaded, skipping:', currentUrl);
-                                                return;
-                                            }
-                                        } catch {}
-                                        
-                                        urlLoaded = true;
-                                        webview.removeEventListener('did-stop-loading', loadUrlAfterEmulation);
-                                        
-                                        console.log('[Article] ref: about:blank ready, enabling emulation...');
-                                        try {
-                                            await this.enableMobileEmulation();
-                                            console.log('[Article] ref: Emulation enabled, now loading actual URL:', targetUrl);
-                                            // URL über src Attribut setzen (wirft keine Promise-Fehler wie loadURL)
-                                            if (this.webview && this._isMounted) {
-                                                (this.webview as HTMLWebViewElement).src = targetUrl;
-                                            }
-                                        } catch (e) {
-                                            console.error('[Article] ref: Failed to enable emulation:', e);
-                                            // Fallback: URL trotzdem laden über src Attribut
-                                            if (this.webview && this._isMounted) {
-                                                (this.webview as HTMLWebViewElement).src = targetUrl;
-                                            }
-                                        }
-                                    };
-                                    // did-stop-loading statt dom-ready verwenden
-                                    webview.addEventListener('did-stop-loading', loadUrlAfterEmulation);
-                                }
-                            } catch {}
-                        }
-                    }}
-                />
             ) : (
                 <Stack
                     className="loading-prompt"
