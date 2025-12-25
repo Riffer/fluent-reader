@@ -102,6 +102,108 @@ npm run package-linux
 
 ## Troubleshooting
 
+### Crash Dump Analysis (Windows)
+
+When the Electron app crashes, crash dumps are automatically saved to:
+```
+%APPDATA%\Electron\Crashpad\reports\
+```
+
+#### Installing the Debugger
+
+The Windows Debugger (WinDbg/cdb) is needed to analyze crash dumps. Install it via:
+
+**Option 1: Microsoft Store (Recommended)**
+- Search for "WinDbg Preview" in Microsoft Store
+- Install it - this includes `cdbX64.exe` in the WindowsApps folder
+
+**Option 2: Windows SDK**
+- Download Windows SDK from: https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/
+- During installation, select "Debugging Tools for Windows"
+
+After installation, verify `cdbX64` is available:
+```powershell
+where.exe cdbX64
+# Should return: C:\Users\<USER>\AppData\Local\Microsoft\WindowsApps\cdbX64.exe
+```
+
+#### Finding the Latest Crash Dump
+
+```powershell
+$latestDump = Get-ChildItem -Path "$env:APPDATA\Electron\Crashpad\reports" -Filter "*.dmp" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Write-Host "Latest crash: $($latestDump.Name) - $($latestDump.LastWriteTime)"
+```
+
+#### Basic Crash Analysis
+
+Run the debugger with automatic analysis:
+```powershell
+cdbX64 -z "<path-to-dump>.dmp" -c "!analyze -v; .ecxr; kb; q"
+```
+
+**Key commands explained:**
+- `!analyze -v` - Verbose automatic analysis (shows crash type, faulting module)
+- `.ecxr` - Switch to exception context (shows CPU registers at crash time)
+- `kb` - Display stack backtrace with parameters
+- `q` - Quit debugger
+
+#### Example: Full Analysis Session
+
+```powershell
+# Find and analyze the latest crash
+$latestDump = Get-ChildItem -Path "$env:APPDATA\Electron\Crashpad\reports" -Filter "*.dmp" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+cdbX64 -z $latestDump.FullName -c ".ecxr; !analyze -v; kb 20; q" 2>&1 | Select-Object -Last 80
+```
+
+#### Interpreting Results
+
+**Common crash indicators:**
+- `AV.Type: Read` + `AV.Dereference: NullPtr` = Null pointer dereference
+- `rax=0000000000000000` in registers = Trying to access address 0x0
+- `electron!v8::...` in stack = Crash in JavaScript engine (V8)
+
+**Example crash output:**
+```
+KEY_VALUES_STRING: 1
+    Key  : AV.Dereference
+    Value: NullPtr
+    Key  : AV.Type
+    Value: Read
+    Key  : Failure.Bucket
+    Value: INVALID_POINTER_READ_c0000005_electron.exe!Unknown
+```
+
+This indicates JavaScript code tried to access a property on `null` or `undefined`.
+
+#### Preventing Common Crashes
+
+1. **Always check if objects exist before calling methods:**
+   ```typescript
+   // Bad - crashes if contentView is null
+   window.contentView.navigate(url)
+   
+   // Good - safe access
+   if (window.contentView) {
+       window.contentView.navigate(url)
+   }
+   ```
+
+2. **Don't call Device Emulation on empty WebContents:**
+   ```typescript
+   // Check pageLoaded before device emulation calls
+   if (this.pageLoaded) {
+       this.contentView.webContents.disableDeviceEmulation()
+   }
+   ```
+
+3. **Send IPC messages only after page is loaded:**
+   ```typescript
+   // Preload script must be running before it can receive messages
+   await window.contentView.navigate(url)
+   // Now preload is loaded, safe to send settings
+   window.contentView.send('set-zoom-level', level)
+   ```
+
 ### Node Version Compatibility
 **Error**: `better-sqlite3 requires Node 20+`
 
