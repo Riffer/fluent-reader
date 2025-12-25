@@ -744,6 +744,11 @@ export class ContentViewManager {
      * Apply device emulation based on current mode (Visual Zoom + Mobile Mode)
      * Combines all settings: viewport size, scale, and screen position
      * ONLY safe to call after did-finish-load!
+     * 
+     * EXPERIMENTAL: Adaptive viewport scaling
+     * When scale exceeds critical threshold (content would overflow), the emulated
+     * viewport is proportionally reduced. This triggers responsive layouts and
+     * prevents content from being cut off.
      */
     private applyDeviceEmulationForCurrentMode(): void {
         const wc = this.contentView?.webContents
@@ -763,6 +768,7 @@ export class ContentViewManager {
         
         // Calculate viewport and scale based on mode
         let viewportWidth = width
+        let viewportHeight = height
         let effectiveScale = this.keyboardZoomFactor
         
         if (this.mobileMode) {
@@ -775,23 +781,50 @@ export class ContentViewManager {
             const baseScale = width / mobileViewport
             effectiveScale = baseScale * this.keyboardZoomFactor
             
+            // EXPERIMENTAL: Adaptive viewport when scale exceeds critical threshold
+            // Critical scale = physical width / emulated width
+            // In mobile mode: criticalScale ≈ 2.9 (1086/375 example)
+            const criticalScale = width / mobileViewport
+            if (effectiveScale > criticalScale) {
+                // Reduce viewport proportionally to prevent overflow
+                // New viewport = physical / effectiveScale
+                viewportWidth = Math.round(width / effectiveScale)
+                viewportHeight = Math.round(height / effectiveScale)
+                console.log("[ContentViewManager] ADAPTIVE: Scale", effectiveScale.toFixed(2),
+                    "exceeds critical", criticalScale.toFixed(2),
+                    "→ reducing viewport to", viewportWidth, "x", viewportHeight)
+            }
+            
             console.log("[ContentViewManager] Mobile auto-scale:",
                 "baseScale:", baseScale.toFixed(2),
                 "keyboardZoom:", this.keyboardZoomFactor,
                 "effectiveScale:", effectiveScale.toFixed(2))
+        } else {
+            // Normal mode (non-mobile)
+            // EXPERIMENTAL: Adaptive viewport when scale exceeds 1.0
+            // At scale > 1.0, content would overflow the physical viewport
+            const criticalScale = 1.0
+            if (effectiveScale > criticalScale) {
+                // Reduce viewport proportionally to prevent overflow
+                viewportWidth = Math.round(width / effectiveScale)
+                viewportHeight = Math.round(height / effectiveScale)
+                console.log("[ContentViewManager] ADAPTIVE: Scale", effectiveScale.toFixed(2),
+                    "exceeds critical", criticalScale.toFixed(2),
+                    "→ reducing viewport to", viewportWidth, "x", viewportHeight)
+            }
         }
         
         try {
             wc.enableDeviceEmulation({
                 screenPosition: 'mobile',  // Always 'mobile' for pinch-to-zoom
-                screenSize: { width: viewportWidth, height },
-                viewSize: { width: viewportWidth, height },
+                screenSize: { width: viewportWidth, height: viewportHeight },
+                viewSize: { width: viewportWidth, height: viewportHeight },
                 viewPosition: { x: 0, y: 0 },
                 deviceScaleFactor: 1,
                 scale: effectiveScale,
             })
             console.log("[ContentViewManager] Device emulation applied:",
-                "viewport:", viewportWidth, "x", height,
+                "viewport:", viewportWidth, "x", viewportHeight,
                 "scale:", effectiveScale.toFixed(2),
                 "mobile:", this.mobileMode)
         } catch (e) {
