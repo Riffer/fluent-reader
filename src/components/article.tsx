@@ -63,8 +63,7 @@ type ArticleProps = {
 type ArticleState = {
     fontFamily: string
     fontSize: number
-    loadWebpage: boolean
-    loadFull: boolean
+    contentMode: SourceOpenTarget  // Replaces loadWebpage + loadFull
     fullContent: string
     loaded: boolean
     error: boolean
@@ -102,6 +101,24 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private contentViewCurrentUrl: string | null = null  // Track current URL to avoid double navigation
     private pendingContentViewFocus: boolean = false  // Track if we need to focus ContentView after load
 
+    // Helper getters for content mode checks
+    private get isWebpageMode(): boolean {
+        return this.state.contentMode === SourceOpenTarget.Webpage
+    }
+    
+    private get isFullContentMode(): boolean {
+        return this.state.contentMode === SourceOpenTarget.FullContent
+    }
+    
+    private get isLocalMode(): boolean {
+        return this.state.contentMode === SourceOpenTarget.Local
+    }
+    
+    // ContentView is used for all modes now (Webpage, FullContent, Local)
+    private get usesContentView(): boolean {
+        return this.state.contentMode !== SourceOpenTarget.External
+    }
+
     constructor(props: ArticleProps) {
         super(props)
         // Initialisiere mit dem gespeicherten Feed-Zoom
@@ -112,8 +129,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.state = {
             fontFamily: window.settings.getFont(),
             fontSize: window.settings.getFontSize(),
-            loadWebpage: props.source.openTarget === SourceOpenTarget.Webpage,
-            loadFull: props.source.openTarget === SourceOpenTarget.FullContent,
+            contentMode: props.source.openTarget,  // Use enum directly
             fullContent: "",
             loaded: false,
             error: false,
@@ -311,7 +327,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Navigation (for cookie persistence)
         const unsubNavigated = window.contentView.onNavigated((url) => {
-            if (this.props.source.persistCookies && this.state.loadWebpage) {
+            if (this.props.source.persistCookies && this.isWebpageMode) {
                 console.log("[CookiePersist] ContentView: Navigation to:", url);
                 this.savePersistedCookiesDebounced();
             }
@@ -413,8 +429,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             return;
         }
         
-        const isWebpage = this.state.loadWebpage;
-        console.log('[ContentView] Initializing for:', isWebpage ? 'Webpage' : 'RSS/Full Content');
+        console.log('[ContentView] Initializing for mode:', SourceOpenTarget[this.state.contentMode]);
         
         try {
             // Setup listeners if not already done
@@ -450,7 +465,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             }
             
             // Load content based on mode FIRST (so preload script is loaded)
-            if (isWebpage) {
+            if (this.isWebpageMode) {
                 // Webpage mode: Navigate to URL
                 const targetUrl = this.props.item.link;
                 if (this.contentViewCurrentUrl !== targetUrl) {
@@ -461,9 +476,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     console.log('[ContentView] URL unchanged, skipping navigation');
                 }
             } else {
-                // RSS or Full content mode: Load HTML directly
+                // Local (RSS) or FullContent mode: Load HTML directly
                 const htmlDataUrl = this.articleView();
-                console.log('[ContentView] Loading HTML content');
+                console.log('[ContentView] Loading HTML content for mode:', SourceOpenTarget[this.state.contentMode]);
                 // Navigate to data URL (articleView returns data:text/html;base64,...)
                 await window.contentView.navigate(htmlDataUrl);
                 this.contentViewCurrentUrl = htmlDataUrl;
@@ -602,7 +617,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             return
         }
         
-        const url = this.state.loadWebpage ? this.props.item.link : this.props.item.link
+        const url = this.props.item.link
         console.log("[CookiePersist] Article: Loading cookies for article:", this.props.item.title)
         console.log("[CookiePersist] Article: URL:", url)
         
@@ -622,7 +637,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             return
         }
         
-        const url = this.state.loadWebpage ? this.props.item.link : this.props.item.link
+        const url = this.props.item.link
         console.log("[CookiePersist] Article: Saving cookies for article:", this.props.item.title)
         console.log("[CookiePersist] Article: URL:", url)
         
@@ -767,21 +782,21 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 key: "fontMenu",
                 text: intl.get("article.font"),
                 iconProps: { iconName: "Font" },
-                disabled: this.state.loadWebpage,
+                disabled: this.isWebpageMode,
                 subMenuProps: this.fontFamilyMenuProps(),
             },
             {
                 key: "fontSizeMenu",
                 text: intl.get("article.fontSize"),
                 iconProps: { iconName: "FontSize" },
-                disabled: this.state.loadWebpage,
+                disabled: this.isWebpageMode,
                 subMenuProps: this.fontSizeMenuProps(),
             },
             {
                 key: "directionMenu",
                 text: intl.get("article.textDir"),
                 iconProps: { iconName: "ChangeEntitlements" },
-                disabled: this.state.loadWebpage,
+                disabled: this.isWebpageMode,
                 subMenuProps: this.directionMenuProps(),
             },
             {
@@ -794,11 +809,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             key: "copySourceCode",
                             text: "Quelltext kopieren",
                             iconProps: { iconName: "Code" },
-                            disabled: !this.state.loadFull && !this.state.loadWebpage,
+                            disabled: this.isLocalMode,  // Only available for Webpage/FullContent
                             onClick: () => {
-                                if (this.state.loadFull && this.state.fullContent) {
+                                if (this.isFullContentMode && this.state.fullContent) {
                                     window.utils.writeClipboard(this.state.fullContent)
-                                } else if (this.state.loadWebpage && window.contentView) {
+                                } else if (window.contentView) {
                                     window.contentView.executeJavaScript(`
                                         (function() {
                                             const html = document.documentElement.outerHTML;
@@ -818,22 +833,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             key: "copyComputedSource",
                             text: "Berechneter Quelltext kopieren",
                             iconProps: { iconName: "CodeEdit" },
-                            disabled: !this.state.loadFull && !this.state.loadWebpage,
+                            disabled: this.isLocalMode,  // Only available for Webpage/FullContent
                             onClick: () => {
-                                if (this.state.loadFull && window.contentView) {
-                                    window.contentView.executeJavaScript(`
-                                        (function() {
-                                            const html = document.documentElement.outerHTML;
-                                            return html;
-                                        })()
-                                    `).then((result: string) => {
-                                        if (result) {
-                                            window.utils.writeClipboard(result)
-                                        }
-                                    }).catch((err: any) => {
-                                        console.error('Fehler beim Kopieren des berechneten Quelltexts:', err)
-                                    })
-                                } else if (this.state.loadWebpage && window.contentView) {
+                                if (window.contentView) {
                                     window.contentView.executeJavaScript(`
                                         (function() {
                                             let contentEl = document.getElementById('fr-zoom-container') || document.documentElement;
@@ -875,7 +877,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             iconProps: { iconName: (this.props.source.mobileMode || false) ? "CheckMark" : "" },
                             canCheck: true,
                             checked: this.props.source.mobileMode || false,
-                            disabled: !this.state.loadWebpage,
+                            // Mobile Mode works with ContentView (all modes except External)
+                            disabled: !this.usesContentView,
                             onClick: this.toggleMobileMode,
                         },
                         {
@@ -884,7 +887,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             iconProps: { iconName: this.state.visualZoomEnabled ? "CheckMark" : "" },
                             canCheck: true,
                             checked: this.state.visualZoomEnabled,
-                            disabled: !this.state.loadWebpage,
+                            // Visual Zoom works with ContentView (all modes except External)
+                            disabled: !this.usesContentView,
                             onClick: this.toggleVisualZoom,
                         },
                         {
@@ -909,7 +913,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             iconProps: { iconName: (this.props.source.persistCookies || false) ? "CheckMark" : "" },
                             canCheck: true,
                             checked: this.props.source.persistCookies || false,
-                            disabled: !this.state.loadWebpage,
+                            disabled: !this.isWebpageMode,
                             onClick: this.togglePersistCookies,
                         },
                         {
@@ -920,12 +924,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             iconProps: { iconName: this.state.inputModeEnabled ? "CheckMark" : "" },
                             canCheck: true,
                             checked: this.state.inputModeEnabled,
-                            disabled: !this.state.loadWebpage,
+                            disabled: !this.isWebpageMode,
                             onClick: () => {
                                 const newValue = !this.state.inputModeEnabled;
                                 console.log('[InputMode] Menu toggle:', newValue ? 'ENABLED' : 'DISABLED');
                                 // Cookies speichern beim Verlassen des Eingabe-Modus
-                                if (!newValue && this.props.source.persistCookies && this.state.loadWebpage) {
+                                if (!newValue && this.props.source.persistCookies && this.isWebpageMode) {
                                     console.log('[CookiePersist] Article: Saving cookies after leaving input mode (Menu)');
                                     this.savePersistedCookies();
                                 }
@@ -1025,7 +1029,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 const newValue = !this.state.inputModeEnabled;
                 console.log('[InputMode] Toggle:', newValue ? 'ENABLED (shortcuts off)' : 'DISABLED (shortcuts on)');
                 // Cookies speichern beim Verlassen des Eingabe-Modus (z.B. nach Login)
-                if (!newValue && this.props.source.persistCookies && this.state.loadWebpage) {
+                if (!newValue && this.props.source.persistCookies && this.isWebpageMode) {
                     console.log('[CookiePersist] Article: Saving cookies after leaving input mode (Ctrl+I)');
                     this.savePersistedCookies();
                 }
@@ -1037,10 +1041,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             if (this.state.inputModeEnabled) {
                 if (input.key === 'Escape') {
                     console.log('[InputMode] Escape pressed - disabling input mode');
-                    console.log('[InputMode] persistCookies:', this.props.source.persistCookies, 'loadWebpage:', this.state.loadWebpage);
+                    console.log('[InputMode] persistCookies:', this.props.source.persistCookies, 'contentMode:', SourceOpenTarget[this.state.contentMode]);
                     this.setInputMode(false);
                     // Cookies speichern beim Verlassen des Eingabe-Modus (z.B. nach Login)
-                    if (this.props.source.persistCookies && this.state.loadWebpage) {
+                    if (this.props.source.persistCookies && this.isWebpageMode) {
                         console.log('[CookiePersist] Article: Saving cookies after leaving input mode');
                         this.savePersistedCookies();
                     }
@@ -1090,8 +1094,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "m":
                 case "M":
                     // Toggle Mobile Mode
-                    console.log('[Article] M key pressed - toggling mobile mode, usingContentView:', 
-                        this.state.loadWebpage && this.state.visualZoomEnabled && !!window.contentView);
+                    console.log('[Article] M key pressed - toggling mobile mode, usesContentView:', this.usesContentView);
                     this.toggleMobileMode()
                     break
                 case "p":
@@ -1134,7 +1137,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (window.contentView) {
             this.setState({ loaded: false, error: false })
             window.contentView.reload()
-        } else if (this.state.loadFull) {
+        } else if (this.isFullContentMode) {
             this.loadFull()
         }
     }
@@ -1155,8 +1158,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Globalen Mobile-Mode Status initial setzen (für den Fall dass bereits aktiviert)
         this.setGlobalMobileMode(this.localMobileMode);
         
-        // Setup ContentView listeners if Visual Zoom is enabled
-        if (this.state.visualZoomEnabled && this.state.loadWebpage) {
+        // Setup ContentView listeners - now for ALL modes (not just Webpage)
+        if (this.state.visualZoomEnabled) {
             this.setupContentViewListeners()
         }
         
@@ -1169,7 +1172,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         
         // Load full content if needed
-        if (this.state.loadFull && !this.state.fullContent) {
+        if (this.isFullContentMode && !this.state.fullContent) {
             this.loadFull()
         }
         
@@ -1292,23 +1295,21 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 this.loadPersistedCookies()
             }
             
-            const loadFull = this.props.source.openTarget === SourceOpenTarget.FullContent
+            const newContentMode = this.props.source.openTarget
             this.setState({
-                loadWebpage:
-                    this.props.source.openTarget === SourceOpenTarget.Webpage,
-                loadFull: loadFull,
+                contentMode: newContentMode,
                 fullContent: "",
                 isLoadingFull: false,
             }, () => {
-                if (loadFull) {
+                if (newContentMode === SourceOpenTarget.FullContent) {
                     this.setState({ isLoadingFull: true })
                     this.loadFull()
-                } else if (this.state.loadWebpage) {
+                } else if (newContentMode === SourceOpenTarget.Webpage) {
                     // For webpage mode - ContentView navigates to URL
                     if (window.contentView) {
                         const targetUrl = this.props.item.link;
                         if (this.contentViewCurrentUrl !== targetUrl) {
-                            console.log('[ContentView] Article changed (webpage) - navigating to:', targetUrl);
+                            console.log('[ContentView] Article changed (Webpage) - navigating to:', targetUrl);
                             this.contentViewCurrentUrl = targetUrl;
                             window.contentView.navigate(targetUrl);
                         }
@@ -1320,11 +1321,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         }, 100);
                     }
                 } else {
-                    // For regular RSS feed content - ContentView loads HTML data URL
+                    // For Local (RSS) mode - ContentView loads HTML data URL
                     // ContentView is now used for ALL modes, so we need to update content
                     if (window.contentView) {
                         const htmlDataUrl = this.articleView();
-                        console.log('[ContentView] Article changed (RSS) - loading new content');
+                        console.log('[ContentView] Article changed (Local/RSS) - loading new content');
                         this.contentViewCurrentUrl = htmlDataUrl;
                         window.contentView.navigate(htmlDataUrl);
                         // Focus ContentView
@@ -1345,22 +1346,20 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 return
             }
             
-            const targetLoadWebpage = this.props.source.openTarget === SourceOpenTarget.Webpage
-            const targetLoadFull = this.props.source.openTarget === SourceOpenTarget.FullContent
+            const targetContentMode = this.props.source.openTarget
             
             console.log('[Article] componentDidUpdate - openTarget changed:',
-                'prev:', prevProps.source.openTarget, 
-                'new:', this.props.source.openTarget,
-                'current state loadWebpage:', this.state.loadWebpage,
-                'target loadWebpage:', targetLoadWebpage)
+                'prev:', SourceOpenTarget[prevProps.source.openTarget], 
+                'new:', SourceOpenTarget[this.props.source.openTarget],
+                'current state contentMode:', SourceOpenTarget[this.state.contentMode],
+                'target contentMode:', SourceOpenTarget[targetContentMode])
             
             // Only update if state doesn't already match the target
-            if (this.state.loadWebpage !== targetLoadWebpage || this.state.loadFull !== targetLoadFull) {
+            if (this.state.contentMode !== targetContentMode) {
                 console.log('[Article] openTarget changed from outside, syncing state:', 
-                    'loadWebpage:', targetLoadWebpage, 'loadFull:', targetLoadFull)
+                    'contentMode:', SourceOpenTarget[targetContentMode])
                 this.setState({
-                    loadWebpage: targetLoadWebpage,
-                    loadFull: targetLoadFull,
+                    contentMode: targetContentMode,
                 })
             } else {
                 console.log('[Article] openTarget changed but state already matches - skipping setState')
@@ -1382,7 +1381,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Handle hamburger menu layout changes - update ContentView bounds
         // The hamburger menu doesn't overlap but changes the layout position
-        if (this.state.loadWebpage && prevProps.menuOpen !== this.props.menuOpen) {
+        if (this.usesContentView && prevProps.menuOpen !== this.props.menuOpen) {
             // Small delay to let the CSS transition complete
             setTimeout(() => {
                 if (this._isMounted) {
@@ -1599,7 +1598,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Capture screenshot and hide ContentView to allow overlay interaction
      */
     private handleContentViewMouseLeave = async () => {
-        if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return
+        if (!this.state.visualZoomEnabled || !this.usesContentView) return
         if (!window.contentView) return
         if (this.contentViewHiddenForMenu) return  // Already hidden
         
@@ -1623,7 +1622,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Restore ContentView when mouse returns to the area
      */
     private handleContentViewMouseEnter = () => {
-        if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return
+        if (!this.state.visualZoomEnabled || !this.usesContentView) return
         if (!window.contentView) return
         if (!this.contentViewHiddenForMenu) return  // Not hidden, nothing to do
         
@@ -1658,7 +1657,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * and captures mouse events when visible
      */
     private handleGlobalMouseMove = (e: MouseEvent) => {
-        if (!this.state.visualZoomEnabled || !this.state.loadWebpage) return
+        if (!this.state.visualZoomEnabled || !this.usesContentView) return
         if (!this.contentViewPlaceholderRef) return
         
         const rect = this.contentViewPlaceholderRef.getBoundingClientRect()
@@ -1767,22 +1766,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     toggleWebpage = () => {
-        console.log('[Article] toggleWebpage called, current loadWebpage:', this.state.loadWebpage);
+        console.log('[Article] toggleWebpage called, current contentMode:', SourceOpenTarget[this.state.contentMode]);
         
         // Set flag to prevent componentDidUpdate from overriding our state changes
         this._isTogglingMode = true;
         
-        if (this.state.loadWebpage) {
-            // Switching FROM webpage mode TO RSS mode
-            console.log('[Article] Switching FROM Webpage TO RSS mode');
+        if (this.isWebpageMode) {
+            // Switching FROM webpage mode TO Local (RSS) mode
+            console.log('[Article] Switching FROM Webpage TO Local mode');
             // Clear tracked URL so ContentView will reload with new content
             this.contentViewCurrentUrl = null;
             
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ loadWebpage: false, webviewVisible: false }, () => {
-                console.log('[Article] State set to loadWebpage: false');
+            this.setState({ contentMode: SourceOpenTarget.Local, webviewVisible: false }, () => {
+                console.log('[Article] State set to contentMode: Local');
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
@@ -1805,11 +1804,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
-            console.log('[Article] Source snapshot openTarget:', sourceSnapshot.openTarget);
+            console.log('[Article] Source snapshot openTarget:', SourceOpenTarget[sourceSnapshot.openTarget]);
             
-            this.setState({ loadWebpage: true, loadFull: false, webviewVisible: false }, () => {
-                console.log('[Article] State set to loadWebpage: true');
-                console.log('[Article] Current props.source.openTarget:', this.props.source.openTarget);
+            this.setState({ contentMode: SourceOpenTarget.Webpage, webviewVisible: false }, () => {
+                console.log('[Article] State set to contentMode: Webpage');
+                console.log('[Article] Current props.source.openTarget:', SourceOpenTarget[this.props.source.openTarget]);
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
@@ -1831,15 +1830,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Set flag to prevent componentDidUpdate from overriding our state changes
         this._isTogglingMode = true;
         
-        if (this.state.loadFull) {
-            // Switching FROM Full Content TO RSS raw
+        if (this.isFullContentMode) {
+            // Switching FROM Full Content TO Local (RSS raw)
             // Clear tracked URL so ContentView will reload with new content
             this.contentViewCurrentUrl = null;
             
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ loadFull: false, webviewVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.Local, webviewVisible: false }, () => {
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
@@ -1855,14 +1854,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.props.item.link.startsWith("https://") ||
             this.props.item.link.startsWith("http://")
         ) {
-            // Switching TO full mode
+            // Switching TO FullContent mode
             // Clear tracked URL so ContentView will reload
             this.contentViewCurrentUrl = null;
             
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ loadFull: true, loadWebpage: false, webviewVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.FullContent, webviewVisible: false }, () => {
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
@@ -2335,7 +2334,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     articleView = () => {
-        const articleContent = this.state.loadFull
+        const articleContent = this.isFullContentMode
             ? this.state.fullContent
             : this.props.item.content
 
@@ -2362,14 +2361,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         })
 
         // Use extractor metadata if available (better alignment with extracted content)
-        const displayTitle = this.state.loadFull && this.state.extractorTitle ? this.state.extractorTitle : this.props.item.title
-        const displayDate = this.state.loadFull && this.state.extractorDate ? this.state.extractorDate : this.props.item.date
+        const displayTitle = this.isFullContentMode && this.state.extractorTitle ? this.state.extractorTitle : this.props.item.title
+        const displayDate = this.isFullContentMode && this.state.extractorDate ? this.state.extractorDate : this.props.item.date
 
         // When showing full content with extractor metadata, don't show duplicate header in main
         // (it's already in the <article> structure)
         const headerContent = renderToString(
             <>
-                {!(this.state.loadFull && this.state.extractorTitle) && (
+                {!(this.isFullContentMode && this.state.extractorTitle) && (
                     <>
                         <p className="title">{displayTitle}</p>
                         <p className="date">
@@ -2629,15 +2628,15 @@ window.__articleData = ${JSON.stringify({
                         title={
                             this.state.isLoadingFull 
                                 ? intl.get("article.loadFull") + " (wird geladen...)"
-                                : this.state.loadFull 
+                                : this.isFullContentMode 
                                     ? intl.get("article.loadFull") + " ✓ (geladen)"
                                     : intl.get("article.loadFull")
                         }
-                        className={!this.state.loadWebpage ? "active" : ""}
+                        className={!this.isWebpageMode ? "active" : ""}
                         iconProps={{ 
                             iconName: this.state.isLoadingFull 
                                 ? "Sync" 
-                                : this.state.loadFull 
+                                : this.isFullContentMode 
                                     ? "CheckMark" 
                                     : "RawSource" 
                         }}
@@ -2645,7 +2644,7 @@ window.__articleData = ${JSON.stringify({
                     />
                     <CommandBarButton
                         title={intl.get("article.loadWebpage")}
-                        className={this.state.loadWebpage ? "active" : ""}
+                        className={this.isWebpageMode ? "active" : ""}
                         iconProps={{ iconName: "Globe" }}
                         onClick={this.toggleWebpage}
                     />
@@ -2672,8 +2671,8 @@ window.__articleData = ${JSON.stringify({
                 </Stack>
             </Stack>
             {/* Use ContentView (WebContentsView) for ALL article display modes */}
-            {/* Show placeholder when: RSS content ready, Full content ready, or Webpage mode */}
-            {((!this.state.loadFull && !this.state.loadWebpage) || (this.state.loadFull && this.state.fullContent) || this.state.loadWebpage) ? (
+            {/* Show placeholder when: content is ready (Local, FullContent with content, or Webpage) */}
+            {(this.isLocalMode || (this.isFullContentMode && this.state.fullContent) || this.isWebpageMode) ? (
                 <div
                     id="article-contentview-placeholder"
                     className={this.state.error ? "error" : ""}

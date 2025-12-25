@@ -107,8 +107,8 @@ module.exports = [
             new CopyPlugin({
                 patterns: [
                     {
-                        from: "src/renderer/webview-preload.js",
-                        to: "webview-preload.js",
+                        from: "src/renderer/content-preload.js",
+                        to: "content-preload.js",
                     },
                 ],
             }),

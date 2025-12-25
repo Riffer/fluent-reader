@@ -1,5 +1,6 @@
-// Preload für Webviews: Echter Zoom via CSS-Transform (Chrome-ähnlich)
-// Die gesamte Seite wird skaliert, nicht nur optisch verkleinert
+// Preload for ContentView: CSS-Transform-based zoom (Chrome-like)
+// This script runs in the WebContentsView that displays article content.
+// The entire page is scaled, not just visually zoomed.
 try {
   const { ipcRenderer } = require('electron');
 
@@ -128,7 +129,7 @@ try {
   function ensureZoomContainer() {
     let wrapper = document.getElementById('fr-zoom-wrapper');
     if (!wrapper) {
-      console.log('[Preload] Creating zoom container - viewport:', window.innerWidth, 'x', window.innerHeight);
+      console.log('[ContentPreload] Creating zoom container - viewport:', window.innerWidth, 'x', window.innerHeight);
       // Erstelle Wrapper als Fixed Viewport (nicht scrollbar)
       wrapper = document.createElement('div');
       wrapper.id = 'fr-zoom-wrapper';
@@ -227,11 +228,11 @@ try {
     const style = document.getElementById('fr-zoom-style');
     
     if (!wrapper || !container) {
-      console.log('[Preload] removeZoomContainer: no container found');
+      console.log('[ContentPreload] removeZoomContainer: no container found');
       return;
     }
     
-    console.log('[Preload] Removing zoom container for Visual Zoom mode');
+    console.log('[ContentPreload] Removing zoom container for Visual Zoom mode');
     
     // Bewege alle Children zurück zum Body
     while (container.firstChild) {
@@ -256,7 +257,7 @@ try {
     document.body.style.height = '';
     document.body.style.display = '';
     
-    console.log('[Preload] Zoom container removed - native Visual Zoom should work now');
+    console.log('[ContentPreload] Zoom container removed - native Visual Zoom should work now');
   }
 
   // Wende Zoom auf Container an - Zoom kann von einem beliebigen Punkt aus erfolgen
@@ -266,7 +267,7 @@ try {
     // Bei Visual Zoom: KEINE CSS-basierte Zoom-Manipulation!
     // Der native Browser-Zoom (via enableDeviceEmulation) übernimmt.
     if (visualZoomEnabled) {
-      console.log('[Preload] applyZoom skipped - Visual Zoom is enabled');
+      console.log('[ContentPreload] applyZoom skipped - Visual Zoom is enabled');
       return;
     }
     
@@ -368,7 +369,7 @@ try {
 
   // Listener für externe Zoom-Befehle (von Keyboard - bewahre Scroll-Position)
   ipcRenderer.on('set-webview-zoom', (event, zoomLevel_) => {
-    console.log('[Preload] Received set-webview-zoom:', zoomLevel_, 'viewport:', window.innerWidth, 'x', window.innerHeight);
+    console.log('[ContentPreload] Received set-webview-zoom:', zoomLevel_, 'viewport:', window.innerWidth, 'x', window.innerHeight);
     zoomLevel = zoomLevel_;
     applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
     // Zeige Zoom-Overlay beim Artikelwechsel, wenn aktiviert
@@ -390,7 +391,7 @@ try {
   ipcRenderer.on('set-mobile-mode', (event, enabled) => {
     const wasEnabled = mobileMode;
     mobileMode = !!enabled;
-    console.log('[Preload] Mobile mode changed:', wasEnabled ? 'ON' : 'OFF', '->', mobileMode ? 'ON' : 'OFF');
+    console.log('[ContentPreload] Mobile mode changed:', wasEnabled ? 'ON' : 'OFF', '->', mobileMode ? 'ON' : 'OFF');
     // Zeige kurz das Overlay um den Modus-Wechsel anzuzeigen (auch wenn Overlay sonst deaktiviert)
     if (wasEnabled !== mobileMode) {
       const factor = zoomLevelToFactor(zoomLevel);
@@ -408,7 +409,7 @@ try {
   ipcRenderer.on('set-visual-zoom-mode', (event, enabled) => {
     const wasEnabled = visualZoomEnabled;
     visualZoomEnabled = !!enabled;
-    console.log('[Preload] Visual Zoom mode changed:', wasEnabled ? 'ON' : 'OFF', '->', visualZoomEnabled ? 'ON' : 'OFF');
+    console.log('[ContentPreload] Visual Zoom mode changed:', wasEnabled ? 'ON' : 'OFF', '->', visualZoomEnabled ? 'ON' : 'OFF');
     
     // Wenn Visual Zoom aktiviert wird, entferne den CSS Zoom-Container
     // damit der native Browser-Pinch-Zoom (via enableDeviceEmulation) funktioniert
@@ -429,25 +430,25 @@ try {
   let inputModeEnabled = false;
   ipcRenderer.on('set-input-mode', (event, enabled) => {
     inputModeEnabled = !!enabled;
-    console.log('[Preload] Input mode changed:', inputModeEnabled ? 'ON (navigation disabled)' : 'OFF (navigation enabled)');
+    console.log('[ContentPreload] Input mode changed:', inputModeEnabled ? 'ON (navigation disabled)' : 'OFF (navigation enabled)');
   });
 
   // NSFW-Cleanup Einstellung - synchron beim Start laden
   let nsfwCleanupEnabled = false;
   try {
     nsfwCleanupEnabled = ipcRenderer.sendSync('get-nsfw-cleanup');
-    console.log('[webview-preload] NSFW-Cleanup loaded:', nsfwCleanupEnabled ? 'enabled' : 'disabled');
+    console.log('[ContentPreload] NSFW-Cleanup loaded:', nsfwCleanupEnabled ? 'enabled' : 'disabled');
   } catch (e) {
-    console.warn('[webview-preload] Could not load NSFW-Cleanup setting:', e);
+    console.warn('[ContentPreload] Could not load NSFW-Cleanup setting:', e);
   }
 
   // Auto Cookie-Consent Einstellung - synchron beim Start laden
   let autoCookieConsentEnabled = false;
   try {
     autoCookieConsentEnabled = ipcRenderer.sendSync('get-auto-cookie-consent');
-    console.log('[webview-preload] Auto Cookie-Consent loaded:', autoCookieConsentEnabled ? 'enabled' : 'disabled');
+    console.log('[ContentPreload] Auto Cookie-Consent loaded:', autoCookieConsentEnabled ? 'enabled' : 'disabled');
   } catch (e) {
-    console.warn('[webview-preload] Could not load Auto Cookie-Consent setting:', e);
+    console.warn('[ContentPreload] Could not load Auto Cookie-Consent setting:', e);
   }
 
   // Fallback: postMessage von Embedder
@@ -988,7 +989,7 @@ try {
             cleanupComplete = true;
           }
         } catch (e) {
-          console.error('[webview-preload] Site cleanup failed:', e);
+          console.error('[ContentPreload] Site cleanup failed:', e);
         }
       }
     });
@@ -1019,12 +1020,12 @@ try {
                                cookieDialog.querySelector('button[data-testid="reject-nonessential-cookies-button"]');
           if (rejectButton) {
             rejectButton.click();
-            console.log('[webview-preload] Cookie-Consent: Clicked Reddit reject button');
+            console.log('[ContentPreload] Cookie-Consent: Clicked Reddit reject button');
             return true;
           } else {
             // Fallback: Dialog entfernen wenn kein Button gefunden
             cookieDialog.remove();
-            console.log('[webview-preload] Cookie-Consent: Removed Reddit cookie dialog (no button found)');
+            console.log('[ContentPreload] Cookie-Consent: Removed Reddit cookie dialog (no button found)');
             return true;
           }
         }
@@ -1057,7 +1058,7 @@ try {
             handled = true;
           }
         } catch (e) {
-          console.error('[webview-preload] Cookie-Consent failed:', e);
+          console.error('[ContentPreload] Cookie-Consent failed:', e);
         }
       }
     });
@@ -1081,7 +1082,7 @@ try {
     if (cookieConsentStarted || !hasCookieConsentPatterns()) return;
     cookieConsentStarted = true;
     
-    console.log('[webview-preload] Starting Auto Cookie-Consent');
+    console.log('[ContentPreload] Starting Auto Cookie-Consent');
     
     // Initial consent handling
     applyCookieConsent();
@@ -1097,7 +1098,7 @@ try {
         if (done && cookieConsentObserver) {
           cookieConsentObserver.disconnect();
           cookieConsentObserver = null;
-          console.log('[webview-preload] Cookie-Consent complete, observer stopped');
+          console.log('[ContentPreload] Cookie-Consent complete, observer stopped');
           showOverlayMessage('Cookie-Consent erledigt', 1500);
         }
       }, 100);
@@ -1127,7 +1128,7 @@ try {
     if (siteCleanupStarted || !hasSiteTransformations()) return;
     siteCleanupStarted = true;
     
-    console.log('[webview-preload] Starting site cleanup');
+    console.log('[ContentPreload] Starting site cleanup');
     
     // Initial cleanup
     applySiteCleanup();
@@ -1145,7 +1146,7 @@ try {
         if (cleanupDone && siteCleanupObserver) {
           siteCleanupObserver.disconnect();
           siteCleanupObserver = null;
-          console.log('[webview-preload] Site cleanup complete, observer stopped');
+          console.log('[ContentPreload] Site cleanup complete, observer stopped');
           showOverlayMessage('Site-Cleanup abgeschlossen', 2000);
         }
       }, 50);

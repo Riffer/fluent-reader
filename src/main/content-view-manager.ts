@@ -38,7 +38,7 @@ export class ContentViewManager {
     private get preloadPath(): string {
         return path.join(
             app.getAppPath(),
-            app.isPackaged ? "dist/webview-preload.js" : "webview-preload.js"
+            app.isPackaged ? "dist/content-preload.js" : "content-preload.js"
         )
     }
     
