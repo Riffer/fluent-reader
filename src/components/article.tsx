@@ -9,6 +9,7 @@ import {
     FocusZone,
     ContextualMenuItemType,
     Spinner,
+    SpinnerSize,
     Icon,
     Link,
 } from "@fluentui/react"
@@ -81,6 +82,7 @@ type ArticleState = {
     showP2PShareDialog: boolean
     visualZoomEnabled: boolean  // Visual Zoom (Pinch-to-Zoom) ohne Mobile-Modus
     menuBlurScreenshot: string | null  // Screenshot for blur placeholder when menu is open
+    isNavigatingWithVisualZoom: boolean  // Show loading spinner during Visual Zoom navigation
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -100,6 +102,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private contentViewHiddenForMenu: boolean = false  // Track if we hid ContentView for menu access
     private contentViewCurrentUrl: string | null = null  // Track current URL to avoid double navigation
     private pendingContentViewFocus: boolean = false  // Track if we need to focus ContentView after load
+    private contentViewInitialized: boolean = false  // Track if Device Emulation is already set (for JS navigation experiment)
 
     // Helper getters for content mode checks
     private get isWebpageMode(): boolean {
@@ -145,6 +148,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             showP2PShareDialog: false,
             visualZoomEnabled: window.settings.getVisualZoom(),
             menuBlurScreenshot: null,
+            isNavigatingWithVisualZoom: false,
         }
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
@@ -197,9 +201,26 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         this.updateDefaultZoom(clampedLevel);
     }
+    
+    /**
+     * Get current navigation settings for bundled navigation call
+     * This bundles all settings that affect how the content is displayed
+     */
+    private getNavigationSettings = () => {
+        const zoomLevel = this.currentZoom;
+        const factor = 1.0 + (zoomLevel * 0.1);
+        return {
+            zoomFactor: factor,
+            visualZoom: this.state.visualZoomEnabled,
+            mobileMode: this.localMobileMode,
+            showZoomOverlay: this.state.showZoomOverlay
+        };
+    }
 
     /**
      * Send settings to ContentView preload script
+     * @deprecated For post-navigation settings updates only. 
+     *             Use navigateWithSettings() for navigation.
      */
     private sendSettingsToContentView = () => {
         if (!window.contentView) return;
@@ -333,6 +354,31 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             }
         });
         this.contentViewCleanup.push(unsubNavigated);
+        
+        // Visual Zoom loading spinner events
+        if ((window as any).ipcRenderer) {
+            const ipc = (window as any).ipcRenderer;
+            
+            // Show loading spinner when Visual Zoom navigation starts
+            const onVisualZoomLoading = () => {
+                console.log('[ContentView] Visual Zoom loading started - showing spinner');
+                if (this._isMounted) {
+                    this.setState({ isNavigatingWithVisualZoom: true });
+                }
+            };
+            ipc.on('content-view-visual-zoom-loading', onVisualZoomLoading);
+            this.contentViewCleanup.push(() => ipc.removeAllListeners('content-view-visual-zoom-loading'));
+            
+            // Hide loading spinner when Visual Zoom is ready
+            const onVisualZoomReady = () => {
+                console.log('[ContentView] Visual Zoom ready - hiding spinner');
+                if (this._isMounted) {
+                    this.setState({ isNavigatingWithVisualZoom: false });
+                }
+            };
+            ipc.on('content-view-visual-zoom-ready', onVisualZoomReady);
+            this.contentViewCleanup.push(() => ipc.removeAllListeners('content-view-visual-zoom-ready'));
+        }
     }
     
     /**
@@ -456,48 +502,42 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 window.addEventListener('resize', this.windowResizeListener);
             }
             
-            // Configure Visual Zoom mode (main process setting - doesn't need preload)
-            window.contentView.setVisualZoom(this.state.visualZoomEnabled);
-            
-            // Set mobile mode if needed (main process setting - doesn't need preload)
-            if (this.localMobileMode) {
-                window.contentView.setMobileMode(true);
-            }
-            
-            // Load content based on mode FIRST (so preload script is loaded)
+            // Load content with bundled settings (all settings applied BEFORE navigation)
             if (this.isWebpageMode) {
-                // Webpage mode: Navigate to URL
+                // Webpage mode: Navigate to URL with bundled settings
                 const targetUrl = this.props.item.link;
                 if (this.contentViewCurrentUrl !== targetUrl) {
-                    console.log('[ContentView] Navigating to:', targetUrl);
+                    console.log('[ContentView] FIRST LOAD - navigateWithSettings to:', targetUrl);
                     this.contentViewCurrentUrl = targetUrl;
-                    await window.contentView.navigate(targetUrl);
+                    await window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
+                    // Mark ContentView as initialized (Device Emulation is now active)
+                    this.contentViewInitialized = true;
+                    console.log('[ContentView] ContentView initialized, subsequent navigations will use JS navigation');
                 } else {
                     console.log('[ContentView] URL unchanged, skipping navigation');
                 }
             } else {
-                // Local (RSS) or FullContent mode: Load HTML directly
+                // Local (RSS) or FullContent mode: Load HTML directly with bundled settings
                 const htmlDataUrl = this.articleView();
-                console.log('[ContentView] Loading HTML content for mode:', SourceOpenTarget[this.state.contentMode]);
-                // Navigate to data URL (articleView returns data:text/html;base64,...)
-                await window.contentView.navigate(htmlDataUrl);
+                console.log('[ContentView] FIRST LOAD - Loading HTML content for mode:', SourceOpenTarget[this.state.contentMode]);
+                // Navigate with settings bundled - all settings applied BEFORE navigation starts
+                await window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
                 this.contentViewCurrentUrl = htmlDataUrl;
+                // Mark ContentView as initialized (Device Emulation is now active)
+                this.contentViewInitialized = true;
+                console.log('[ContentView] ContentView initialized, subsequent navigations will use JS navigation');
             }
             
-            // NOW send settings to preload (after page is loaded and preload script is running)
-            // Small delay to ensure preload script has initialized
-            setTimeout(() => {
-                if (window.contentView) {
-                    window.contentView.send('set-visual-zoom-mode', this.state.visualZoomEnabled);
-                    this.sendSettingsToContentView();
-                    this.sendZoomOverlaySettingToContentView(this.state.showZoomOverlay);
-                    // Apply current zoom level (this sends to preload)
-                    this.applyZoom(this.currentZoom);
-                }
-            }, 100);
+            // Settings are now bundled with navigation - no need for separate send
+            // The preload reads settings via synchronous IPC on load
+            console.log('[ContentView] Navigation complete (settings bundled with navigate call)');
             
-            // Show ContentView
-            window.contentView.setVisible(true);
+            // Show ContentView (if Visual Zoom is enabled, main process handles showing after emulation)
+            // We still call setVisible(true) here - main process will handle the timing
+            if (!this.state.visualZoomEnabled) {
+                window.contentView.setVisible(true);
+            }
+            // For Visual Zoom: ContentViewManager shows the view after emulation is applied (dom-ready)
             
             // Focus
             window.contentView.focus();
@@ -1278,9 +1318,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.setGlobalMobileMode(this.localMobileMode);
             
             // Synchronisiere currentZoom sofort bei Artikelwechsel
-            const savedZoom = this.props.source.defaultZoom || 0
+            // Verwende den AKTUELLEN Zoom (this.currentZoom), nicht den gespeicherten aus props
+            // Der gespeicherte props.source.defaultZoom kann veraltet sein wenn der User gerade gezoomt hat
+            // Nur wenn wir zu einer ANDEREN Source wechseln, verwenden wir den gespeicherten Wert
+            const isSameSource = prevProps.source.sid === this.props.source.sid
+            const savedZoom = isSameSource 
+                ? this.currentZoom  // Gleiche Source: behalte aktuellen Zoom
+                : (this.props.source.defaultZoom || 0)  // Andere Source: verwende gespeicherten Zoom
             this.currentZoom = savedZoom
             this.setState({ zoom: savedZoom })
+            
+            console.log('[Article] Zoom for article change: isSameSource:', isSameSource, 
+                'currentZoom:', this.currentZoom, 'savedZoom:', savedZoom)
             
             // Close DevTools before article change to prevent crash
             try {
@@ -1305,13 +1354,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.setState({ isLoadingFull: true })
                     this.loadFull()
                 } else if (newContentMode === SourceOpenTarget.Webpage) {
-                    // For webpage mode - ContentView navigates to URL
+                    // For webpage mode - ContentView navigates to URL with bundled settings
                     if (window.contentView) {
                         const targetUrl = this.props.item.link;
                         if (this.contentViewCurrentUrl !== targetUrl) {
-                            console.log('[ContentView] Article changed (Webpage) - navigating to:', targetUrl);
+                            // JS-Navigation test showed: Emulation is reset even with window.location.href
+                            // So we use navigateWithSettings with HIDE-SHOW strategy:
+                            // Main process hides view, navigates, applies emulation at dom-ready, then shows
+                            console.log('[ContentView] Article changed (Webpage) - navigateWithSettings to:', targetUrl);
                             this.contentViewCurrentUrl = targetUrl;
-                            window.contentView.navigate(targetUrl);
+                            window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
                         }
                         // Focus ContentView for keyboard input (with delay to ensure it's ready)
                         setTimeout(() => {
@@ -1321,13 +1373,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         }, 100);
                     }
                 } else {
-                    // For Local (RSS) mode - ContentView loads HTML data URL
-                    // ContentView is now used for ALL modes, so we need to update content
+                    // For Local (RSS) mode - ContentView loads HTML data URL with bundled settings
                     if (window.contentView) {
                         const htmlDataUrl = this.articleView();
-                        console.log('[ContentView] Article changed (Local/RSS) - loading new content');
+                        // Use navigateWithSettings with HIDE-SHOW strategy
+                        console.log('[ContentView] Article changed (Local/RSS) - navigateWithSettings');
                         this.contentViewCurrentUrl = htmlDataUrl;
-                        window.contentView.navigate(htmlDataUrl);
+                        window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
                         // Focus ContentView
                         setTimeout(() => {
                             if (window.contentView) {
@@ -1335,7 +1387,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             }
                         }, 100);
                     }
-                    this.applyZoom(this.currentZoom)
+                    // CSS zoom for non-Visual-Zoom mode is handled by preload via sync IPC
+                    // No need for separate applyZoom call anymore!
                 }
             })
         } else if (prevProps.source.openTarget !== this.props.source.openTarget) {
@@ -2697,6 +2750,31 @@ window.__articleData = ${JSON.stringify({
                             onMouseLeave={this.handleBlurPlaceholderMouseLeave}
                             title="Klicken oder kurz warten zum Zurückkehren"
                         />
+                    )}
+                    {/* Loading spinner for Visual Zoom navigation */}
+                    {this.state.isNavigatingWithVisualZoom && (
+                        <div
+                            id="visual-zoom-loading"
+                            style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                background: "var(--neutralLighter, #f3f2f1)",
+                                zIndex: 5,
+                            }}
+                        >
+                            <Spinner 
+                                size={SpinnerSize.large}
+                                label="Laden..."
+                                labelPosition="bottom"
+                            />
+                        </div>
                     )}
                 </div>
             ) : (

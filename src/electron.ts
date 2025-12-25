@@ -6,6 +6,12 @@ import { WindowManager } from "./main/window"
 import { initP2P, registerP2PIpcHandlers } from "./main/p2p-share"
 import { initP2PLan, registerP2PLanIpcHandlers, shutdownP2P, onSystemSuspend, onSystemResume } from "./main/p2p-lan"
 
+// ===== Security Warnings =====
+// Suppress Content-Security-Policy warning for external websites loaded in ContentView
+// These external sites have their own CSPs (or none) - we can't control them
+// The main app (index.html) has a proper CSP defined
+process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
+
 // ===== Chromium-Flags für Visual Zoom (Pinch-to-Zoom) =====
 // WICHTIG: Diese müssen VOR app.whenReady() gesetzt werden!
 app.commandLine.appendSwitch('enable-pinch');

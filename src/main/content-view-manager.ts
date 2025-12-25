@@ -21,6 +21,17 @@ interface ContentViewBounds {
     height: number
 }
 
+/**
+ * Navigation settings for bundled navigation call
+ * All settings are applied BEFORE navigation starts, eliminating race conditions
+ */
+interface NavigationSettings {
+    zoomFactor: number       // Zoom factor (0.7 = 70%, 1.0 = 100%, etc.)
+    visualZoom: boolean      // Whether Visual Zoom (Device Emulation) is enabled
+    mobileMode: boolean      // Whether Mobile Mode is enabled
+    showZoomOverlay: boolean // Whether to show zoom overlay
+}
+
 export class ContentViewManager {
     private contentView: WebContentsView | null = null
     private parentWindow: BrowserWindow | null = null
@@ -30,6 +41,8 @@ export class ContentViewManager {
     private visualZoomEnabled: boolean = false
     private mobileMode: boolean = false
     private pageLoaded: boolean = false  // Track if a page has been loaded (for safe device emulation)
+    private emulationAppliedBeforeLoad: boolean = false  // Track if emulation was applied pre-navigation (to skip did-finish-load)
+    private pendingEmulationShow: boolean = false  // Track if we need to show ContentView after emulation is applied
     private mobileUserAgent: string = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     
     // Preload script path
@@ -104,6 +117,13 @@ export class ContentViewManager {
             this.setupContextMenu()
             console.log("[ContentViewManager] Context menu setup")
             
+            // Forward ContentView console messages to main process
+            this.contentView.webContents.on('console-message', (event, level, message, line, sourceId) => {
+                if (message.includes('[ContentPreload]')) {
+                    console.log(`[ContentView] ${message}`)
+                }
+            })
+            
             // Setup keyboard events forwarding
             this.setupKeyboardEvents()
             console.log("[ContentViewManager] Keyboard events setup")
@@ -122,28 +142,84 @@ export class ContentViewManager {
         
         const wc = this.contentView.webContents
         
+        // did-start-navigation is the VERY FIRST event - TOO EARLY, Chromium resets it
+        wc.on("did-start-navigation", (event, url, isInPlace, isMainFrame) => {
+            if (!isMainFrame) return  // Only main frame navigations
+            
+            console.log("[ContentViewManager] EVENT: did-start-navigation -", url)
+            
+            // DISABLED - too early, Chromium resets emulation after this
+            // if (this.visualZoomEnabled && this.pageLoaded) {
+            //     console.log("[ContentViewManager] EVENT: did-start-navigation → Applying emulation (experimental)")
+            //     this.applyDeviceEmulationForCurrentMode(true)
+            // }
+        })
+        
         wc.on("did-start-loading", () => {
+            console.log("[ContentViewManager] EVENT: did-start-loading")
             this.sendToRenderer("content-view-loading", true)
+            
+            // DISABLED - inconsistent, sometimes too early
+            // if (this.visualZoomEnabled && this.pageLoaded) {
+            //     console.log("[ContentViewManager] EVENT: did-start-loading → Applying emulation")
+            //     this.applyDeviceEmulationForCurrentMode(true)
+            // }
         })
         
         wc.on("did-stop-loading", () => {
+            console.log("[ContentViewManager] EVENT: did-stop-loading")
             this.sendToRenderer("content-view-loading", false)
         })
         
-        wc.on("did-finish-load", () => {
-            console.log("[ContentViewManager] Page loaded:", this.currentUrl)
-            this.pageLoaded = true  // Now safe to apply device emulation
-            this.sendToRenderer("content-view-loaded", this.currentUrl)
+        // DISABLED for testing - only did-start-navigation
+        wc.on("dom-ready", () => {
+            console.log("[ContentViewManager] EVENT: dom-ready -", this.currentUrl)
             
-            // Send visual zoom status to preload BEFORE applying device emulation
-            // This ensures the preload doesn't create CSS zoom wrapper
-            if (this.visualZoomEnabled) {
-                wc.send('set-visual-zoom-mode', true)
-                console.log("[ContentViewManager] Sent set-visual-zoom-mode after page load")
+            // Mark page as loaded (safe for device emulation now)
+            if (!this.pageLoaded) {
+                console.log("[ContentViewManager] pageLoaded was: false → setting to true (dom-ready)")
+                this.pageLoaded = true
             }
             
-            // Apply visual zoom AFTER page loads (like POC does)
+            // Send visual zoom status to preload
+            if (this.visualZoomEnabled) {
+                wc.send('set-visual-zoom-mode', true)
+                console.log("[ContentViewManager] EVENT: dom-ready → Sent set-visual-zoom-mode")
+            }
+            
+            // Apply emulation at dom-ready (earliest consistent point after Chromium reset)
+            console.log("[ContentViewManager] EVENT: dom-ready → Calling applyVisualZoomIfEnabled()")
             this.applyVisualZoomIfEnabled()
+            
+            // HIDE-SHOW STRATEGY: Show ContentView after emulation is applied
+            if (this.pendingEmulationShow && this.visualZoomEnabled) {
+                console.log("[ContentViewManager] EVENT: dom-ready → pendingEmulationShow: showing ContentView now")
+                this.pendingEmulationShow = false
+                // Small delay to ensure emulation has taken effect
+                setTimeout(() => {
+                    this.setVisible(true, false)
+                    // Notify renderer that ContentView is now visible (hide loading spinner)
+                    this.sendToRenderer("content-view-visual-zoom-ready")
+                    console.log("[ContentViewManager] ContentView shown after emulation applied")
+                }, 10)
+            }
+        })
+        
+        wc.on("did-finish-load", () => {
+            console.log("[ContentViewManager] EVENT: did-finish-load -", this.currentUrl)
+            // pageLoaded should already be true from dom-ready
+            if (!this.pageLoaded) {
+                console.log("[ContentViewManager] pageLoaded was: false → setting to true (did-finish-load fallback)")
+                this.pageLoaded = true
+            }
+            this.sendToRenderer("content-view-loaded", this.currentUrl)
+            
+            // DISABLED - testing did-start-navigation only
+            // if (this.visualZoomEnabled) {
+            //     console.log("[ContentViewManager] EVENT: did-finish-load → Verifying emulation is applied")
+            //     this.applyVisualZoomIfEnabled()
+            // }
+            this.emulationAppliedBeforeLoad = false  // Reset flag
         })
         
         wc.on("did-fail-load", (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
@@ -215,10 +291,16 @@ export class ContentViewManager {
     private setupIpcHandlers(): void {
         console.log("[ContentViewManager] Setting up IPC handlers...")
         
-        // Navigate to URL
+        // Navigate to URL (legacy - prefer navigateWithSettings for new code)
         ipcMain.handle("content-view-navigate", async (event, url: string) => {
             console.log("[ContentViewManager] IPC: navigate to", url)
             return this.navigate(url)
+        })
+        
+        // Navigate with all settings bundled - eliminates race conditions
+        ipcMain.handle("content-view-navigate-with-settings", async (event, url: string, settings: NavigationSettings) => {
+            console.log("[ContentViewManager] IPC: navigateWithSettings to", url, "settings:", settings)
+            return this.navigateWithSettings(url, settings)
         })
         
         // Update bounds
@@ -245,15 +327,23 @@ export class ContentViewManager {
             this.sendToContentView(channel, ...args)
         })
         
+        // EXPERIMENTAL: Navigate via JavaScript (to test if Device Emulation survives)
+        ipcMain.handle("content-view-navigate-via-js", async (event, url: string) => {
+            console.log("[ContentViewManager] IPC: navigate-via-js to", url)
+            return this.navigateViaJs(url)
+        })
+        
         // Execute JavaScript in content view
         ipcMain.handle("content-view-execute-js", async (event, code: string) => {
             return this.executeJavaScript(code)
         })
         
         // Set zoom factor (for +/- keyboard shortcuts - uses CSS zoom or Device Emulation)
+        // IMPORTANT: This must be synchronous (sendSync) to ensure zoom is set BEFORE navigation starts
         ipcMain.on("content-view-set-zoom-factor", (event, factor: number) => {
             console.log("[ContentViewManager] IPC: set zoom factor", factor)
             this.setZoomFactor(factor)
+            event.returnValue = true  // For sendSync - ensures caller waits
         })
         
         // Set CSS zoom level directly (for preload-based zoom when Visual Zoom is OFF)
@@ -428,6 +518,18 @@ export class ContentViewManager {
             this.currentUrl = url
             console.log("[ContentViewManager] Navigating to:", url)
             
+            // CRITICAL: Apply device emulation BEFORE loading the page
+            // This prevents the "jump" when the page loads with wrong viewport
+            // and then gets resized after did-finish-load
+            // BUT: Only if a page was already loaded (not on first load - that crashes!)
+            if (this.visualZoomEnabled && this.pageLoaded) {
+                console.log("[ContentViewManager] Pre-navigation: Applying device emulation (subsequent load)")
+                this.applyDeviceEmulationForCurrentMode(true)  // Force before page load
+                this.emulationAppliedBeforeLoad = true  // Skip did-finish-load emulation
+            } else {
+                this.emulationAppliedBeforeLoad = false
+            }
+            
             this.contentView.webContents.loadURL(url).catch(err => {
                 // Ignore aborted navigations
                 if (err.code !== "ERR_ABORTED") {
@@ -441,6 +543,97 @@ export class ContentViewManager {
             console.error("[ContentViewManager] navigate error:", e)
             return false
         }
+    }
+    
+    /**
+     * Navigate with all settings bundled in a single call
+     * This eliminates race conditions by applying all settings SYNCHRONOUSLY before navigation
+     * 
+     * Flow:
+     * 1. Apply all settings immediately (no async)
+     * 2. Set up Device Emulation with correct zoom (if visualZoom enabled and page already loaded)
+     * 3. Start navigation
+     * 4. Preload reads final settings via synchronous IPC on load
+     */
+    public navigateWithSettings(url: string, settings: NavigationSettings): boolean {
+        console.log("[ContentViewManager] ==========================================")
+        console.log("[ContentViewManager] navigateWithSettings called:", url)
+        console.log("[ContentViewManager] Settings:", JSON.stringify(settings))
+        console.log("[ContentViewManager] Current state: pageLoaded:", this.pageLoaded, 
+            "currentZoomFactor:", this.keyboardZoomFactor,
+            "visualZoomEnabled:", this.visualZoomEnabled)
+        
+        if (!this.contentView) {
+            console.error("[ContentViewManager] Cannot navigate - not initialized")
+            return false
+        }
+        
+        try {
+            // === STEP 1: Apply ALL settings SYNCHRONOUSLY ===
+            this.visualZoomEnabled = settings.visualZoom
+            this.mobileMode = settings.mobileMode
+            this.keyboardZoomFactor = Math.max(0.25, Math.min(5.0, settings.zoomFactor))
+            // showZoomOverlay is read by preload via sync IPC, no need to store here
+            
+            console.log("[ContentViewManager] Settings applied:",
+                "visualZoom:", this.visualZoomEnabled,
+                "mobileMode:", this.mobileMode,
+                "zoomFactor:", this.keyboardZoomFactor)
+            
+            // === HIDE-SHOW STRATEGY ===
+            // Hide ContentView before navigation to prevent visible "jump" when emulation is reset.
+            // Chromium resets enableDeviceEmulation() when loadURL() is called.
+            // We hide the view, navigate, apply emulation at dom-ready, then show again.
+            if (this.visualZoomEnabled) {
+                // Always set pendingEmulationShow for Visual Zoom - even on first load
+                this.pendingEmulationShow = true
+                if (this.isVisible) {
+                    console.log("[ContentViewManager] HIDE-SHOW: Hiding ContentView before navigation")
+                    this.setVisible(false, true)  // preserveContent=true to keep blur working
+                    // Notify renderer to show loading spinner
+                    this.sendToRenderer("content-view-visual-zoom-loading")
+                } else {
+                    console.log("[ContentViewManager] HIDE-SHOW: ContentView already hidden (first load), will show after emulation")
+                }
+            }
+            
+            // === STEP 2: Start navigation ===
+            this.currentUrl = url
+            console.log("[ContentViewManager] Starting loadURL (emulation will be applied after dom-ready)")
+            this.contentView.webContents.loadURL(url).catch(err => {
+                // Ignore aborted navigations
+                if (err.code !== "ERR_ABORTED") {
+                    console.error("[ContentViewManager] Navigation error:", err)
+                }
+            })
+            
+            console.log("[ContentViewManager] navigateWithSettings: loadURL called successfully")
+            console.log("[ContentViewManager] ==========================================")
+            return true
+        } catch (e) {
+            console.error("[ContentViewManager] navigateWithSettings error:", e)
+            return false
+        }
+    }
+    
+    /**
+     * EXPERIMENTAL: Navigate via JavaScript in preload
+     * This tests if Device Emulation survives a JavaScript-triggered navigation
+     * (as opposed to loadURL() which resets it)
+     */
+    public navigateViaJs(url: string): boolean {
+        console.log("[ContentViewManager] navigateViaJs called:", url)
+        
+        if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
+            console.error("[ContentViewManager] Cannot navigate - webContents not ready")
+            return false
+        }
+        
+        // Send URL to preload script - it will do window.location.href = url
+        this.currentUrl = url
+        this.contentView.webContents.send('navigate-via-js', url)
+        console.log("[ContentViewManager] Sent navigate-via-js to preload")
+        return true
     }
     
     /**
@@ -543,6 +736,17 @@ export class ContentViewManager {
             return
         }
         
+        // Skip if emulation was already applied before navigation (async IPC arrived late)
+        if (this.emulationAppliedBeforeLoad) {
+            console.log("[ContentViewManager] setZoomFactor: skipping - emulation already applied pre-navigation")
+            // Still update the factor for next time
+            this.keyboardZoomFactor = Math.max(0.25, Math.min(5.0, factor))
+            // But DO send the zoom level to preload for overlay display
+            const level = Math.round((factor - 1.0) / 0.1)
+            this.contentView.webContents.send('set-visual-zoom-level', level)
+            return
+        }
+        
         // Clamp factor to reasonable range (0.25 to 5.0)
         const clampedFactor = Math.max(0.25, Math.min(5.0, factor))
         this.keyboardZoomFactor = clampedFactor
@@ -552,6 +756,9 @@ export class ContentViewManager {
                 // With Device Emulation, use scale parameter
                 this.applyDeviceEmulationWithScale(clampedFactor)
                 console.log("[ContentViewManager] Zoom via Device Emulation scale:", clampedFactor)
+                // Send zoom level to preload for overlay display
+                const level = Math.round((clampedFactor - 1.0) / 0.1)
+                this.contentView.webContents.send('set-visual-zoom-level', level)
             } else {
                 // Without Visual Zoom, use CSS zoom via preload
                 // Convert factor to zoom level: 1.0 = 0, 1.1 = 1, 0.9 = -1
@@ -656,11 +863,14 @@ export class ContentViewManager {
      * This is the KEY to enabling pinch-to-zoom!
      */
     private applyDeviceEmulation(): void {
+        console.log("[ContentViewManager] applyDeviceEmulation called - visualZoomEnabled:", this.visualZoomEnabled)
         if (!this.visualZoomEnabled || !this.contentView) {
+            console.log("[ContentViewManager] applyDeviceEmulation: skipping (disabled or no view)")
             return
         }
         
         // Use the central method that handles all modes
+        console.log("[ContentViewManager] applyDeviceEmulation: → calling applyDeviceEmulationForCurrentMode()")
         this.applyDeviceEmulationForCurrentMode()
     }
     
@@ -668,6 +878,7 @@ export class ContentViewManager {
      * Called after page load - reapply device emulation (like POC does)
      */
     private applyVisualZoomIfEnabled(): void {
+        console.log("[ContentViewManager] applyVisualZoomIfEnabled called")
         this.applyDeviceEmulation()
     }
     
@@ -749,13 +960,21 @@ export class ContentViewManager {
      * When scale exceeds critical threshold (content would overflow), the emulated
      * viewport is proportionally reduced. This triggers responsive layouts and
      * prevents content from being cut off.
+     * 
+     * @param forceBeforeLoad - If true, skip the pageLoaded check (used for pre-navigation setup)
      */
-    private applyDeviceEmulationForCurrentMode(): void {
+    private applyDeviceEmulationForCurrentMode(forceBeforeLoad: boolean = false): void {
         const wc = this.contentView?.webContents
         if (!wc || wc.isDestroyed()) return
         
+        console.log("[ContentViewManager] applyDeviceEmulationForCurrentMode called:",
+            "forceBeforeLoad:", forceBeforeLoad,
+            "keyboardZoomFactor:", this.keyboardZoomFactor,
+            "pageLoaded:", this.pageLoaded)
+        
         // Safety check: don't apply device emulation before page is loaded
-        if (!this.pageLoaded) {
+        // UNLESS forceBeforeLoad is set (for pre-navigation setup to prevent jump)
+        if (!this.pageLoaded && !forceBeforeLoad) {
             console.log("[ContentViewManager] applyDeviceEmulationForCurrentMode: page not loaded yet, skipping")
             return
         }
@@ -770,6 +989,10 @@ export class ContentViewManager {
         let viewportWidth = width
         let viewportHeight = height
         let effectiveScale = this.keyboardZoomFactor
+        
+        console.log("[ContentViewManager] Calculating emulation:",
+            "physicalSize:", width, "x", height,
+            "initialScale:", effectiveScale)
         
         if (this.mobileMode) {
             // Mobile viewport is fixed at 768px (or less if screen is smaller)

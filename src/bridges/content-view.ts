@@ -22,12 +22,47 @@ export interface ContentViewContextMenu {
     mediaType: string
 }
 
+/**
+ * Navigation settings for bundled navigation call
+ * All settings are applied BEFORE navigation starts, eliminating race conditions
+ */
+export interface NavigationSettings {
+    zoomFactor: number       // Zoom factor (0.7 = 70%, 1.0 = 100%, etc.)
+    visualZoom: boolean      // Whether Visual Zoom (Device Emulation) is enabled
+    mobileMode: boolean      // Whether Mobile Mode is enabled
+    showZoomOverlay: boolean // Whether to show zoom overlay
+}
+
 export const contentViewBridge = {
     /**
      * Navigate content view to URL
+     * @deprecated Use navigateWithSettings() for new code - it bundles all settings
      */
     navigate: (url: string): Promise<boolean> => {
         return ipcRenderer.invoke("content-view-navigate", url)
+    },
+    
+    /**
+     * Navigate with all settings bundled in a single call
+     * This eliminates race conditions by applying all settings BEFORE navigation
+     * 
+     * Flow:
+     * 1. Main process receives URL + settings
+     * 2. All settings are applied synchronously
+     * 3. Device Emulation is set up (if visualZoom enabled)
+     * 4. Navigation starts
+     * 5. Preload reads settings via synchronous IPC on load
+     */
+    navigateWithSettings: (url: string, settings: NavigationSettings): Promise<boolean> => {
+        return ipcRenderer.invoke("content-view-navigate-with-settings", url, settings)
+    },
+    
+    /**
+     * EXPERIMENTAL: Navigate via JavaScript in preload
+     * Tests if Device Emulation survives a JS-triggered navigation
+     */
+    navigateViaJs: (url: string): Promise<boolean> => {
+        return ipcRenderer.invoke("content-view-navigate-via-js", url)
     },
     
     /**
@@ -73,9 +108,10 @@ export const contentViewBridge = {
      * Set zoom factor (for +/- keyboard shortcuts)
      * Uses CSS zoom (via preload) when Visual Zoom is OFF
      * Uses Device Emulation scale when Visual Zoom is ON
+     * IMPORTANT: This is synchronous to ensure zoom is set BEFORE navigation starts
      */
     setZoomFactor: (factor: number): void => {
-        ipcRenderer.send("content-view-set-zoom-factor", factor)
+        ipcRenderer.sendSync("content-view-set-zoom-factor", factor)
     },
     
     /**

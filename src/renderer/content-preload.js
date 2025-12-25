@@ -8,15 +8,28 @@ try {
   const MIN_ZOOM_LEVEL = -6;  // 40% minimum zoom (100% - 6*10%)
   const MAX_ZOOM_LEVEL = 40;  // 500% maximum zoom (100% + 40*10%)
 
-  // Zoom-Overlay Einstellung (default: aus)
+  // Zoom-Overlay Einstellung - load synchronously to show overlay on first load
   let showZoomOverlayEnabled = false;
+  try {
+    showZoomOverlayEnabled = ipcRenderer.sendSync('get-zoom-overlay');
+    console.log('[ContentPreload] Zoom Overlay initial state:', showZoomOverlayEnabled ? 'ON' : 'OFF');
+  } catch (e) {
+    console.warn('[ContentPreload] Could not load Zoom Overlay state:', e);
+  }
   
   // Mobile Mode Status
   let mobileMode = false;
   
   // Visual Zoom Mode: Wenn aktiviert, werden Touch-Events NICHT abgefangen
   // damit der native Browser-Pinch-Zoom funktioniert
+  // Load initial value synchronously to prevent CSS zoom flash
   let visualZoomEnabled = false;
+  try {
+    visualZoomEnabled = ipcRenderer.sendSync('get-visual-zoom');
+    console.log('[ContentPreload] Visual Zoom initial state:', visualZoomEnabled ? 'ON' : 'OFF');
+  } catch (e) {
+    console.warn('[ContentPreload] Could not load Visual Zoom state:', e);
+  }
 
   // Overlay für Debug-Anzeige (Zoom, NSFW-Cleanup, etc.)
   let infoOverlay = null;
@@ -359,19 +372,83 @@ try {
   }
 
   // Initial: Warte auf DOM
+  // ABER: Überspringen wenn Visual Zoom aktiviert ist (dann macht Device Emulation den Zoom)
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-      applyZoom(zoomLevel, { notify: false });
+      if (!visualZoomEnabled) {
+        applyZoom(zoomLevel, { notify: false });
+      } else {
+        console.log('[ContentPreload] Skipping initial CSS zoom - Visual Zoom mode active');
+        // Aber zeige trotzdem das Overlay wenn aktiviert (für Visual Zoom)
+        if (showZoomOverlayEnabled) {
+          showZoomOverlay(zoomLevel);
+        }
+      }
+      // Log initial scaling info
+      logCurrentScale('DOMContentLoaded');
     });
   } else {
-    applyZoom(zoomLevel, { notify: false });
+    if (!visualZoomEnabled) {
+      applyZoom(zoomLevel, { notify: false });
+    } else {
+      console.log('[ContentPreload] Skipping initial CSS zoom - Visual Zoom mode active');
+      // Aber zeige trotzdem das Overlay wenn aktiviert (für Visual Zoom)
+      if (showZoomOverlayEnabled) {
+        showZoomOverlay(zoomLevel);
+      }
+    }
+    // Log initial scaling info
+    logCurrentScale('Already loaded');
   }
+  
+  // === SCALE OBSERVER für Debugging ===
+  function logCurrentScale(reason) {
+    const vv = window.visualViewport;
+    const dpr = window.devicePixelRatio;
+    const innerW = window.innerWidth;
+    const innerH = window.innerHeight;
+    const outerW = window.outerWidth;
+    const outerH = window.outerHeight;
+    
+    let msg = `[ContentPreload] SCALE (${reason}): `;
+    msg += `innerSize=${innerW}x${innerH}, `;
+    msg += `outerSize=${outerW}x${outerH}, `;
+    msg += `DPR=${dpr.toFixed(2)}`;
+    
+    if (vv) {
+      msg += `, visualViewport: ${Math.round(vv.width)}x${Math.round(vv.height)} scale=${vv.scale.toFixed(2)}`;
+    }
+    
+    console.log(msg);
+  }
+  
+  // Observe visualViewport changes
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      logCurrentScale('visualViewport resize');
+    });
+    window.visualViewport.addEventListener('scroll', () => {
+      // Only log on significant scale changes, not scroll
+      // logCurrentScale('visualViewport scroll');
+    });
+  }
+  
+  // Also log on window resize
+  window.addEventListener('resize', () => {
+    logCurrentScale('window resize');
+  });
 
   // Listener für externe Zoom-Befehle (von Keyboard - bewahre Scroll-Position)
+  // ABER: Bei Visual Zoom nur das Level tracken, NICHT CSS zoom anwenden!
   ipcRenderer.on('set-webview-zoom', (event, zoomLevel_) => {
-    console.log('[ContentPreload] Received set-webview-zoom:', zoomLevel_, 'viewport:', window.innerWidth, 'x', window.innerHeight);
+    console.log('[ContentPreload] Received set-webview-zoom:', zoomLevel_, 'visualZoom:', visualZoomEnabled);
     zoomLevel = zoomLevel_;
-    applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
+    
+    // Bei Visual Zoom: Kein CSS Zoom anwenden (Device Emulation macht den Zoom)
+    if (!visualZoomEnabled) {
+      applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
+    }
+    
     // Zeige Zoom-Overlay beim Artikelwechsel, wenn aktiviert
     if (showZoomOverlayEnabled) {
       showZoomOverlay(zoomLevel);
@@ -385,6 +462,19 @@ try {
     if (showZoomOverlayEnabled) {
       showZoomOverlay(zoomLevel);
     }
+  });
+  
+  // Listener für Visual Zoom Level Update (für Overlay-Anzeige bei Device Emulation)
+  // Das CSS-basierte zoomLevel wird nicht verwendet bei Visual Zoom,
+  // aber wir brauchen trotzdem ein Level für die Overlay-Anzeige
+  ipcRenderer.on('set-visual-zoom-level', (event, level) => {
+    console.log('[ContentPreload] Visual Zoom level update:', level);
+    zoomLevel = level;  // Update internal tracking
+    if (showZoomOverlayEnabled) {
+      showZoomOverlay(level);
+    }
+    // Log scale after receiving zoom level
+    setTimeout(() => logCurrentScale('after set-visual-zoom-level'), 50);
   });
   
   // Listener für Mobile Mode Status
@@ -433,6 +523,16 @@ try {
     console.log('[ContentPreload] Input mode changed:', inputModeEnabled ? 'ON (navigation disabled)' : 'OFF (navigation enabled)');
   });
 
+  // EXPERIMENTAL: JavaScript-based navigation (to test if Device Emulation survives)
+  ipcRenderer.on('navigate-via-js', (event, url) => {
+    console.log('[ContentPreload] Received navigate-via-js:', url);
+    console.log('[ContentPreload] Current emulation state before JS navigation:');
+    logCurrentScale('before JS navigation');
+    
+    // Navigate using JavaScript - this might preserve Device Emulation!
+    window.location.href = url;
+  });
+
   // NSFW-Cleanup Einstellung - synchron beim Start laden
   let nsfwCleanupEnabled = false;
   try {
@@ -458,7 +558,10 @@ try {
       if (!data || typeof data !== 'object') return;
       if (data.type === 'set-webview-zoom' && typeof data.zoomLevel === 'number') {
         zoomLevel = data.zoomLevel;
-        applyZoom(zoomLevel, { notify: false });
+        // Bei Visual Zoom: Kein CSS Zoom anwenden
+        if (!visualZoomEnabled) {
+          applyZoom(zoomLevel, { notify: false });
+        }
       }
     } catch {}
   });
