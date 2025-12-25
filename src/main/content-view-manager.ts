@@ -646,13 +646,22 @@ export class ContentViewManager {
     
     /**
      * Disable visual zoom
+     * Only sets the flag - actual disabling happens after page load to avoid crash
      */
     public disableVisualZoom(): void {
         if (!this.contentView) return
         
-        this.contentView.webContents.disableDeviceEmulation()
         this.visualZoomEnabled = false
-        console.log("[ContentViewManager] Visual zoom disabled")
+        console.log("[ContentViewManager] Visual zoom disabled (flag set)")
+        
+        // Only disable device emulation if a page has been loaded
+        // Calling disableDeviceEmulation() on empty webContents causes V8 crash!
+        if (this.pageLoaded && this.contentView.webContents && !this.contentView.webContents.isDestroyed()) {
+            this.contentView.webContents.disableDeviceEmulation()
+            console.log("[ContentViewManager] Device emulation disabled")
+        } else {
+            console.log("[ContentViewManager] Skipping disableDeviceEmulation - page not loaded yet")
+        }
     }
     
     /**

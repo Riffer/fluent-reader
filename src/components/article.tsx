@@ -85,7 +85,6 @@ type ArticleState = {
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
-    webview: Electron.WebviewTag
     globalKeydownListener: (e: KeyboardEvent) => void
     globalKeyupListener: (e: KeyboardEvent) => void
     pressedZoomKeys: Set<string>
@@ -101,7 +100,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private resizeObserver: ResizeObserver | null = null
     private contentViewHiddenForMenu: boolean = false  // Track if we hid ContentView for menu access
     private contentViewCurrentUrl: string | null = null  // Track current URL to avoid double navigation
-    private pendingWebViewFocus: boolean = false  // Flag to focus WebView after next did-stop-loading
+    private pendingContentViewFocus: boolean = false  // Track if we need to focus ContentView after load
 
     constructor(props: ArticleProps) {
         super(props)
@@ -143,20 +142,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 this.setState({ zoom: zoomLevel })
                 this.props.updateDefaultZoom(this.props.source, zoomLevel);
             });
-        }
-    }
-
-    private sendZoomToPreload = (zoom: number) => {
-        if (!this.webview) return;
-        try {
-            this.webview.send('set-webview-zoom', zoom);
-        } catch (e) {
-            // Falls das Webview noch nicht bereit ist, nach dom-ready einmalig senden
-            const once = () => {
-                try { this.webview.send('set-webview-zoom', zoom); } catch {}
-                this.webview.removeEventListener('dom-ready', once as any);
-            };
-            try { this.webview.addEventListener('dom-ready', once as any); } catch {}
         }
     }
 
@@ -277,6 +262,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Setup ContentView event listeners
      */
     private setupContentViewListeners = () => {
+        // Guard: Ensure contentView bridge is available
+        if (!window.contentView) {
+            console.warn('[ContentView] Cannot setup listeners - contentView bridge not available');
+            return;
+        }
+        
         console.log('[ContentView] Setting up listeners');
         
         // Loading state
@@ -450,23 +441,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 window.addEventListener('resize', this.windowResizeListener);
             }
             
-            // Configure Visual Zoom mode
+            // Configure Visual Zoom mode (main process setting - doesn't need preload)
             window.contentView.setVisualZoom(this.state.visualZoomEnabled);
-            window.contentView.send('set-visual-zoom-mode', this.state.visualZoomEnabled);
             
-            // Set mobile mode if needed
+            // Set mobile mode if needed (main process setting - doesn't need preload)
             if (this.localMobileMode) {
                 window.contentView.setMobileMode(true);
             }
             
-            // Send settings to ContentView preload
-            this.sendSettingsToContentView();
-            this.sendZoomOverlaySettingToContentView(this.state.showZoomOverlay);
-            
-            // Apply current zoom level
-            this.applyZoom(this.currentZoom);
-            
-            // Load content based on mode
+            // Load content based on mode FIRST (so preload script is loaded)
             if (isWebpage) {
                 // Webpage mode: Navigate to URL
                 const targetUrl = this.props.item.link;
@@ -486,6 +469,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 this.contentViewCurrentUrl = htmlDataUrl;
             }
             
+            // NOW send settings to preload (after page is loaded and preload script is running)
+            // Small delay to ensure preload script has initialized
+            setTimeout(() => {
+                if (window.contentView) {
+                    window.contentView.send('set-visual-zoom-mode', this.state.visualZoomEnabled);
+                    this.sendSettingsToContentView();
+                    this.sendZoomOverlaySettingToContentView(this.state.showZoomOverlay);
+                    // Apply current zoom level (this sends to preload)
+                    this.applyZoom(this.currentZoom);
+                }
+            }, 100);
+            
             // Show ContentView
             window.contentView.setVisible(true);
             
@@ -498,17 +493,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
     
-    // Input Mode: Sendet Status an WebView/ContentView um Keyboard-Navigation zu deaktivieren
+    // Input Mode: Sendet Status an ContentView um Keyboard-Navigation zu deaktivieren
     private setInputMode = (enabled: boolean) => {
         this.setState({ inputModeEnabled: enabled });
-        // Send to WebView
-        if (this.webview) {
-            try {
-                this.webview.send('set-input-mode', enabled);
-            } catch (e) {
-                // WebView not ready - ignore
-            }
-        }
         // Send to ContentView
         if (window.contentView) {
             try {
@@ -532,23 +519,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Globalen Mobile-Mode Status setzen (für neue WebViews bei Artikelwechsel)
         this.setGlobalMobileMode(newMobileMode);
         
-        // Check if we're using ContentView (Visual Zoom mode + Webpage mode)
-        const usingContentView = this.state.loadWebpage && this.state.visualZoomEnabled && window.contentView;
-        
-        if (usingContentView) {
-            // Use ContentView bridge - this handles User-Agent, Device Emulation, and reload
+        // Use ContentView bridge - this handles User-Agent, Device Emulation, and reload
+        if (window.contentView) {
             console.log('[Article] Setting ContentView mobile mode:', newMobileMode);
             window.contentView.setMobileMode(newMobileMode);
-        } else {
-            // Legacy WebView path - Emulation sofort aktivieren/deaktivieren
-            if (newMobileMode) {
-                await this.enableMobileEmulation();
-            } else {
-                await this.disableMobileEmulation();
-            }
-            
-            // Webview neu laden damit die Seite mit korrektem User-Agent/Viewport lädt
-            this.reloadWebview();
         }
     }
 
@@ -564,83 +538,26 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
-    // Device Emulation für Mobile Mode aktivieren
-    private enableMobileEmulation = async () => {
-        if (!this.webview) return false;
-        try {
-            const webContentsId = (this.webview as any).getWebContentsId();
-            if (!webContentsId) {
-                console.error('[MobileMode] Could not get webContentsId');
-                return false;
-            }
-            
-            // Hole die tatsächliche Webview-Größe für dynamischen Viewport
-            // Fallback auf 768x844 wenn noch nicht gerendert (getBoundingClientRect gibt 0 zurück)
-            const webviewRect = this.webview.getBoundingClientRect();
-            const viewportWidth = webviewRect.width > 0 ? Math.min(768, Math.round(webviewRect.width)) : 768;
-            const viewportHeight = webviewRect.height > 0 ? Math.round(webviewRect.height) : 844;
-            
-            const ipcRenderer = (window as any).ipcRenderer;
-            if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
-                const result = await ipcRenderer.invoke('enable-device-emulation', webContentsId, {
-                    screenPosition: "mobile",
-                    screenSize: { width: viewportWidth, height: viewportHeight },
-                    deviceScaleFactor: 1,  // Kein extra Scaling
-                    viewSize: { width: viewportWidth, height: viewportHeight },
-                    fitToView: false,
-                    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
-                });
-                console.log('[MobileMode] Device emulation enabled:', result, 'viewport:', viewportWidth, 'x', viewportHeight);
-                // Sende Status an Webview-Preload für Overlay
-                try {
-                    this.webview.send('set-mobile-mode', true);
-                } catch {}
-                return result;
-            }
-            return false;
-        } catch (e) {
-            console.error('[MobileMode] Error enabling emulation:', e);
-            return false;
-        }
-    }
-
-    // Device Emulation deaktivieren
-    private disableMobileEmulation = async () => {
-        if (!this.webview) return false;
-        try {
-            const webContentsId = (this.webview as any).getWebContentsId();
-            if (!webContentsId) return false;
-            const ipcRenderer = (window as any).ipcRenderer;
-            if (ipcRenderer && typeof ipcRenderer.invoke === 'function') {
-                const result = await ipcRenderer.invoke('disable-device-emulation', webContentsId);
-                console.log('[MobileMode] Device emulation disabled:', result);
-                // Sende Status an Webview-Preload für Overlay
-                try {
-                    this.webview.send('set-mobile-mode', false);
-                } catch {}
-                return result;
-            }
-            return false;
-        } catch (e) {
-            console.error('[MobileMode] Error disabling emulation:', e);
-            return false;
-        }
-    }
+    // Note: enableMobileEmulation and disableMobileEmulation removed
+    // Mobile mode is now handled via window.contentView.setMobileMode()
 
     // Setzt den globalen Mobile-Mode-Status im Main-Prozess
-    // Der Main-Prozess wendet dann automatisch Emulation auf neue WebViews an
+    // Der Main-Prozess wendet dann automatisch Emulation auf neue ContentViews an
     private setGlobalMobileMode = (enabled: boolean) => {
         const ipcRenderer = (window as any).ipcRenderer;
         if (ipcRenderer && typeof ipcRenderer.send === 'function') {
             // FESTE Viewport-Breite für konsistentes Mobile-Verhalten
             // 768px ist der Standard-Breakpoint für Mobile/Tablet
-            // Höhe wird dynamisch berechnet falls Webview vorhanden
             const viewportWidth = 768;
             let viewportHeight = 844;
-            if (this.webview) {
+            
+            // Try to get height from ContentView placeholder
+            if (this.contentViewPlaceholderRef) {
                 try {
-                    const webviewRect = this.webview.getBoundingClientRect();
-                    viewportHeight = Math.round(webviewRect.height);
+                    const rect = this.contentViewPlaceholderRef.getBoundingClientRect();
+                    if (rect.height > 0) {
+                        viewportHeight = Math.round(rect.height);
+                    }
                 } catch {}
             }
             
@@ -662,24 +579,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const newValue = !this.state.nsfwCleanupEnabled;
         window.settings.setNsfwCleanup(newValue);
         this.setState({ nsfwCleanupEnabled: newValue });
-        // Webview neu laden damit die Einstellung greift
-        this.reloadWebview();
+        // Reload ContentView damit die Einstellung greift
+        this.webviewReload();
     }
 
     private toggleAutoCookieConsent = () => {
         const newValue = !this.state.autoCookieConsentEnabled;
         window.settings.setAutoCookieConsent(newValue);
         this.setState({ autoCookieConsentEnabled: newValue });
-        // Webview neu laden damit die Einstellung greift
-        this.reloadWebview();
-    }
-
-    private reloadWebview = () => {
-        if (this.webview) {
-            try {
-                this.webview.reload();
-            } catch {}
-        }
+        // Reload ContentView damit die Einstellung greift
+        this.webviewReload();
     }
 
     // ===== Cookie Persistence =====
@@ -889,13 +798,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             onClick: () => {
                                 if (this.state.loadFull && this.state.fullContent) {
                                     window.utils.writeClipboard(this.state.fullContent)
-                                } else if (this.state.loadWebpage && this.webview) {
-                                    this.webview.executeJavaScript(`
+                                } else if (this.state.loadWebpage && window.contentView) {
+                                    window.contentView.executeJavaScript(`
                                         (function() {
                                             const html = document.documentElement.outerHTML;
                                             return html;
                                         })()
-                                    `, false).then((result: string) => {
+                                    `).then((result: string) => {
                                         if (result) {
                                             window.utils.writeClipboard(result)
                                         }
@@ -911,21 +820,21 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             iconProps: { iconName: "CodeEdit" },
                             disabled: !this.state.loadFull && !this.state.loadWebpage,
                             onClick: () => {
-                                if (this.state.loadFull && this.webview) {
-                                    this.webview.executeJavaScript(`
+                                if (this.state.loadFull && window.contentView) {
+                                    window.contentView.executeJavaScript(`
                                         (function() {
                                             const html = document.documentElement.outerHTML;
                                             return html;
                                         })()
-                                    `, false).then((result: string) => {
+                                    `).then((result: string) => {
                                         if (result) {
                                             window.utils.writeClipboard(result)
                                         }
                                     }).catch((err: any) => {
                                         console.error('Fehler beim Kopieren des berechneten Quelltexts:', err)
                                     })
-                                } else if (this.state.loadWebpage && this.webview) {
-                                    this.webview.executeJavaScript(`
+                                } else if (this.state.loadWebpage && window.contentView) {
+                                    window.contentView.executeJavaScript(`
                                         (function() {
                                             let contentEl = document.getElementById('fr-zoom-container') || document.documentElement;
                                             let clone = contentEl.cloneNode(true);
@@ -938,7 +847,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                                             const html = new XMLSerializer().serializeToString(clone);
                                             return html;
                                         })()
-                                    `, false).then((result: string) => {
+                                    `).then((result: string) => {
                                         if (result) {
                                             window.utils.writeClipboard(result)
                                         }
@@ -1038,8 +947,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             text: "Artikel Developer Tools",
                             iconProps: { iconName: "FileHTML" },
                             onClick: () => {
-                                if (this.webview) {
-                                    this.webview.openDevTools()
+                                if (window.contentView) {
+                                    window.contentView.openDevTools()
                                 }
                             },
                         },
@@ -1213,108 +1122,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
-    // Früh beim Start der Navigation Zoom setzen und Sichtbarkeit aktivieren
-    webviewStartLoadingEarly = () => {
-        if (!this.webview) return;
-        console.log('[Article] webviewStartLoadingEarly - did-start-loading fired');
-        
-        // Cookie Persistence: Cookies laden bei jeder Navigation
-        if (this.props.source.persistCookies && this.state.loadWebpage) {
-            console.log("[CookiePersist] Article: Loading cookies at did-start-loading");
-            this.loadPersistedCookies();
-        }
-        
-        const targetZoom = this.props.source.defaultZoom || 0;
-        // Synchronisiere currentZoom mit dem Feed-Zoom
-        this.currentZoom = targetZoom;
-        console.log('[Article] Sending initial zoom:', targetZoom);
-        try {
-            // Verwende echten Zoom-Level statt Skalierung
-            this.webview.send('set-webview-zoom', targetZoom);
-        } catch {}
-        if (!this.state.webviewVisible) this.setState({ webviewVisible: true });
-    }
-
-    webviewStartLoading = () => { 
-        console.log('[Article] webviewStartLoading - dom-ready fired');
-        
-        // Guard: Prüfe ob this.webview noch gültig ist
-        if (!this.webview) {
-            console.log('[Article] dom-ready: webview is null, skipping');
-            return;
-        }
-        
-        // Mobile Mode: Emulation wird bei did-stop-loading aktiviert (zuverlässiger)
-        // Hier nur IPC-Signal für Overlay senden
-        const currentMobileMode = this.localMobileMode;
-        
-        const targetZoom = this.props.source.defaultZoom || 0;
-        // Synchronisiere currentZoom mit dem Feed-Zoom
-        this.currentZoom = targetZoom;
-        console.log('[Article] dom-ready: Sending zoom:', targetZoom, 'overlay:', this.state.showZoomOverlay, 'mobileMode:', currentMobileMode, 'visualZoom:', this.state.visualZoomEnabled);
-        try {
-            // Verwende echten Zoom-Level statt Skalierung
-            this.webview.send('set-webview-zoom', targetZoom);
-            // Sende Zoom-Overlay-Einstellung
-            this.webview.send('set-zoom-overlay-setting', this.state.showZoomOverlay);
-            // Sende Mobile-Mode-Status für Overlay
-            this.webview.send('set-mobile-mode', currentMobileMode);
-            // Sende Visual Zoom Status (wichtig für Touch-Event-Handling im Preload)
-            this.webview.send('set-visual-zoom-mode', this.state.visualZoomEnabled);
-        } catch {}
-        if (!this.state.webviewVisible) this.setState({ webviewVisible: true });
-    }
-    webviewLoaded = () => {
-        console.log('[Article] webviewLoaded - did-stop-loading fired');
-        this.setState({ loaded: true })
-        
-        // Guard: Prüfe ob this.webview noch gültig ist
-        if (!this.webview) {
-            console.log('[Article] did-stop-loading: webview is null, skipping');
-            return;
-        }
-        
-        // Mobile Mode: Emulation aktivieren/deaktivieren (zuverlässiger Zeitpunkt als dom-ready)
-        const currentMobileMode = this.localMobileMode;
-        if (this.state.loadWebpage) {
-            if (currentMobileMode) {
-                console.log('[Article] did-stop-loading: Mobile emulation handled by ContentView');
-                // NOTE: With ContentView, mobile mode is handled via window.contentView.setMobileMode()
-            } else {
-                console.log('[Article] did-stop-loading: Normal mode');
-            }
-        }
-        
-        const targetZoom = this.props.source.defaultZoom || 0;
-        // Synchronisiere currentZoom mit dem Feed-Zoom
-        this.currentZoom = targetZoom;
-        console.log('[Article] did-stop-loading: Applying zoom:', targetZoom, 'mobileMode:', currentMobileMode);
-        
-        // Apply zoom via ContentView (replaces old WebView logic)
-        this.applyZoom(targetZoom);
-        this.sendZoomOverlaySettingToContentView(this.state.showZoomOverlay);
-        
-        // Send mobile mode status to ContentView
-        if (window.contentView) {
-            window.contentView.send('set-mobile-mode', currentMobileMode);
-        }
-        
-        // Cookies speichern nach dem Laden (für Login-Flows)
-        if (this.props.source.persistCookies && this.state.loadWebpage) {
-            console.log("[CookiePersist] Article: Saving cookies after page load (did-stop-loading)")
-            this.savePersistedCookies()
-        }
-        
-        // Focus auf Webview setzen nachdem alles geladen ist
-        this.focusWebviewAfterLoad()
-    }
+    // Note: webviewStartLoadingEarly, webviewStartLoading, webviewLoaded removed
+    // ContentView handles loading events via setupContentViewListeners()
+    
     webviewError = (reason: string) => {
         this.setState({ error: true, errorDescription: reason })
     }
+    
     webviewReload = () => {
-        if (this.webview) {
+        // Use ContentView reload instead of webview
+        if (window.contentView) {
             this.setState({ loaded: false, error: false })
-            this.webview.reload()
+            window.contentView.reload()
         } else if (this.state.loadFull) {
             this.loadFull()
         }
@@ -1386,19 +1205,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 const newZoom = Math.min(MAX_ZOOM_LEVEL, this.currentZoom + 1)
                 this.currentZoom = newZoom
                 this.setState({ zoom: newZoom })
-                this.sendZoomToPreload(newZoom)
-                this.updateDefaultZoom(newZoom)
+                this.applyZoom(newZoom)
             } else if (e.key === '-' || e.key === '_') {
                 const newZoom = Math.max(MIN_ZOOM_LEVEL, this.currentZoom - 1)
                 this.currentZoom = newZoom
                 this.setState({ zoom: newZoom })
-                this.sendZoomToPreload(newZoom)
-                this.updateDefaultZoom(newZoom)
+                this.applyZoom(newZoom)
             } else if (e.key === '#') {
                 this.currentZoom = 0
                 this.setState({ zoom: 0 })
-                this.sendZoomToPreload(0)
-                this.updateDefaultZoom(0)
+                this.applyZoom(0)
             }
         }
         
@@ -1409,56 +1225,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         document.addEventListener('keydown', this.globalKeydownListener)
         document.addEventListener('keyup', this.globalKeyupListener)
         
-        let webview = document.getElementById("article") as Electron.WebviewTag
-        if (webview != this.webview) {
-            this.webview = webview
-            if (webview) {
-                webview.focus()
-                this.setState({ loaded: false, error: false })
-                // Vor dem Laden: Zoom direkt setzen und sichtbar schalten
-                this.webviewStartLoadingEarly()
-                webview.addEventListener("did-stop-loading", this.webviewLoaded)
-                webview.addEventListener("did-start-loading", this.webviewStartLoadingEarly)
-                webview.addEventListener("dom-ready", this.webviewStartLoading)
-                // Keyboard shortcuts for zoom control
-                webview.addEventListener('keydown', (e: any) => {
-                    try {
-                        if (e.key === '+' || e.key === '=') {
-                            this.sendZoomToPreload(this.state.zoom + 1)
-                        } else if (e.key === '-' || e.key === '_') {
-                            this.sendZoomToPreload(this.state.zoom - 1)
-                        } else if (e.key === '#') {
-                            this.sendZoomToPreload(0)
-                        }
-                    } catch {}
-                })
-                // Events aus sendToHost (Preload -> Renderer) entgegennehmen
-                webview.addEventListener('ipc-message', (e: any) => {
-                    try {
-                        if (e && e.channel === 'webview-zoom-changed' && typeof e.args?.[0] === 'number') {
-                            this.props.updateDefaultZoom(this.props.source, e.args[0])
-                        } else if (e && e.channel === 'article-nav' && e.args?.[0]) {
-                            // Handle left/right arrow navigation from webview
-                            const direction = e.args[0].direction;
-                            this.props.offsetItem(direction);
-                        }
-                    } catch {}
-                })
-                // Close DevTools before navigation to prevent crash
-                webview.addEventListener('will-navigate', () => {
-                    try {
-                        if (webview.isDevToolsOpened()) {
-                            webview.closeDevTools()
-                        }
-                    } catch {}
-                })
-                let card = document.querySelector(
-                    `#refocus div[data-iid="${this.props.item._id}"]`
-                ) as HTMLElement
-                // @ts-ignore
-                if (card) card.scrollIntoViewIfNeeded()
-            }
-        }
+        // Note: WebView code removed - ContentView is now the only display method
+        // ContentView is initialized via ref callback in render()
+        
+        // Scroll to current article card in feed list
+        let card = document.querySelector(
+            `#refocus div[data-iid="${this.props.item._id}"]`
+        ) as HTMLElement
+        // @ts-ignore
+        if (card) card.scrollIntoViewIfNeeded()
     }
     componentDidUpdate = (prevProps: ArticleProps, prevState: ArticleState) => {
         if (prevProps.item._id != this.props.item._id) {
@@ -1506,8 +1281,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             // Close DevTools before article change to prevent crash
             try {
-                if (this.webview && this.webview.isDevToolsOpened()) {
-                    this.webview.closeDevTools()
+                if (window.contentView && window.contentView.isDevToolsOpened()) {
+                    window.contentView.closeDevTools()
                 }
             } catch {}
             
@@ -1559,7 +1334,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             }
                         }, 100);
                     }
-                    this.sendZoomToPreload(this.currentZoom)
+                    this.applyZoom(this.currentZoom)
                 }
             })
         } else if (prevProps.source.openTarget !== this.props.source.openTarget) {
@@ -1906,31 +1681,31 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     
     private contentViewRestoreTimeout: NodeJS.Timeout | null = null
     
-    // Focus webview after full content is loaded
-    private focusWebviewAfterLoad = () => {
-        if (this.webview) {
-            // Check if we're waiting to focus WebView after mode switch
-            if (this.pendingWebViewFocus) {
-                console.log('[VisualZoom] pendingWebViewFocus: focusing WebView now');
-                this.pendingWebViewFocus = false;
+    // Focus ContentView after full content is loaded
+    private focusContentViewAfterLoad = () => {
+        if (window.contentView) {
+            // Check if we're waiting to focus ContentView after mode switch
+            if (this.pendingContentViewFocus) {
+                console.log('[VisualZoom] pendingContentViewFocus: focusing ContentView now');
+                this.pendingContentViewFocus = false;
                 // Multiple focus attempts to ensure it sticks
-                this.webview.focus();
+                window.contentView.focus();
                 setTimeout(() => {
-                    if (this.webview && this._isMounted) {
-                        this.webview.focus();
-                        console.log('[VisualZoom] ✅ WebView focused - press P to switch back');
+                    if (window.contentView && this._isMounted) {
+                        window.contentView.focus();
+                        console.log('[VisualZoom] ✅ ContentView focused - press P to switch back');
                     }
                 }, 50);
                 setTimeout(() => {
-                    if (this.webview && this._isMounted) {
-                        this.webview.focus();
+                    if (window.contentView && this._isMounted) {
+                        window.contentView.focus();
                     }
                 }, 200);
             } else {
                 // Normal focus with small delay
                 setTimeout(() => {
-                    if (this.webview && this._isMounted) {
-                        this.webview.focus()
+                    if (window.contentView && this._isMounted) {
+                        window.contentView.focus()
                     }
                 }, 100)
             }
@@ -1967,8 +1742,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Close DevTools before unmount to prevent crash
         try {
-            if (this.webview && this.webview.isDevToolsOpened()) {
-                this.webview.closeDevTools()
+            if (window.contentView && window.contentView.isDevToolsOpened()) {
+                window.contentView.closeDevTools()
             }
         } catch {}
         
