@@ -1393,6 +1393,43 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     
     /**
+     * Central helper to capture screenshot and hide ContentView
+     * Used by all overlay/menu handlers for consistent behavior
+     * @param reason - Description for logging
+     * @param shouldHideCheck - Optional callback to verify we should still hide (for async timing)
+     */
+    private hideContentViewWithScreenshot = async (reason: string, shouldHideCheck?: () => boolean): Promise<void> => {
+        if (!window.contentView) return
+        if (this.contentViewHiddenForMenu) return  // Already hidden
+        
+        console.log(`[Article] ${reason} - capturing screenshot`)
+        try {
+            const screenshot = await window.contentView.captureScreen()
+            if (screenshot && this._isMounted) {
+                // Use setState callback to hide ContentView after React renders the placeholder
+                this.setState({ menuBlurScreenshot: screenshot }, () => {
+                    // Re-check conditions after async setState
+                    if (this._isMounted && window.contentView && (!shouldHideCheck || shouldHideCheck())) {
+                        window.contentView.setVisible(false, true) // preserveContent for blur-div
+                        this.contentViewHiddenForMenu = true
+                        console.log(`[Article] ContentView hidden for ${reason}`)
+                    }
+                })
+                return
+            }
+        } catch (e) {
+            console.error(`[Article] Error capturing screenshot for ${reason}:`, e)
+        }
+        
+        // Fallback: hide without screenshot (error case or no screenshot)
+        if (!shouldHideCheck || shouldHideCheck()) {
+            window.contentView.setVisible(false, true) // preserveContent for blur-div
+            this.contentViewHiddenForMenu = true
+            console.log(`[Article] ContentView hidden for ${reason} (no screenshot)`)
+        }
+    }
+    
+    /**
      * Handle Redux overlay visibility change for ContentView
      * Only handles Redux-based overlays (menu, settings, log menu, context menu)
      * Fluent UI dropdowns are handled by onMenuOpened/onMenuDismissed callbacks
@@ -1401,27 +1438,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (!window.contentView) return
         
         if (overlayActive) {
-            // Redux overlay is opening - capture screenshot and hide ContentView
-            console.log('[Article] Redux overlay opening - capturing screenshot')
-            try {
-                const screenshot = await window.contentView.captureScreen()
-                if (screenshot && this._isMounted) {
-                    this.setState({ menuBlurScreenshot: screenshot })
-                    // Small delay to ensure React renders the placeholder before hiding ContentView
-                    setTimeout(() => {
-                        if (this._isMounted && this.props.overlayActive) {
-                            window.contentView.setVisible(false, true) // preserveContent for blur-div
-                            this.contentViewHiddenForMenu = true
-                            console.log('[Article] ContentView hidden for Redux overlay')
-                        }
-                    }, 16)
-                }
-            } catch (e) {
-                console.error('[Article] Error capturing screenshot:', e)
-                // Even without screenshot, hide ContentView
-                window.contentView.setVisible(false, true) // preserveContent for blur-div
-                this.contentViewHiddenForMenu = true
-            }
+            await this.hideContentViewWithScreenshot('Redux overlay opening', () => this.props.overlayActive)
         } else {
             // Redux overlay closed - check if we can restore
             if (this.contentViewHiddenForMenu && !this.fluentMenuOpen && !this.localDialogOpen) {
@@ -1442,28 +1459,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (!window.contentView) return
         
         if (dialogOpen) {
-            // Local dialog is opening - capture screenshot and hide ContentView
-            console.log('[Article] Local dialog opening - capturing screenshot')
             this.localDialogOpen = true
-            try {
-                const screenshot = await window.contentView.captureScreen()
-                if (screenshot && this._isMounted) {
-                    this.setState({ menuBlurScreenshot: screenshot })
-                    // Small delay to ensure React renders the placeholder before hiding ContentView
-                    setTimeout(() => {
-                        if (this._isMounted && this.localDialogOpen) {
-                            window.contentView.setVisible(false, true) // preserveContent for blur-div
-                            this.contentViewHiddenForMenu = true
-                            console.log('[Article] ContentView hidden for local dialog')
-                        }
-                    }, 16)
-                }
-            } catch (e) {
-                console.error('[Article] Error capturing screenshot:', e)
-                // Even without screenshot, hide ContentView
-                window.contentView.setVisible(false, true) // preserveContent for blur-div
-                this.contentViewHiddenForMenu = true
-            }
+            await this.hideContentViewWithScreenshot('local dialog opening', () => this.localDialogOpen)
         } else {
             // Local dialog closed - check if we can restore
             this.localDialogOpen = false
@@ -1482,26 +1479,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Called by onMenuOpened callback in menu props
      */
     private handleFluentMenuOpened = async () => {
-        console.log('[Article] Fluent UI menu opening')
         this.fluentMenuOpen = true
         
         // ContentView is now used for ALL modes (RSS, Full Content, Webpage)
         // Hide it whenever a menu opens to allow interaction with the menu
-        if (!window.contentView) return
-        if (this.contentViewHiddenForMenu) return  // Already hidden
-        
-        try {
-            const screenshot = await window.contentView.captureScreen()
-            if (screenshot && this._isMounted) {
-                this.setState({ menuBlurScreenshot: screenshot })
-            }
-        } catch (e) {
-            console.error('[Article] Error capturing screenshot for Fluent menu:', e)
-        }
-        
-        window.contentView.setVisible(false, true) // preserveContent for blur-div
-        this.contentViewHiddenForMenu = true
-        console.log('[Article] ContentView hidden for Fluent UI menu')
+        await this.hideContentViewWithScreenshot('Fluent UI menu opening', () => this.fluentMenuOpen)
     }
     
     /**
@@ -1586,11 +1568,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.blurHoverTimer = null
         }
         
-        // Clear screenshot FIRST to prevent flash on article switch
-        this.setState({ menuBlurScreenshot: null })
-        
+        // Show ContentView FIRST, then remove blur screenshot
+        // This prevents a flash where neither is visible
         window.contentView.setVisible(true)
         this.contentViewHiddenForMenu = false
+        
+        // Small delay to ensure ContentView is rendered before removing blur
+        setTimeout(() => {
+            if (this._isMounted) {
+                this.setState({ menuBlurScreenshot: null })
+            }
+        }, 16)  // One frame delay
     }
     
     /**
@@ -1599,22 +1587,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      */
     private handleContentViewMouseLeave = async () => {
         if (!this.state.visualZoomEnabled || !this.usesContentView) return
-        if (!window.contentView) return
-        if (this.contentViewHiddenForMenu) return  // Already hidden
         
-        console.log('[Article] Mouse left ContentView area - hiding for overlay access')
-        try {
-            const screenshot = await window.contentView.captureScreen()
-            if (screenshot && this._isMounted) {
-                this.setState({ menuBlurScreenshot: screenshot })
-                console.log('[Article] Screenshot captured, length:', screenshot?.length)
-            }
-        } catch (e) {
-            console.error('[Article] Error capturing screenshot:', e)
-        }
-        
-        window.contentView.setVisible(false, true) // preserveContent for blur-div
-        this.contentViewHiddenForMenu = true
+        await this.hideContentViewWithScreenshot('Mouse left ContentView area')
     }
     
     /**

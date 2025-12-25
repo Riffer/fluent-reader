@@ -366,21 +366,48 @@ export class ContentViewManager {
         })
     }
     
+    // Enable performance logging for captureScreen (set to true for debugging)
+    private static readonly CAPTURE_PERF_LOGGING = false
+    
     /**
      * Capture screenshot of content view
      * Returns base64 data URL or null if not available
+     * Uses JPEG encoding (Q70) for optimal performance:
+     * - ~8x faster than PNG (~70ms vs ~590ms)
+     * - ~9x smaller file size (~220KB vs ~2MB)
      */
     public async captureScreen(): Promise<string | null> {
         if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
             return null
         }
         
+        const perfStart = ContentViewManager.CAPTURE_PERF_LOGGING ? performance.now() : 0
+        
         try {
+            // Step 1: Capture the page (GPU buffer read)
+            const captureStart = ContentViewManager.CAPTURE_PERF_LOGGING ? performance.now() : 0
             const image = await this.contentView.webContents.capturePage()
+            const captureTime = ContentViewManager.CAPTURE_PERF_LOGGING ? performance.now() - captureStart : 0
+            
             if (image.isEmpty()) {
                 return null
             }
-            return image.toDataURL()
+            
+            // Step 2: Encode to JPEG (much faster than PNG)
+            const encodeStart = ContentViewManager.CAPTURE_PERF_LOGGING ? performance.now() : 0
+            const jpegBuffer = image.toJPEG(70)  // Quality 70 - good balance for blur overlay
+            const encodeTime = ContentViewManager.CAPTURE_PERF_LOGGING ? performance.now() - encodeStart : 0
+            
+            // Step 3: Convert to base64 data URL
+            const dataUrl = `data:image/jpeg;base64,${jpegBuffer.toString('base64')}`
+            
+            if (ContentViewManager.CAPTURE_PERF_LOGGING) {
+                const totalTime = performance.now() - perfStart
+                const sizeKB = Math.round(dataUrl.length / 1024)
+                console.log(`[ContentViewManager] captureScreen perf: capture=${captureTime.toFixed(1)}ms, encode=${encodeTime.toFixed(1)}ms, total=${totalTime.toFixed(1)}ms, size=${sizeKB}KB`)
+            }
+            
+            return dataUrl
         } catch (e) {
             console.error("[ContentViewManager] captureScreen error:", e)
             return null
