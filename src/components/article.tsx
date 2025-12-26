@@ -2413,6 +2413,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const singleImageClass = isSingleImage ? "single-image" : ""
 
         // Baue HTML direkt mit eingebetteten Daten über JSON, nicht über Query-Parameter
+        // CSS ist vollständig inline eingebettet, da data: URLs keine file:// Ressourcen laden können
         const htmlContent = `<!DOCTYPE html>
 <html>
 <head>
@@ -2420,29 +2421,65 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
     <title>Article</title>
-    <link rel="stylesheet" href="file://${this.state.appPath ? this.state.appPath.replace(/\\\\/g, '/') : '/'}/article/article.css" />
     <style>
+/* Scrollbar Styles */
+::-webkit-scrollbar { width: 16px; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: #0006; }
+::-webkit-scrollbar-thumb:active { background-color: #0008; }
+
+/* CSS Variables */
+:root { --gray: #484644; --primary: #0078d4; --primary-alt: #004578; }
+
+/* Base Styles */
 html, body { margin: 0; padding: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
 body { padding: 12px 16px 32px; overflow-x: hidden; overflow-y: auto; font-size: ${this.state.fontSize}px; box-sizing: border-box; width: 100%; }
 ${this.state.fontFamily ? `body { font-family: "${this.state.fontFamily}"; }` : ''}
 body.rtl { direction: rtl; }
-body.vertical { writing-mode: vertical-rl; }
+body.vertical { writing-mode: vertical-rl; padding: 32px; padding-right: 96px; overflow: scroll hidden; }
 * { box-sizing: border-box; }
-#main { display: none; width: 100%; margin: 0; }
+
+/* Typography */
+h1, h2, h3, h4, h5, h6, b, strong { font-weight: 600; }
+a { color: var(--primary); text-decoration: none; }
+a:hover, a:active { color: var(--primary-alt); text-decoration: underline; }
+
+/* Main Container */
+#main { display: none; width: 100%; margin: 0; max-width: 700px; margin: 0 auto; }
+body.vertical #main { max-width: unset; max-height: 700px; margin: auto 0; }
 #main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Title and Date */
 #main > p.title { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; margin-block-end: 0; }
-#main > p.date { color: #666; font-size: 0.875rem; margin-block-start: 0.5rem; }
+#main > p.date { color: var(--gray); font-size: 0.875rem; margin-block-start: 0.5rem; }
+
+/* Article Content */
 #main > article { max-width: 800px; margin: 20px auto 0; padding: 0 16px; }
-#main img { max-width: 100%; height: auto; }
+article { line-height: 1.6; }
+body.vertical article { line-height: 1.5; }
+body.vertical article p { text-indent: 2rem; }
+article * { max-width: 100%; }
+article img { height: auto; max-width: 100%; }
+body.vertical article img { max-height: 75%; }
+article figure { margin: 16px 0; text-align: center; }
+article figure figcaption { font-size: 0.875rem; color: var(--gray); -webkit-user-modify: read-only; }
+article iframe { width: 100%; }
+article code { font-family: Monaco, Consolas, monospace; font-size: 0.875rem; line-height: 1; word-break: break-word; }
+article pre { word-break: normal; overflow-wrap: normal; white-space: pre-wrap; max-width: 100%; overflow-x: auto; }
+article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding: 0 40px; }
 #main table { max-width: 100%; overflow-x: auto; }
-#main pre { max-width: 100%; overflow-x: auto; }
-#main code { word-break: break-word; }
+
+/* Dark Mode */
 @media (prefers-color-scheme: dark) {
+  :root { --gray: #a19f9d; --primary: #4ba0e1; --primary-alt: #65aee6; }
   body { background-color: #2d2d30; color: #f8f8f8; }
   #main > p.date { color: #a19f9d; }
   a { color: #4ba0e1; }
   a:hover, a:active { color: #65aee6; }
+  ::-webkit-scrollbar-thumb { background-color: #fff4; }
+  ::-webkit-scrollbar-thumb:hover { background-color: #fff6; }
+  ::-webkit-scrollbar-thumb:active { background-color: #fff8; }
 }
 
 /* Comic Mode Styles - für Bilder-dominierte Inhalte */
