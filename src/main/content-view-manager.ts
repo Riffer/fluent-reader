@@ -147,12 +147,19 @@ export class ContentViewManager {
             if (!isMainFrame) return  // Only main frame navigations
             
             console.log("[ContentViewManager] EVENT: did-start-navigation -", url)
+        })
+        
+        // did-commit-navigation is when server responds and page starts loading
+        // This is the OPTIMAL time to hide - user sees old content until server responds
+        wc.on("did-navigate", (event, url) => {
+            console.log("[ContentViewManager] EVENT: did-navigate -", url)
             
-            // DISABLED - too early, Chromium resets emulation after this
-            // if (this.visualZoomEnabled && this.pageLoaded) {
-            //     console.log("[ContentViewManager] EVENT: did-start-navigation → Applying emulation (experimental)")
-            //     this.applyDeviceEmulationForCurrentMode(true)
-            // }
+            // LATE HIDE: Hide ContentView NOW - server has responded, new page is coming
+            if (this.visualZoomEnabled && this.pendingEmulationShow && this.isVisible) {
+                console.log("[ContentViewManager] LATE-HIDE: Server responded, hiding ContentView now")
+                this.setVisible(false, true)  // preserveContent=true for blur
+                this.sendToRenderer("content-view-visual-zoom-loading")
+            }
         })
         
         wc.on("did-start-loading", () => {
@@ -206,6 +213,21 @@ export class ContentViewManager {
                     // Notify renderer that ContentView is now visible (hide loading spinner)
                     this.sendToRenderer("content-view-visual-zoom-ready")
                     console.log("[ContentViewManager] ContentView shown after emulation applied")
+                    
+                    // === FOCUS FIX: Move focus away, then back to ContentView ===
+                    // First focus the main window to "reset" focus
+                    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                        this.mainWindow.webContents.focus()
+                        console.log("[ContentViewManager] Focus moved to main window")
+                    }
+                    
+                    // Then focus ContentView after a delay
+                    setTimeout(() => {
+                        if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
+                            this.contentView.webContents.focus()
+                            console.log("[ContentViewManager] Focus set to ContentView")
+                        }
+                    }, 1)
                 }, 10)
             }
         })
@@ -585,21 +607,15 @@ export class ContentViewManager {
                 "mobileMode:", this.mobileMode,
                 "zoomFactor:", this.keyboardZoomFactor)
             
-            // === HIDE-SHOW STRATEGY ===
-            // Hide ContentView before navigation to prevent visible "jump" when emulation is reset.
-            // Chromium resets enableDeviceEmulation() when loadURL() is called.
-            // We hide the view, navigate, apply emulation at dom-ready, then show again.
+            // === LATE-HIDE STRATEGY ===
+            // Instead of hiding BEFORE navigation (user sees nothing during network wait),
+            // we now hide in did-navigate event (when server responds).
+            // This lets the user see the OLD content while waiting for the server.
+            // Flow: loadURL() → [user sees old page] → did-navigate (HIDE) → dom-ready (SHOW)
             if (this.visualZoomEnabled) {
-                // Always set pendingEmulationShow for Visual Zoom - even on first load
+                // Set flag for did-navigate handler to know it should hide
                 this.pendingEmulationShow = true
-                if (this.isVisible) {
-                    console.log("[ContentViewManager] HIDE-SHOW: Hiding ContentView before navigation")
-                    this.setVisible(false, true)  // preserveContent=true to keep blur working
-                    // Notify renderer to show loading spinner
-                    this.sendToRenderer("content-view-visual-zoom-loading")
-                } else {
-                    console.log("[ContentViewManager] HIDE-SHOW: ContentView already hidden (first load), will show after emulation")
-                }
+                console.log("[ContentViewManager] LATE-HIDE: Will hide in did-navigate event (after server responds)")
             }
             
             // === STEP 2: Start navigation ===
