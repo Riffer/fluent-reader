@@ -3,6 +3,36 @@
 ## 💡 Offene Ideen
 
 
+### Aktuelle Seiten-URL beim Teilen/Kopieren (26.12.2025)
+**Beschreibung:** Wenn der User innerhalb einer Webseite navigiert (Links folgt), wird beim "Link kopieren" im Kontextmenü immer noch die ursprüngliche Feed-URL verwendet, nicht die aktuelle Seiten-URL nach Navigation.
+
+**Problem:**
+- User öffnet Artikel aus Feed (URL: `https://blog.example.com/post1`)
+- User folgt Links innerhalb der Seite zu `https://other-site.com/interesting`
+- User will diese URL teilen/kopieren
+- Aktuell wird nur `https://blog.example.com/post1` kopiert
+
+**Nutzen:**
+- User navigiert oft von der ursprünglichen Seite weg
+- Will dann in normalen Browser wechseln, weiß aber nicht mehr wie er dort hin kam
+- Navigated-Link würde sehr helfen
+
+**Technische Umsetzung:**
+- `content-view-context-menu` Event um `pageURL` erweitern (aus `this.currentUrl`)
+- Im ContentViewManager wird `currentUrl` bereits bei `did-navigate` und `did-navigate-in-page` aktualisiert
+- Im Kontextmenü `pageURL` anzeigen wenn `linkURL` leer ist
+- Alternativ: Beide URLs anbieten ("Link kopieren" vs "Aktuelle Seiten-URL kopieren")
+
+**Betroffene Dateien:**
+- `src/main/content-view-manager.ts` - `setupContextMenu()` um `pageURL: this.currentUrl` erweitern
+- `src/bridges/content-view.ts` - Interface `ContentViewContextMenu` erweitern
+- `src/components/article.tsx` - `onContextMenu` Handler anpassen
+- `src/components/context-menu.tsx` - Neue Menüoption oder Fallback-Logik
+
+**Status:** 📋 Geplant
+
+---
+
 ### Auto-Refresh nach Aufwachen aus Suspend (16.12.2025)
 **Beschreibung:** Wenn das Gerät aus dem Suspend/Sleep aufwacht, soll die App automatisch eine Aktualisierung aller Feeds durchführen.
 
