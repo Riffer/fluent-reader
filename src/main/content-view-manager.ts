@@ -99,6 +99,11 @@ export class ContentViewManager {
             })
             console.log("[ContentViewManager] WebContentsView instance created")
             
+            // Set background color to prevent white flash on dark pages
+            // Using transparent - let's see if this works
+            this.contentView.setBackgroundColor('#00000000')  // Transparent
+            console.log("[ContentViewManager] Background color set to transparent")
+            
             // Set initial bounds (hidden off-screen)
             this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
             console.log("[ContentViewManager] Initial bounds set")
