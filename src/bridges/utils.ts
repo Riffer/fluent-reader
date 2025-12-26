@@ -1,6 +1,5 @@
 import { ipcRenderer } from "electron"
 import {
-    ImageCallbackTypes,
     TouchBarTexts,
     WindowStateListenerType,
 } from "../schema-types"
@@ -81,38 +80,9 @@ const utilsBridge = {
             callback(pos, text)
         })
     },
-    addWebviewContextListener: (
-        callback: (pos: [number, number], text: string, url: string) => any
-    ) => {
-        ipcRenderer.removeAllListeners("webview-context-menu")
-        ipcRenderer.on("webview-context-menu", (_, pos, text, url) => {
-            callback(pos, text, url)
-        })
-    },
-    imageCallback: (type: ImageCallbackTypes) => {
-        ipcRenderer.invoke("image-callback", type)
-    },
 
-    addWebviewKeydownListener: (callback: (event: Electron.Input) => any) => {
-        ipcRenderer.removeAllListeners("webview-keydown")
-        ipcRenderer.on("webview-keydown", (_, input) => {
-            callback(input)
-        })
-    },
-
-    addWebviewKeyupListener: (callback: (event: Electron.Input) => any) => {
-        ipcRenderer.removeAllListeners("webview-keyup")
-        ipcRenderer.on("webview-keyup", (_, input) => {
-            callback(input)
-        })
-    },
-
-    addWebviewErrorListener: (callback: (reason: string) => any) => {
-        ipcRenderer.removeAllListeners("webview-error")
-        ipcRenderer.on("webview-error", (_, reason) => {
-            callback(reason)
-        })
-    },
+    // Note: WebView listeners removed - ContentView uses window.contentView.on* instead
+    // See bridges/content-view.ts for onContextMenu, onInput, onError
 
     writeClipboard: (text: string) => {
         ipcRenderer.invoke("write-clipboard", text)

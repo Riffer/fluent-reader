@@ -150,10 +150,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             menuBlurScreenshot: null,
             isNavigatingWithVisualZoom: false,
         }
-        window.utils.addWebviewContextListener(this.contextMenuHandler)
-        window.utils.addWebviewKeydownListener(this.keyDownHandler)
-        window.utils.addWebviewKeyupListener(this.keyUpHandler)
-        window.utils.addWebviewErrorListener(this.contentError)
 
         // IPC-Listener für Zoom-Änderungen vom Preload-Script
         if ((window as any).ipcRenderer) {
