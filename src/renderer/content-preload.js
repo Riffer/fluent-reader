@@ -750,7 +750,7 @@ try {
   }, { passive: false });
 
   // Arrow key navigation - send to parent via webContents
-  // This allows left/right arrow keys to navigate articles even when focus is on webview
+  // This allows left/right arrow keys to navigate articles even when focus is on webcontentsview
   // Smooth keyboard scrolling state
   let scrollDirection = 0; // -1 = up, 0 = stopped, 1 = down
   let scrollAnimationFrame = null;

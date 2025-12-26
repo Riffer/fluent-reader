@@ -679,7 +679,7 @@ interface HostCookies {
 **Ablauf - Cookie laden:**
 1. Artikel öffnen → Prüfen ob `source.persistCookies === true`
 2. Falls ja → Host aus URL extrahieren, gespeicherte Cookies für Host laden
-3. Cookies in Webview-Session setzen via Electron API
+3. Cookies in WebContentsview-Session setzen via Electron API
 4. Falls `persistCookies: false` → Keine Cookies laden, Session bleibt temporär
 
 **Ablauf - Cookie speichern (mehrere Trigger):**
@@ -687,7 +687,7 @@ interface HostCookies {
 | Event | Beschreibung | Priorität |
 |-------|--------------|-----------|
 | `componentDidUpdate` | Artikelwechsel - alter Artikel wird verlassen | ✅ Kritisch |
-| `componentWillUnmount` | Webview wird zerstört | ✅ Kritisch |
+| `componentWillUnmount` | Webcontentsview wird zerstört | ✅ Kritisch |
 | `did-finish-load` | Seite fertig geladen (z.B. nach Login) | ✅ Wichtig |
 | App-Beenden | `beforeunload` / `will-quit` | ✅ Backup |
 
@@ -703,12 +703,12 @@ componentDidUpdate(prevProps) {
 }
 
 componentWillUnmount() {
-  // Webview wird zerstört → Cookies speichern
+  // Komponente wird zerstört → Cookies speichern
   this.saveCookiesForCurrentHost();
 }
 
 // Nach Seitenload (für Login-Flows)
-webview.addEventListener('did-finish-load', () => {
+webcontentsview.addEventListener('did-finish-load', () => {
   if (source.persistCookies) {
     this.saveCookiesForCurrentHost();
   }
@@ -847,12 +847,12 @@ Derzeit gibt es ein Browser-Symbol, das beim Klick "Lade vollständigen Inhalt" 
 
 ---
 
-## Shortcut-Deaktivierung bei Webview-Eingabefeldern
+## Shortcut-Deaktivierung bei Browser-Eingabefeldern
 
 **Status:** ✅ Implementiert (v1.1.7) - als "Input-Modus"
 
 **Beschreibung:**
-Wenn der Benutzer im Webview in ein Login-Formular oder anderes Eingabefeld tippt, werden die Shortcuts (z.B. `L`, `M`, `S`, `+`, `-`) fälschlicherweise als Befehle interpretiert statt als Texteingabe.
+Wenn der Benutzer im Browser-Modus in ein Login-Formular oder anderes Eingabefeld tippt, werden die Shortcuts (z.B. `L`, `M`, `S`, `+`, `-`) fälschlicherweise als Befehle interpretiert statt als Texteingabe.
 
 **Implementierte Lösung: Manueller Input-Modus**
 
@@ -879,81 +879,6 @@ Statt automatischer Fokus-Erkennung wurde ein manueller Input-Modus implementier
 | `ESC` | Input-Modus beenden + Cookies speichern |
 
 Alle anderen Shortcuts sind deaktiviert um normale Texteingabe zu ermöglichen.
-
----
-
-## Ursprüngliche Idee: Automatische Fokus-Erkennung (nicht implementiert)
-
-**Problem:**
-- `keyDownHandler` in `article.tsx` empfängt alle Tasteneingaben aus dem Webview via IPC
-- Tasten wie `L` (Lade vollständigen Inhalt), `M` (Mark read), `S` (Star), `+`/`-` (Zoom) werden abgefangen
-- Benutzer kann nicht normal in Login-Formulare tippen
-
-**Technische Lösung:**
-
-1. **Signal aus webview-preload.js:**
-```javascript
-// Fokus-Tracking für Eingabefelder
-document.addEventListener('focusin', (e) => {
-    const isInput = e.target.tagName === 'INPUT' || 
-                    e.target.tagName === 'TEXTAREA' ||
-                    e.target.isContentEditable;
-    ipcRenderer.sendToHost('input-focus-changed', isInput);
-});
-
-document.addEventListener('focusout', (e) => {
-    ipcRenderer.sendToHost('input-focus-changed', false);
-});
-```
-
-2. **State in article.tsx:**
-```typescript
-state = {
-    // ... existing state
-    webviewInputFocused: boolean  // NEU
-}
-
-// Beim Webview-Setup
-webview.addEventListener('ipc-message', (event) => {
-    if (event.channel === 'input-focus-changed') {
-        this.setState({ webviewInputFocused: event.args[0] });
-    }
-});
-```
-
-3. **Anpassung keyDownHandler:**
-```typescript
-keyDownHandler = (input: Electron.Input) => {
-    // Bei fokussiertem Input: nur Escape und Navigation erlauben
-    if (this.state.webviewInputFocused) {
-        const allowedKeys = ['Escape', 'ArrowLeft', 'ArrowRight', 'F1', 'F2', 'F5'];
-        if (!allowedKeys.includes(input.key)) {
-            return; // Normale Texteingabe zulassen
-        }
-    }
-    // ... rest des Handlers
-}
-```
-
-**Erlaubte Shortcuts bei fokussiertem Input:**
-| Taste | Aktion | Grund |
-|-------|--------|-------|
-| `Escape` | Artikel schließen | Wichtige Navigation |
-| `ArrowLeft/Right` | Vorheriger/Nächster Artikel | Navigation |
-| `F1-F9` | Menü, Suche, etc. | Keine Texteingabe-Konflikte |
-
-**Blockierte Shortcuts bei fokussiertem Input:**
-| Taste | Normale Aktion | Konflikt mit |
-|-------|---------------|--------------|
-| `L` | Lade vollständigen Inhalt | Buchstabe L |
-| `M` | Als gelesen markieren | Buchstabe M |
-| `S` | Favorit | Buchstabe S |
-| `H` | Verstecken | Buchstabe H |
-| `B` | Im Browser öffnen | Buchstabe B |
-| `+`/`-` | Zoom | Zahlen/Sonderzeichen |
-| `W` | Toggle Full | Buchstabe W |
-
-**Fazit:** Automatische Fokus-Erkennung wurde verworfen zugunsten des manuellen Input-Modus (Ctrl+I), da dieser zuverlässiger und einfacher zu implementieren ist.
 
 ---
 
@@ -1072,7 +997,7 @@ const handleTouchStart = (e: React.TouchEvent) => {
 **Status:** Idee
 
 **Beschreibung:**
-Ein Greasemonkey/Tampermonkey-ähnliches System zur automatischen Ausführung von JavaScript auf Webseiten im Webview. Hauptanwendungsfall: Automatisches Wegklicken von Cookie-Consent-Bannern, aber auch andere Automatisierungen möglich.
+Ein Greasemonkey/Tampermonkey-ähnliches System zur automatischen Ausführung von JavaScript auf Webseiten im WebContentsView. Hauptanwendungsfall: Automatisches Wegklicken von Cookie-Consent-Bannern, aber auch andere Automatisierungen möglich.
 
 **Motivation:**
 - Cookie-Banner nerven beim Lesen von Artikeln
@@ -1180,9 +1105,9 @@ interface UserScript {
     └── custom-styles.js
 ```
 
-3. **Skript-Injection via webview-preload.js:**
+3. **Skript-Injection via ontentsview-preload.js:**
 ```javascript
-// In webview-preload.js
+// In ontentsview-preload.js
 const { ipcRenderer } = require('electron');
 
 // Skripte vom Main Process holen
@@ -1245,13 +1170,13 @@ function matchesPattern(url: string, pattern: string): boolean {
 - 🔗 **External Link Handler** - Öffnet externe Links im Browser
 
 **Sicherheitsüberlegungen:**
-- Skripte laufen im Webview-Context (sandboxed)
+- Skripte laufen im WebContentsview-Context (sandboxed)
 - Kein Zugriff auf Electron/Node APIs aus Userscripts
 - Warnung beim Import von externen Skripten
 - Optional: Skript-Signierung für vertrauenswürdige Quellen
 
 **Betroffene Dateien:**
-- `src/renderer/webview-preload.js` - Skript-Injection
+- `src/renderer/webcontents-preload.js` - Skript-Injection
 - `src/main/userscripts.ts` - NEU: Skript-Management
 - `src/components/settings/userscripts.tsx` - NEU: UI
 - `src/bridges/userscripts.ts` - NEU: IPC-Bridge
@@ -1378,7 +1303,7 @@ Im Quellcode befinden sich einige Kommentare auf Deutsch, was fuer international
 **Loesung:**
 - Alle deutschen Kommentare im Quellcode sollen auf **Englisch** umgestellt werden
 - Einheitliche Sprache im gesamten Codebase fuer bessere internationale Zusammenarbeit
-- Betrifft: article.tsx, window.ts, utils.ts, webview-preload.js und weitere Dateien
+- Betrifft: article.tsx, window.ts, utils.ts, webcontentsview-preload.js und weitere Dateien
 
 ### Lokalisierung neuer Funktionen
 
