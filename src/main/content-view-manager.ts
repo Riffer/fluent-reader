@@ -12,6 +12,8 @@
 import { WebContentsView, ipcMain, app, session, Input } from "electron"
 import type { BrowserWindow } from "electron"
 import path from "path"
+import fs from "fs"
+import os from "os"
 
 // Content view bounds (will be updated by renderer)
 interface ContentViewBounds {
@@ -45,6 +47,10 @@ export class ContentViewManager {
     private pendingEmulationShow: boolean = false  // Track if we need to show ContentView after emulation is applied
     private mobileUserAgent: string = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     
+    // Temporary file for data: URL workaround (touch events break with data: URLs after navigation)
+    private tempHtmlDir: string = ""
+    private tempHtmlFile: string = ""
+    
     // Preload script path
     // In dev mode, webpack puts electron.js in dist/, so app.getAppPath() = fluent-reader/dist
     // In packaged mode, app.getAppPath() = resources/app, and preload is in dist/
@@ -57,6 +63,118 @@ export class ContentViewManager {
     
     constructor() {
         this.setupIpcHandlers()
+        this.setupTempDir()
+    }
+    
+    /**
+     * Setup temporary directory for data: URL → file: URL conversion
+     * This workaround is needed because data: URLs have broken touch event behavior
+     * in Electron's WebContentsView after navigation (events stop being delivered)
+     */
+    private setupTempDir(): void {
+        try {
+            // Create a unique temp directory for this app instance
+            this.tempHtmlDir = path.join(os.tmpdir(), `fluent-reader-content-${process.pid}`)
+            if (!fs.existsSync(this.tempHtmlDir)) {
+                fs.mkdirSync(this.tempHtmlDir, { recursive: true })
+            }
+            this.tempHtmlFile = path.join(this.tempHtmlDir, "article.html")
+            console.log("[ContentViewManager] Temp directory setup:", this.tempHtmlDir)
+        } catch (e) {
+            console.error("[ContentViewManager] Failed to setup temp directory:", e)
+        }
+    }
+    
+    /**
+     * Convert a data: URL to a file: URL by writing content to temp file
+     * Returns the file: URL, or the original URL if not a data: URL
+     */
+    private convertDataUrlToFileUrl(url: string): string {
+        // Only convert data: URLs
+        if (!url.startsWith("data:")) {
+            return url
+        }
+        
+        try {
+            // Parse the data: URL
+            // Format: data:[<mediatype>][;base64],<data>
+            const match = url.match(/^data:([^;,]+)?(;base64)?,(.*)$/)
+            if (!match) {
+                console.warn("[ContentViewManager] Could not parse data: URL")
+                return url
+            }
+            
+            const [, mediaType, isBase64, data] = match
+            let htmlContent: string
+            
+            if (isBase64) {
+                // Decode base64
+                htmlContent = Buffer.from(data, 'base64').toString('utf-8')
+            } else {
+                // URL-encoded
+                htmlContent = decodeURIComponent(data)
+            }
+            
+            // Write to temp file
+            fs.writeFileSync(this.tempHtmlFile, htmlContent, 'utf-8')
+            
+            // Return file: URL
+            const fileUrl = `file://${this.tempHtmlFile.replace(/\\/g, '/')}`
+            console.log("[ContentViewManager] Converted data: URL to file: URL:", fileUrl)
+            return fileUrl
+        } catch (e) {
+            console.error("[ContentViewManager] Failed to convert data: URL:", e)
+            return url
+        }
+    }
+    
+    /**
+     * Cleanup temp files on destroy
+     */
+    private cleanupTempFiles(): void {
+        try {
+            if (this.tempHtmlDir && fs.existsSync(this.tempHtmlDir)) {
+                fs.rmSync(this.tempHtmlDir, { recursive: true, force: true })
+                console.log("[ContentViewManager] Temp directory cleaned up")
+            }
+        } catch (e) {
+            console.warn("[ContentViewManager] Failed to cleanup temp files:", e)
+        }
+    }
+    
+    /**
+     * WORKAROUND: Inject touch event listeners via executeJavaScript
+     * After navigation, the preload script's document reference becomes stale.
+     * This calls the preload's exposed function via contextBridge.
+     * 
+     * WICHTIG: Da contextIsolation=true, läuft executeJavaScript im Main World,
+     * nicht im Preload-Kontext. Der Preload exponiert die Funktion über contextBridge
+     * als window.cssZoomBridge.reRegisterTouchEvents()
+     */
+    private injectTouchEventListeners(): void {
+        if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
+            return
+        }
+        
+        // Call the preload's exposed function via contextBridge
+        // The preload exposes cssZoomBridge.reRegisterTouchEvents() to the main world
+        const script = `
+            (function() {
+                // cssZoomBridge is exposed by preload via contextBridge
+                if (window.cssZoomBridge && typeof window.cssZoomBridge.reRegisterTouchEvents === 'function') {
+                    console.log('[ContentViewManager] Calling cssZoomBridge.reRegisterTouchEvents()');
+                    window.cssZoomBridge.reRegisterTouchEvents();
+                } else {
+                    console.log('[ContentViewManager] cssZoomBridge not found - contextBridge may not be ready');
+                    console.log('[ContentViewManager] Available on window:', Object.keys(window).filter(k => k.includes('css') || k.includes('zoom') || k.includes('bridge')));
+                }
+            })();
+        `
+        
+        this.contentView.webContents.executeJavaScript(script).catch(err => {
+            console.error("[ContentViewManager] Failed to inject touch listeners:", err)
+        })
+        console.log("[ContentViewManager] Touch event injection requested")
     }
     
     /**
@@ -104,9 +222,14 @@ export class ContentViewManager {
             this.contentView.setBackgroundColor('#00000000')  // Transparent
             console.log("[ContentViewManager] Background color set to transparent")
             
-            // Set initial bounds (hidden off-screen)
-            this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
-            console.log("[ContentViewManager] Initial bounds set")
+            // Set initial bounds (hidden off-screen, or use saved bounds if recreating)
+            if (this.bounds && this.isVisible) {
+                this.contentView.setBounds(this.bounds)
+                console.log("[ContentViewManager] Using saved bounds:", this.bounds)
+            } else {
+                this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
+                console.log("[ContentViewManager] Initial bounds set (off-screen)")
+            }
             
             // Add to parent window's content view
             if (this.parentWindow && !this.parentWindow.isDestroyed()) {
@@ -137,6 +260,54 @@ export class ContentViewManager {
         } catch (e) {
             console.error("[ContentViewManager] Error creating WebContentsView:", e)
         }
+    }
+    
+    /**
+     * NUCLEAR OPTION: Recreate the WebContentsView completely
+     * This is needed because Electron's WebContentsView has a bug where touch events
+     * stop being delivered to the preload script after navigating to a new page.
+     * The ONLY reliable fix is to destroy and recreate the entire view.
+     */
+    private recreateContentView(): void {
+        console.log("[ContentViewManager] NUCLEAR OPTION: Recreating WebContentsView...")
+        
+        if (!this.parentWindow || this.parentWindow.isDestroyed()) {
+            console.error("[ContentViewManager] Cannot recreate - no parent window")
+            return
+        }
+        
+        // Save current state
+        const savedBounds = this.bounds
+        const savedVisible = this.isVisible
+        
+        // Destroy old view
+        if (this.contentView) {
+            try {
+                this.parentWindow.contentView.removeChildView(this.contentView)
+                // webContents is destroyed automatically when view is removed
+                this.contentView = null
+                console.log("[ContentViewManager] Old WebContentsView destroyed")
+            } catch (e) {
+                console.error("[ContentViewManager] Error destroying old view:", e)
+            }
+        }
+        
+        // Reset page loaded state
+        this.pageLoaded = false
+        
+        // Create fresh view
+        this.createContentView()
+        
+        // Restore visibility state
+        if (savedVisible && savedBounds) {
+            this.bounds = savedBounds
+            this.isVisible = true
+            if (this.contentView) {
+                this.contentView.setBounds(savedBounds)
+            }
+        }
+        
+        console.log("[ContentViewManager] WebContentsView recreated successfully")
     }
     
     /**
@@ -195,15 +366,20 @@ export class ContentViewManager {
                 this.pageLoaded = true
             }
             
-            // Send visual zoom status to preload
+            // Send zoom settings to preload based on mode
+            // Don't round - preserve fractional values from pinch-zoom (e.g., 3.5 = 135%)
+            const level = (this.keyboardZoomFactor - 1.0) / 0.1
+            
             if (this.visualZoomEnabled) {
+                // Visual Zoom mode: Send mode flag and level for overlay display
                 wc.send('set-visual-zoom-mode', true)
-                console.log("[ContentViewManager] EVENT: dom-ready → Sent set-visual-zoom-mode")
-                
-                // Also send current zoom level to preload for overlay display
-                const level = Math.round((this.keyboardZoomFactor - 1.0) / 0.1)
                 wc.send('set-visual-zoom-level', level)
-                console.log("[ContentViewManager] EVENT: dom-ready → Sent set-visual-zoom-level:", level, "(factor:", this.keyboardZoomFactor, ")")
+                console.log("[ContentViewManager] EVENT: dom-ready → Sent set-visual-zoom-mode + level:", level)
+            } else {
+                // CSS Zoom mode: Send mode flag and zoom level to apply CSS transform
+                wc.send('set-visual-zoom-mode', false)
+                wc.send('set-webview-zoom', level)
+                console.log("[ContentViewManager] EVENT: dom-ready → CSS Zoom mode: Sent set-webview-zoom:", level)
             }
             
             // Apply emulation at dom-ready (earliest consistent point after Chromium reset)
@@ -235,6 +411,42 @@ export class ContentViewManager {
                             console.log("[ContentViewManager] Focus set to ContentView")
                         }
                     }, 1)
+                }, 10)
+            } else {
+                // === CSS ZOOM MODE: Aggressive workarounds for touch event delivery ===
+                // Without these, the ContentView won't receive touch events after navigation
+                console.log("[ContentViewManager] EVENT: dom-ready → CSS Zoom mode: Applying touch event workarounds")
+                setTimeout(() => {
+                    if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
+                        // WORKAROUND 1: Blur-Focus cycle to reset input routing
+                        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                            this.mainWindow.webContents.focus()
+                            console.log("[ContentViewManager] Focus moved to main window (blur ContentView)")
+                        }
+                        
+                        setTimeout(() => {
+                            if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
+                                this.contentView.webContents.focus()
+                                console.log("[ContentViewManager] Focus returned to ContentView")
+                                
+                                // WORKAROUND 2: Re-apply bounds to trigger Chromium's input re-routing
+                                if (this.contentView && this.bounds) {
+                                    const bounds = { ...this.bounds }
+                                    // Tiny adjustment to force recalculation
+                                    this.contentView.setBounds({ ...bounds, width: bounds.width - 1 })
+                                    setTimeout(() => {
+                                        if (this.contentView && !this.contentView.webContents.isDestroyed()) {
+                                            this.contentView.setBounds(bounds)
+                                            console.log("[ContentViewManager] Re-applied bounds to reset input routing")
+                                        }
+                                    }, 1)
+                                }
+                                
+                                // WORKAROUND 3: Re-register touch events via executeJavaScript
+                                this.injectTouchEventListeners()
+                            }
+                        }, 50) // Longer delay for blur-focus cycle
+                    }
                 }, 10)
             }
         })
@@ -390,7 +602,14 @@ export class ContentViewManager {
             this.setCssZoom(level)
         })
         
-        // Get current CSS zoom level
+        // Get current CSS zoom level (synchronous - for preload initial load)
+        ipcMain.on("get-css-zoom-level", (event) => {
+            const level = this.getCssZoomLevel()
+            console.log("[ContentViewManager] IPC sync: get-css-zoom-level →", level)
+            event.returnValue = level
+        })
+        
+        // Get current CSS zoom level (async)
         ipcMain.handle("content-view-get-css-zoom-level", () => {
             return this.getCssZoomLevel()
         })
@@ -611,6 +830,9 @@ export class ContentViewManager {
             this.visualZoomEnabled = settings.visualZoom
             this.mobileMode = settings.mobileMode
             this.keyboardZoomFactor = Math.max(0.25, Math.min(5.0, settings.zoomFactor))
+            // Keep cssZoomLevel in sync for preload's initial sync IPC
+            // Don't round - preserve fractional values from pinch-zoom
+            this.cssZoomLevel = (this.keyboardZoomFactor - 1.0) / 0.1
             // showZoomOverlay is read by preload via sync IPC, no need to store here
             
             console.log("[ContentViewManager] Settings applied:",
@@ -629,10 +851,26 @@ export class ContentViewManager {
                 console.log("[ContentViewManager] LATE-HIDE: Will hide in did-navigate event (after server responds)")
             }
             
+            // === NUCLEAR OPTION for CSS Zoom Mode ===
+            // Electron's WebContentsView has a bug where touch events stop being delivered
+            // to the preload script after navigating to a new page. The ONLY reliable fix
+            // is to destroy and recreate the entire WebContentsView for each navigation.
+            // This is only needed for CSS Zoom mode (visualZoom=false) where we handle
+            // touch events in the preload. Visual Zoom mode uses Device Emulation which
+            // has its own touch handling.
+            if (!this.visualZoomEnabled && this.pageLoaded) {
+                console.log("[ContentViewManager] CSS Zoom mode: Using NUCLEAR OPTION - recreating WebContentsView")
+                this.recreateContentView()
+            }
+            
             // === STEP 2: Start navigation ===
-            this.currentUrl = url
+            // WORKAROUND: Convert data: URLs to file: URLs to fix touch event issues
+            // In Electron's WebContentsView, touch events stop being delivered to the
+            // preload script after navigating to a new data: URL. Loading from file: works.
+            const actualUrl = this.convertDataUrlToFileUrl(url)
+            this.currentUrl = url  // Keep original URL for reference
             console.log("[ContentViewManager] Starting loadURL (emulation will be applied after dom-ready)")
-            this.contentView.webContents.loadURL(url).catch(err => {
+            this.contentView.webContents.loadURL(actualUrl).catch(err => {
                 // Ignore aborted navigations
                 if (err.code !== "ERR_ABORTED") {
                     console.error("[ContentViewManager] Navigation error:", err)
@@ -773,8 +1011,10 @@ export class ContentViewManager {
             console.log("[ContentViewManager] setZoomFactor: skipping - emulation already applied pre-navigation")
             // Still update the factor for next time
             this.keyboardZoomFactor = Math.max(0.25, Math.min(5.0, factor))
+            // Keep cssZoomLevel in sync (don't round)
+            this.cssZoomLevel = (this.keyboardZoomFactor - 1.0) / 0.1
             // But DO send the zoom level to preload for overlay display
-            const level = Math.round((factor - 1.0) / 0.1)
+            const level = (factor - 1.0) / 0.1
             this.contentView.webContents.send('set-visual-zoom-level', level)
             return
         }
@@ -782,19 +1022,21 @@ export class ContentViewManager {
         // Clamp factor to reasonable range (0.25 to 5.0)
         const clampedFactor = Math.max(0.25, Math.min(5.0, factor))
         this.keyboardZoomFactor = clampedFactor
+        // Keep cssZoomLevel in sync (don't round)
+        this.cssZoomLevel = (clampedFactor - 1.0) / 0.1
         
         try {
             if (this.visualZoomEnabled) {
                 // With Device Emulation, use scale parameter
                 this.applyDeviceEmulationWithScale(clampedFactor)
                 console.log("[ContentViewManager] Zoom via Device Emulation scale:", clampedFactor)
-                // Send zoom level to preload for overlay display
-                const level = Math.round((clampedFactor - 1.0) / 0.1)
+                // Send zoom level to preload for overlay display (don't round)
+                const level = (clampedFactor - 1.0) / 0.1
                 this.contentView.webContents.send('set-visual-zoom-level', level)
             } else {
                 // Without Visual Zoom, use CSS zoom via preload
-                // Convert factor to zoom level: 1.0 = 0, 1.1 = 1, 0.9 = -1
-                const level = Math.round((clampedFactor - 1.0) / 0.1)
+                // Convert factor to zoom level: 1.0 = 0, 1.1 = 1, 0.9 = -1 (don't round)
+                const level = (clampedFactor - 1.0) / 0.1
                 this.setCssZoom(level)
             }
         } catch (e) {
@@ -1138,6 +1380,10 @@ export class ContentViewManager {
             this.contentView = null
         }
         this.parentWindow = null
+        
+        // Cleanup temp files
+        this.cleanupTempFiles()
+        
         console.log("[ContentViewManager] Destroyed")
     }
 }

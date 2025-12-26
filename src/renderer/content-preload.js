@@ -2,11 +2,19 @@
 // This script runs in the WebContentsView that displays article content.
 // The entire page is scaled, not just visually zoomed.
 try {
-  const { ipcRenderer } = require('electron');
+  const { ipcRenderer, contextBridge } = require('electron');
 
   let zoomLevel = 0; // zoomLevel: 0 = 100%, 1 = 110%, -1 = 90%, etc. (lineare 10%-Schritte)
   const MIN_ZOOM_LEVEL = -6;  // 40% minimum zoom (100% - 6*10%)
   const MAX_ZOOM_LEVEL = 40;  // 500% maximum zoom (100% + 40*10%)
+
+  // Load initial zoom level synchronously (to prevent 100% flash)
+  try {
+    zoomLevel = ipcRenderer.sendSync('get-css-zoom-level') || 0;
+    console.log('[ContentPreload] Initial zoom level loaded:', zoomLevel);
+  } catch (e) {
+    console.warn('[ContentPreload] Could not load initial zoom level:', e);
+  }
 
   // Zoom-Overlay Einstellung - load synchronously to show overlay on first load
   let showZoomOverlayEnabled = false;
@@ -447,7 +455,14 @@ try {
     
     // Bei Visual Zoom: Kein CSS Zoom anwenden (Device Emulation macht den Zoom)
     if (!visualZoomEnabled) {
-      applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
+      // Ensure DOM is ready before applying zoom (important after navigation)
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+          applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
+        }, { once: true });
+      } else {
+        applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
+      }
     }
     
     // Zeige Zoom-Overlay beim Artikelwechsel, wenn aktiviert
@@ -605,69 +620,137 @@ try {
   let lastTouchMidpointX = 0;
   let lastTouchMidpointY = 0;
 
-  window.addEventListener('touchstart', (e) => {
-    try {
-      // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
-      if (visualZoomEnabled) return;
-      
-      if (e.touches.length === 2) {
-        const touch1 = e.touches[0];
-        const touch2 = e.touches[1];
-        lastDistance = Math.hypot(
-          touch2.clientX - touch1.clientX,
-          touch2.clientY - touch1.clientY
-        );
-        touchStartZoomLevel = zoomLevel;
+  // Touch-Event-Registrierung als Funktion, die bei jeder Navigation aufgerufen wird
+  // Bei data: URLs wird der document bei jeder Navigation ersetzt, daher müssen
+  // die Event-Listener auf dem neuen document neu registriert werden
+  let touchEventsRegistered = false;
+  
+  function registerTouchEvents() {
+    // WICHTIG: In Electron Preload wird das document bei data: URL Navigationen ersetzt!
+    // Wir müssen die Events auf dem AKTUELLEN document registrieren
+    const touchTarget = document;
+    
+    // Prüfe ob bereits auf diesem document registriert
+    if (touchTarget._touchEventsRegistered) {
+      console.log('[ContentPreload] Touch events already registered on this document');
+      return;
+    }
+    touchTarget._touchEventsRegistered = true;
+    
+    touchTarget.addEventListener('touchstart', (e) => {
+      console.log('[ContentPreload] touchstart received on document, touches:', e.touches.length, 'visualZoomEnabled:', visualZoomEnabled);
+      try {
+        // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
+        if (visualZoomEnabled) return;
         
-        // Berechne Mittelpunkt der beiden Finger
-        lastTouchMidpointX = (touch1.clientX + touch2.clientX) / 2;
-        lastTouchMidpointY = (touch1.clientY + touch2.clientY) / 2;
-      }
-    } catch {}
-  }, { passive: false });
+        if (e.touches.length === 2) {
+          const touch1 = e.touches[0];
+          const touch2 = e.touches[1];
+          lastDistance = Math.hypot(
+            touch2.clientX - touch1.clientX,
+            touch2.clientY - touch1.clientY
+          );
+          touchStartZoomLevel = zoomLevel;
+          console.log('[ContentPreload] 2-finger touch started, distance:', lastDistance, 'zoomLevel:', touchStartZoomLevel);
+          
+          // Berechne Mittelpunkt der beiden Finger
+          lastTouchMidpointX = (touch1.clientX + touch2.clientX) / 2;
+          lastTouchMidpointY = (touch1.clientY + touch2.clientY) / 2;
+        }
+      } catch (err) { console.error('[ContentPreload] touchstart error:', err); }
+    }, { passive: false, capture: true });
 
-  window.addEventListener('touchmove', (e) => {
-    try {
-      // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
-      if (visualZoomEnabled) return;
-      
-      if (e.touches.length === 2 && lastDistance > 0) {
-        e.preventDefault();
-        const touch1 = e.touches[0];
-        const touch2 = e.touches[1];
-        const currentDistance = Math.hypot(
-          touch2.clientX - touch1.clientX,
-          touch2.clientY - touch1.clientY
-        );
-        const scale = currentDistance / lastDistance;
-        // Halbe Geschwindigkeit für Touch-Screen (weniger empfindlich)
-        const scaleFactor = 1 + (scale - 1) / 2;
-        const newFactor = zoomLevelToFactor(touchStartZoomLevel) * scaleFactor;
+    touchTarget.addEventListener('touchmove', (e) => {
+      try {
+        // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
+        if (visualZoomEnabled) {
+          console.log('[ContentPreload] touchmove ignored (Visual Zoom)');
+          return;
+        }
         
-        // Berechne aktuellen Mittelpunkt der Finger
-        const currentMidX = (touch1.clientX + touch2.clientX) / 2;
-        const currentMidY = (touch1.clientY + touch2.clientY) / 2;
-        
-        // TEMP: Scroll-Kompensation deaktiviert für Tests
-        // Berechne Touch-Position relativ zum Container
-        // const container = document.querySelector('#fr-zoom-container');
-        // const wrapper = container.parentElement;
-        // if (container && wrapper) {
-        //   const rect = wrapper.getBoundingClientRect();
-        //   const touchX = (container.scrollLeft || 0) + (currentMidX - rect.left);
-        //   const touchY = (container.scrollTop || 0) + (currentMidY - rect.top);
-        //   applyZoom(factorToZoomLevel(newFactor), { notify: true, zoomPointX: touchX, zoomPointY: touchY, preserveScroll: false });
-        // } else {
-        //   applyZoom(factorToZoomLevel(newFactor), { notify: true, preserveScroll: false });
-        // }
-        applyZoom(factorToZoomLevel(newFactor), { notify: true, preserveScroll: true });
-      }
-    } catch {}
-  }, { passive: false });
+        if (e.touches.length === 2 && lastDistance > 0) {
+          console.log('[ContentPreload] touchmove 2-finger, lastDistance:', lastDistance);
+          e.preventDefault();
+          const touch1 = e.touches[0];
+          const touch2 = e.touches[1];
+          const currentDistance = Math.hypot(
+            touch2.clientX - touch1.clientX,
+            touch2.clientY - touch1.clientY
+          );
+          const scale = currentDistance / lastDistance;
+          // Halbe Geschwindigkeit für Touch-Screen (weniger empfindlich)
+          const scaleFactor = 1 + (scale - 1) / 2;
+          const newFactor = zoomLevelToFactor(touchStartZoomLevel) * scaleFactor;
+          console.log('[ContentPreload] touchmove applying zoom, newFactor:', newFactor);
+          
+          // Berechne aktuellen Mittelpunkt der Finger
+          const currentMidX = (touch1.clientX + touch2.clientX) / 2;
+          const currentMidY = (touch1.clientY + touch2.clientY) / 2;
+          
+          // TEMP: Scroll-Kompensation deaktiviert für Tests
+          // Berechne Touch-Position relativ zum Container
+          // const container = document.querySelector('#fr-zoom-container');
+          // const wrapper = container.parentElement;
+          // if (container && wrapper) {
+          //   const rect = wrapper.getBoundingClientRect();
+          //   const touchX = (container.scrollLeft || 0) + (currentMidX - rect.left);
+          //   const touchY = (container.scrollTop || 0) + (currentMidY - rect.top);
+          //   applyZoom(factorToZoomLevel(newFactor), { notify: true, zoomPointX: touchX, zoomPointY: touchY, preserveScroll: false });
+          // } else {
+          //   applyZoom(factorToZoomLevel(newFactor), { notify: true, preserveScroll: false });
+          // }
+          applyZoom(factorToZoomLevel(newFactor), { notify: true, preserveScroll: true });
+        }
+      } catch (err) { console.error('[ContentPreload] touchmove error:', err); }
+    }, { passive: false, capture: true });
 
-  window.addEventListener('touchend', () => {
-    lastDistance = 0;
+    touchTarget.addEventListener('touchend', () => {
+      console.log('[ContentPreload] touchend received');
+      lastDistance = 0;
+    }, { capture: true });
+
+    console.log('[ContentPreload] Touch event listeners registered on document (capture phase)');
+  }
+  
+  // Registriere Touch-Events sofort (für den initialen document)
+  registerTouchEvents();
+  
+  // Bei jeder Navigation wird ein neues document erstellt - registriere dann erneut
+  // DOMContentLoaded feuert bei jeder Navigation, auch bei data: URLs
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('[ContentPreload] DOMContentLoaded - re-registering touch events');
+    registerTouchEvents();
   });
+  
+  // Export für executeJavaScript Injection vom Main Process
+  // Nach Navigation kann der Main Process diese Funktion aufrufen um Touch-Events
+  // im neuen document-Kontext neu zu registrieren
+  // 
+  // WICHTIG: Da contextIsolation=true ist, läuft der Preload in einem isolierten Kontext.
+  // executeJavaScript läuft im Main World und sieht ein anderes window-Objekt.
+  // Deshalb müssen wir contextBridge verwenden um die Funktion zu exponieren.
+  const reRegisterTouchEvents = function() {
+    console.log('[ContentPreload] __registerCssZoomTouchEvents called from main process');
+    // Force re-registration by clearing the flag on current document
+    if (document._touchEventsRegistered) {
+      console.log('[ContentPreload] Clearing old touch registration flag');
+      delete document._touchEventsRegistered;
+    }
+    registerTouchEvents();
+  };
+  
+  // Also set on window for direct access within preload context
+  window.__registerCssZoomTouchEvents = reRegisterTouchEvents;
+  
+  // Expose to main world via contextBridge so executeJavaScript can call it
+  try {
+    contextBridge.exposeInMainWorld('cssZoomBridge', {
+      reRegisterTouchEvents: reRegisterTouchEvents
+    });
+    console.log('[ContentPreload] contextBridge exposed cssZoomBridge.reRegisterTouchEvents');
+  } catch (e) {
+    console.warn('[ContentPreload] contextBridge failed:', e);
+  }
 
   // macOS Gesture-Events
   window.addEventListener('gesturechange', (e) => {
