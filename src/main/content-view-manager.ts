@@ -185,6 +185,11 @@ export class ContentViewManager {
             if (this.visualZoomEnabled) {
                 wc.send('set-visual-zoom-mode', true)
                 console.log("[ContentViewManager] EVENT: dom-ready → Sent set-visual-zoom-mode")
+                
+                // Also send current zoom level to preload for overlay display
+                const level = Math.round((this.keyboardZoomFactor - 1.0) / 0.1)
+                wc.send('set-visual-zoom-level', level)
+                console.log("[ContentViewManager] EVENT: dom-ready → Sent set-visual-zoom-level:", level, "(factor:", this.keyboardZoomFactor, ")")
             }
             
             // Apply emulation at dom-ready (earliest consistent point after Chromium reset)

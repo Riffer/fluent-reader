@@ -124,6 +124,7 @@ try {
     const factor = zoomLevelToFactor(level);
     const percentage = Math.round(factor * 100);
     const modeIndicator = mobileMode ? ' (M)' : ' (D)';
+    console.log('[ContentPreload] showZoomOverlay: level=', level, 'factor=', factor, 'percentage=', percentage, '%', 'zoomLevel var=', zoomLevel);
     updateOverlay(`Zoom: ${percentage}%${modeIndicator}`);
   }
 
