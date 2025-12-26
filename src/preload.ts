@@ -14,13 +14,13 @@ contextBridge.exposeInMainWorld("p2p", p2pBridge)
 contextBridge.exposeInMainWorld("p2pLan", p2pLanBridge)
 contextBridge.exposeInMainWorld("contentView", contentViewBridge)
 
-// ipcRenderer für Webview-Zoom-Kommunikation (eingeschränkt auf benötigte Channels)
+// ipcRenderer für ContentView-Zoom-Kommunikation (eingeschränkt auf benötigte Channels)
 const limitedIpcRenderer = {
     // Vom Renderer an den Main-Prozess
     send: (channel: string, ...args: any[]) => {
         const allowedSendChannels = [
-            "webview-zoom-changed", 
-            "set-webview-zoom", 
+            "webview-zoom-changed",  // Legacy name, used by ContentView preload
+            "set-webview-zoom",  // Legacy name, used by ContentView preload 
             "set-zoom-overlay-setting", 
             "set-global-mobile-mode",
             // Content View channels
@@ -41,8 +41,8 @@ const limitedIpcRenderer = {
     // Vom Main-Prozess an den Renderer
     on: (channel: string, listener: Function) => {
         const allowedOnChannels = [
-            "set-webview-zoom", 
-            "webview-zoom-changed", 
+            "set-webview-zoom",  // Legacy name, used by ContentView preload
+            "webview-zoom-changed",  // Legacy name, used by ContentView preload 
             "set-zoom-overlay-setting", 
             "power-resume",
             // Content View channels
@@ -100,7 +100,7 @@ const articleExtractorBridge = createArticleExtractorBridge(limitedIpcRenderer)
 contextBridge.exposeInMainWorld("articleExtractor", articleExtractorBridge)
 
 // Deaktiviere Standard-Zoom-Shortcuts im Hauptfenster
-// Der Zoom wird nur in WebView-Tags über deren Preload-Script verwaltet
+// Der Zoom wird über ContentView-Preload-Script verwaltet
 if (typeof window !== 'undefined') {
     window.addEventListener('keydown', (e) => {
         if (e.ctrlKey || e.metaKey) {

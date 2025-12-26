@@ -119,7 +119,7 @@ export class ContentViewManager {
         try {
             console.log("[ContentViewManager] Creating WebContentsView...")
             
-            // Create sandbox session for content isolation (same as webview tag uses)
+            // Create sandbox session for content isolation
             const sandboxSession = session.fromPartition("sandbox")
             console.log("[ContentViewManager] Sandbox session created")
             
@@ -1174,7 +1174,7 @@ export class ContentViewManager {
     /**
      * Set CSS zoom level (for preload-based zoom when Visual Zoom is OFF)
      * Level: 0 = 100%, 1 = 110%, -1 = 90%, etc.
-     * This matches the WebView preload zoom behavior
+     * This matches the original CSS zoom behavior
      */
     public setCssZoom(level: number): void {
         if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
@@ -1186,8 +1186,8 @@ export class ContentViewManager {
         const clampedLevel = Math.max(-6, Math.min(40, level))
         this.cssZoomLevel = clampedLevel
         
-        // Send to preload script (same message as WebView uses)
-        this.contentView.webContents.send('set-webview-zoom', clampedLevel)
+        // Send to preload script
+        this.contentView.webContents.send('set-webview-zoom', clampedLevel)  // Legacy channel name
         console.log("[ContentViewManager] CSS Zoom via preload:", clampedLevel)
     }
     

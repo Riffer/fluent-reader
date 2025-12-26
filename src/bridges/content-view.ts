@@ -117,7 +117,6 @@ export const contentViewBridge = {
     /**
      * Set CSS zoom level directly (for preload-based zoom)
      * Level: 0 = 100%, 1 = 110%, -1 = 90%, etc.
-     * This matches the WebView preload zoom behavior
      */
     setCssZoom: (level: number): void => {
         ipcRenderer.send("content-view-set-css-zoom", level)

@@ -72,7 +72,7 @@ export function setupArticleExtractorHandlers() {
     // Initialize site-specific extraction transformations
     setupExtractorTransformations()
 
-    // Get application path for WebView to load article.html
+    // Get application path for ContentView to load article.html
     ipcMain.handle("get-app-path", (event) => {
         try {
             const appPath = app.getAppPath()

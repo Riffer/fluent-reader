@@ -110,14 +110,15 @@ export class WindowManager {
         initDatabase()
         setupDatabaseIPC()
 
-        // Weiterleitung von Zoom-Änderungen aus Webviews -> Renderer
+        // Weiterleitung von Zoom-Änderungen aus ContentView -> Renderer
+        // Legacy channel name kept for compatibility with content-preload.js
         ipcMain.on("webview-zoom-changed", (_event, zoom: number) => {
             if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                 this.mainWindow.webContents.send("webview-zoom-changed", zoom)
             }
         })
 
-        // App DevTools öffnen/schließen (stabiler als Webview-DevTools)
+        // App DevTools öffnen/schließen
         ipcMain.handle("toggle-app-devtools", () => {
             if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                 if (this.mainWindow.webContents.isDevToolsOpened()) {
@@ -131,7 +132,8 @@ export class WindowManager {
         // Speichert für welche webContentsIds die Emulation bereits aktiviert wurde
         const emulatedWebContentsIds = new Set<number>()
 
-        // Device Emulation für Webviews aktivieren (Mobile Mode)
+        // Device Emulation für WebContents aktivieren (Mobile Mode)
+        // Note: ContentViewManager handles its own emulation, this is for legacy support
         ipcMain.handle("enable-device-emulation", (_event, webContentsId: number, params: any) => {
             // Deduplizierung: Nur einmal pro webContentsId aktivieren
             if (emulatedWebContentsIds.has(webContentsId)) {
@@ -171,7 +173,7 @@ export class WindowManager {
             }
         })
 
-        // Device Emulation für Webviews deaktivieren
+        // Device Emulation für WebContents deaktivieren
         ipcMain.handle("disable-device-emulation", (_event, webContentsId: number) => {
             try {
                 emulatedWebContentsIds.delete(webContentsId)  // Aus dem Set entfernen
@@ -193,7 +195,7 @@ export class WindowManager {
         // ===== Cookie Persistence IPC Handlers =====
 
         // Cookies für einen Host laden und in Session setzen
-        // WICHTIG: Die Webview nutzt partition="sandbox" (ohne persist:)
+        // WICHTIG: ContentView nutzt partition="sandbox" (ohne persist:)
         ipcMain.handle("load-persisted-cookies", async (_event, url: string) => {
             const host = extractHost(url)
             if (!host) {
@@ -206,14 +208,14 @@ export class WindowManager {
                 return { success: true, count: 0 }
             }
 
-            // Webview verwendet partition="sandbox" (ohne persist: prefix!)
+            // ContentView verwendet partition="sandbox" (ohne persist: prefix!)
             const sandboxSession = session.fromPartition("sandbox")
             const count = await setCookiesToSession(sandboxSession, host, cookies)
             return { success: true, count }
         })
 
         // Cookies für einen Host aus Session holen und speichern
-        // WICHTIG: Die Webview nutzt partition="sandbox" (ohne persist:)
+        // WICHTIG: ContentView nutzt partition="sandbox" (ohne persist:)
         ipcMain.handle("save-persisted-cookies", async (_event, url: string) => {
             const host = extractHost(url)
             if (!host) {
@@ -221,7 +223,7 @@ export class WindowManager {
                 return { success: false }
             }
 
-            // Webview verwendet partition="sandbox" (ohne persist: prefix!)
+            // ContentView verwendet partition="sandbox" (ohne persist: prefix!)
             const sandboxSession = session.fromPartition("sandbox")
             const cookies = await getCookiesFromSession(sandboxSession, host)
             if (cookies.length === 0) {
@@ -302,7 +304,7 @@ export class WindowManager {
                 } as any,
             })
             
-            // Zoom wird ausschließlich in den WebView-Tags verwaltet (via Preload-Script)
+            // Zoom wird ausschließlich in ContentView verwaltet (via content-preload.js)
             // NICHT auf dem Hauptfenster setzen!
             this.mainWindowState.manage(this.mainWindow)
             this.mainWindow.on("ready-to-show", () => {

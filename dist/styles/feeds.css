@@ -37,7 +37,6 @@
     display: flex;
     flex-direction: column;
 }
-.article webview,
 .article .error-prompt,
 .article .loading-prompt {
     width: 100%;
@@ -45,9 +44,6 @@
     border: none;
     color: var(--black);
     flex-shrink: 0;
-}
-.article webview.error {
-    display: none;
 }
 .article i.ms-Icon {
     color: var(--neutralDarker);

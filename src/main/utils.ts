@@ -1,7 +1,7 @@
 import { ipcMain, shell, dialog, app, session, clipboard, BrowserWindow } from "electron"
 import { WindowManager } from "./window"
 import fs = require("fs")
-import { ImageCallbackTypes, TouchBarTexts } from "../schema-types"
+import { TouchBarTexts } from "../schema-types"
 import { initMainTouchBar } from "./touchbar"
 import fontList = require("font-list")
 
@@ -173,101 +173,9 @@ export function setUtilsListeners(manager: WindowManager) {
         await session.defaultSession.clearCache()
     })
 
-    app.on("web-contents-created", (_, contents) => {
-        if (contents.getType() === "webview") {
-            contents.on(
-                "did-fail-load",
-                (event, code, desc, validated, isMainFrame) => {
-                    // Ignoriere ERR_ABORTED (-3) und ERR_FAILED (-2) - 
-                    // diese treten bei schnellem Artikelwechsel im Mobile-Mode auf
-                    // und sind harmlos (Navigation wurde abgebrochen)
-                    if (code === -3 || code === -2) {
-                        return
-                    }
-                    if (isMainFrame && manager.hasWindow()) {
-                        manager.mainWindow.webContents.send(
-                            "webview-error",
-                            desc
-                        )
-                    }
-                }
-            )
-            contents.on("context-menu", (_, params) => {
-                if (
-                    (params.hasImageContents ||
-                        params.selectionText ||
-                        params.linkURL) &&
-                    manager.hasWindow()
-                ) {
-                    if (params.hasImageContents) {
-                        ipcMain.removeHandler("image-callback")
-                        ipcMain.handleOnce(
-                            "image-callback",
-                            (_, type: ImageCallbackTypes) => {
-                                switch (type) {
-                                    case ImageCallbackTypes.OpenExternal:
-                                    case ImageCallbackTypes.OpenExternalBg:
-                                        openExternal(
-                                            params.srcURL,
-                                            type ===
-                                                ImageCallbackTypes.OpenExternalBg
-                                        )
-                                        break
-                                    case ImageCallbackTypes.SaveAs:
-                                        contents.session.downloadURL(
-                                            params.srcURL
-                                        )
-                                        break
-                                    case ImageCallbackTypes.Copy:
-                                        contents.copyImageAt(params.x, params.y)
-                                        break
-                                    case ImageCallbackTypes.CopyLink:
-                                        clipboard.writeText(params.srcURL)
-                                        break
-                                }
-                            }
-                        )
-                        manager.mainWindow.webContents.send(
-                            "webview-context-menu",
-                            [params.x, params.y]
-                        )
-                    } else {
-                        manager.mainWindow.webContents.send(
-                            "webview-context-menu",
-                            [params.x, params.y],
-                            params.selectionText,
-                            params.linkURL
-                        )
-                    }
-                    contents
-                        .executeJavaScript(
-                            `new Promise(resolve => {
-                        const dismiss = () => {
-                            document.removeEventListener("mousedown", dismiss)
-                            document.removeEventListener("scroll", dismiss)                            
-                            resolve()
-                        }
-                        document.addEventListener("mousedown", dismiss)
-                        document.addEventListener("scroll", dismiss)
-                    })`
-                        )
-                        .then(() => {
-                            if (manager.hasWindow()) {
-                                manager.mainWindow.webContents.send(
-                                    "webview-context-menu"
-                                )
-                            }
-                        })
-                }
-            })
-            contents.on("before-input-event", (_, input) => {
-                if (manager.hasWindow()) {
-                    let contents = manager.mainWindow.webContents
-                    contents.send("webview-keydown", input)
-                }
-            })
-        }
-    })
+    // Note: WebView context-menu, error, and keyboard handlers removed
+    // ContentView uses native Electron Menu.popup() for context menu (see content-view-manager.ts)
+    // ContentView handles its own errors and keyboard events via IPC
 
     ipcMain.handle("write-clipboard", (_, text) => {
         clipboard.writeText(text)

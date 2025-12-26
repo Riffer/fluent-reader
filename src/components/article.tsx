@@ -69,7 +69,7 @@ type ArticleState = {
     loaded: boolean
     error: boolean
     errorDescription: string
-    webviewVisible: boolean
+    contentVisible: boolean
     zoom: number
     isLoadingFull: boolean
     appPath: string
@@ -137,7 +137,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             loaded: false,
             error: false,
             errorDescription: "",
-            webviewVisible: false,
+            contentVisible: false,
             zoom: initialZoom,
             isLoadingFull: false,
             appPath: "",
@@ -153,7 +153,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         window.utils.addWebviewContextListener(this.contextMenuHandler)
         window.utils.addWebviewKeydownListener(this.keyDownHandler)
         window.utils.addWebviewKeyupListener(this.keyUpHandler)
-        window.utils.addWebviewErrorListener(this.webviewError)
+        window.utils.addWebviewErrorListener(this.contentError)
 
         // IPC-Listener für Zoom-Änderungen vom Preload-Script
         if ((window as any).ipcRenderer) {
@@ -171,7 +171,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     /**
      * Apply zoom to the current view (always ContentView now)
      * - Visual Zoom ON: uses Device Emulation scale (native pinch-to-zoom works)
-     * - Visual Zoom OFF: uses CSS-based zoom via preload (like old WebView)
+     * - Visual Zoom OFF: uses CSS-based zoom via preload
      */
     private applyZoom = (zoomLevel: number) => {
         if (!window.contentView) {
@@ -262,8 +262,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     /**
      * Toggle Visual Zoom mode
      * - Visual Zoom ON: Native pinch-to-zoom via Device Emulation
-     * - Visual Zoom OFF: CSS-based zoom via preload (like old WebView)
-     * Both modes use ContentView now - no more switching between WebView and ContentView!
+     * - Visual Zoom OFF: CSS-based zoom via preload
      */
     private toggleVisualZoom = async () => {
         const newValue = !this.state.visualZoomEnabled;
@@ -454,13 +453,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private windowResizeListener: (() => void) | null = null;
     
     /**
-     * Initialize ContentView for displaying article content
-     */
-    /**
      * Initialize ContentView for ALL content types
      * - Webpage mode: navigate to URL
      * - RSS/Full content: load HTML directly via data URL
-     * ContentView is now the ONLY display method (no more WebView!)
      */
     private initializeContentView = async () => {
         if (!this.contentViewPlaceholderRef) return;
@@ -538,7 +533,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Focus
             window.contentView.focus();
             
-            this.setState({ webviewVisible: true, loaded: true });
+            this.setState({ contentVisible: true, loaded: true });
         } catch (e) {
             console.error('[ContentView] Error initializing:', e);
         }
@@ -567,7 +562,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         console.log('[Article] Mobile mode toggled:', newMobileMode ? 'ON' : 'OFF');
         
-        // Globalen Mobile-Mode Status setzen (für neue WebViews bei Artikelwechsel)
+        // Globalen Mobile-Mode Status setzen (für neue ContentViews bei Artikelwechsel)
         this.setGlobalMobileMode(newMobileMode);
         
         // Use ContentView bridge - this handles User-Agent, Device Emulation, and reload
@@ -631,7 +626,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         window.settings.setNsfwCleanup(newValue);
         this.setState({ nsfwCleanupEnabled: newValue });
         // Reload ContentView damit die Einstellung greift
-        this.webviewReload();
+        this.contentReload();
     }
 
     private toggleAutoCookieConsent = () => {
@@ -639,7 +634,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         window.settings.setAutoCookieConsent(newValue);
         this.setState({ autoCookieConsentEnabled: newValue });
         // Reload ContentView damit die Einstellung greift
-        this.webviewReload();
+        this.contentReload();
     }
 
     // ===== Cookie Persistence =====
@@ -983,7 +978,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             },
                         },
                         {
-                            key: "openWebviewDevTools",
+                            key: "openContentDevTools",
                             text: "Artikel Developer Tools",
                             iconProps: { iconName: "FileHTML" },
                             onClick: () => {
@@ -1026,12 +1021,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
-    // Track last processed key event to prevent duplicates (WebView + ContentView both send events)
+    // Track last processed key event to prevent duplicates
     private lastKeyEventTime: number = 0;
     private lastKeyEventKey: string = '';
 
     keyDownHandler = (input: Electron.Input) => {
-        // Debounce duplicate events (both WebView and ContentView can send keyboard events)
+        // Debounce duplicate events from multiple sources
         const now = Date.now();
         const eventKey = `${input.type}-${input.key}-${input.control}-${input.shift}-${input.alt}`;
         if (now - this.lastKeyEventTime < 50 && eventKey === this.lastKeyEventKey) {
@@ -1086,7 +1081,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     }
                     return;
                 }
-                // Alle anderen Tasten zum Webview durchlassen (nicht als Shortcuts behandeln)
+                // Alle anderen Tasten zum ContentView durchlassen (nicht als Shortcuts behandeln)
                 return;
             }
             
@@ -1135,7 +1130,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     break
                 case "p":
                 case "P":
-                    // Toggle Visual Zoom (WebView <-> ContentView)
+                    // Toggle Visual Zoom
                     console.log('[Article] P key pressed - toggling Visual Zoom (ContentView)');
                     this.toggleVisualZoom()
                     break
@@ -1161,15 +1156,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
-    // Note: webviewStartLoadingEarly, webviewStartLoading, webviewLoaded removed
+    // Note: Legacy loading methods removed
     // ContentView handles loading events via setupContentViewListeners()
     
-    webviewError = (reason: string) => {
+    contentError = (reason: string) => {
         this.setState({ error: true, errorDescription: reason })
     }
     
-    webviewReload = () => {
-        // Use ContentView reload instead of webview
+    contentReload = () => {
+        // Use ContentView reload
         if (window.contentView) {
             this.setState({ loaded: false, error: false })
             window.contentView.reload()
@@ -1180,7 +1175,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     componentDidMount = () => {
         this._isMounted = true
-        // Load app path for WebView article.html loading
+        // Load app path for ContentView article.html loading
         if (!this.state.appPath && (window as any).ipcRenderer) {
             (window as any).ipcRenderer.invoke('get-app-path').then((path: string) => {
                 if (path) {
@@ -1225,7 +1220,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             document.removeEventListener('keyup', this.globalKeyupListener)
         }
         
-        // Global keyboard listener für Zoom (auch außerhalb WebView)
+        // Global keyboard listener für Zoom (auch außerhalb ContentView)
         this.globalKeydownListener = (e: KeyboardEvent) => {
             // Lineare 10%-Schritte: -6 = 40%, 0 = 100%, 40 = 500%
             const MIN_ZOOM_LEVEL = -6
@@ -1264,7 +1259,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         document.addEventListener('keydown', this.globalKeydownListener)
         document.addEventListener('keyup', this.globalKeyupListener)
         
-        // Note: WebView code removed - ContentView is now the only display method
+        // Note: Legacy WebView code removed - ContentView is the only display method
         // ContentView is initialized via ref callback in render()
         
         // Scroll to current article card in feed list
@@ -1309,7 +1304,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.localMobileMode = this.props.source.mobileMode || false;
             console.log('[Article] Article changed - localMobileMode:', this.localMobileMode);
             
-            // WICHTIG: Globalen Mobile-Mode Status setzen BEVOR neuer WebView erstellt wird!
+            // WICHTIG: Globalen Mobile-Mode Status setzen BEVOR neuer ContentView initialisiert wird!
             // Der Main-Prozess wendet dann automatisch die Emulation bei 'did-attach' an.
             this.setGlobalMobileMode(this.localMobileMode);
             
@@ -1802,7 +1797,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.Local, webviewVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, () => {
                 console.log('[Article] State set to contentMode: Local');
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
@@ -1828,7 +1823,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             const sourceSnapshot = this.props.source;
             console.log('[Article] Source snapshot openTarget:', SourceOpenTarget[sourceSnapshot.openTarget]);
             
-            this.setState({ contentMode: SourceOpenTarget.Webpage, webviewVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.Webpage, contentVisible: false }, () => {
                 console.log('[Article] State set to contentMode: Webpage');
                 console.log('[Article] Current props.source.openTarget:', SourceOpenTarget[this.props.source.openTarget]);
                 // Update source to persist openTarget
@@ -1860,7 +1855,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.Local, webviewVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, () => {
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
@@ -1883,7 +1878,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.FullContent, webviewVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.FullContent, contentVisible: false }, () => {
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
@@ -1991,7 +1986,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         fullContent: contentToUse, 
                         loaded: false, // Will be set true after ContentView loads
                         isLoadingFull: false,
-                        webviewVisible: false, // Will be set true after ContentView initializes
+                        contentVisible: false, // Will be set true after ContentView initializes
                         extractorTitle: extractorTitle,
                         extractorDate: extractorDate
                     }, () => {
@@ -2013,7 +2008,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     error: true,
                     errorDescription: "ARTICLE_EXTRACTION_FAILURE",
                     isLoadingFull: false,
-                    webviewVisible: false,
+                    contentVisible: false,
                     extractorTitle: undefined,
                     extractorDate: undefined
                 }, () => {
@@ -2739,8 +2734,8 @@ window.__articleData = ${JSON.stringify({
                         flex: 1, 
                         width: "100%",
                         position: "relative",
-                        // Show placeholder when either webview is visible OR we have a blur screenshot
-                        visibility: (this.state.webviewVisible || this.state.menuBlurScreenshot) ? "visible" : "hidden",
+                        // Show placeholder when either content is visible OR we have a blur screenshot
+                        visibility: (this.state.contentVisible || this.state.menuBlurScreenshot) ? "visible" : "hidden",
                         background: "var(--neutralLighter, #f3f2f1)"
                     }}
                     ref={(el) => {
@@ -2831,7 +2826,7 @@ window.__articleData = ${JSON.stringify({
                         tokens={{ childrenGap: 7 }}>
                         <small>{intl.get("article.error")}</small>
                         <small>
-                            <Link onClick={this.webviewReload}>
+                            <Link onClick={this.contentReload}>
                                 {intl.get("article.reload")}
                             </Link>
                         </small>
