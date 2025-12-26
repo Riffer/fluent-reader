@@ -470,7 +470,7 @@ export class ContentViewManager {
             }
             
             // === Image Menu ===
-            if (params.mediaType === "image" && params.srcURL) {
+            if (params.hasImageContents && params.srcURL) {
                 menuItems.push({
                     label: "Bild im Browser öffnen",
                     click: () => {

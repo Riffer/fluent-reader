@@ -327,20 +327,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         });
         this.contentViewCleanup.push(unsubError);
         
-        // Context menu - add ContentView bounds offset to get window-relative coordinates
+        // Context menu - ContentView uses native Electron menu (Menu.popup)
+        // We no longer need to open the React context menu for ContentView
+        // The native menu handles everything: text, links, images, navigation
         const unsubContextMenu = window.contentView.onContextMenu((params) => {
-            // params.x/y are relative to WebContentsView, need to add bounds offset
-            const boundsX = this.lastContentViewBounds?.x ?? 0;
-            const boundsY = this.lastContentViewBounds?.y ?? 0;
-            const pos: [number, number] = [params.x + boundsX, params.y + boundsY];
-            
-            if (params.selectionText) {
-                this.props.textMenu(pos, params.selectionText, params.linkURL);
-            } else if (params.srcURL && params.mediaType === "image") {
-                this.props.imageMenu(pos);
-            } else {
-                this.props.dismissContextMenu();
-            }
+            // Native menu is shown by ContentViewManager, nothing to do here
+            // This handler is kept for potential future needs (e.g. analytics)
         });
         this.contentViewCleanup.push(unsubContextMenu);
         
