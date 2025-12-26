@@ -9,9 +9,12 @@
  * - Article content runs in WebContentsView (attached to main window)
  * - Communication via IPC between renderer and content view
  */
-import { WebContentsView, ipcMain, app, session, Input } from "electron"
-import type { BrowserWindow } from "electron"
+import { WebContentsView, ipcMain, app, session, Input, Menu, clipboard, shell, nativeImage } from "electron"
+import type { BrowserWindow, MenuItemConstructorOptions } from "electron"
 import path from "path"
+import https from "https"
+import http from "http"
+import fs from "fs"
 
 // Content view bounds (will be updated by renderer)
 interface ContentViewBounds {
@@ -420,12 +423,122 @@ export class ContentViewManager {
     }
     
     /**
-     * Setup context menu forwarding
+     * Setup native context menu for WebContentsView
+     * Uses Electron's native Menu.popup() to display over the WebContentsView
+     * (React/Fluent UI menus cannot overlay native WebContentsView)
      */
     private setupContextMenu(): void {
         if (!this.contentView) return
         
         this.contentView.webContents.on("context-menu", (event, params) => {
+            const menuItems: MenuItemConstructorOptions[] = []
+            
+            // === Text Selection Menu ===
+            if (params.selectionText && params.selectionText.trim().length > 0) {
+                menuItems.push({
+                    label: "Kopieren",
+                    accelerator: "CmdOrCtrl+C",
+                    click: () => {
+                        clipboard.writeText(params.selectionText)
+                    }
+                })
+                menuItems.push({
+                    label: "Im Web suchen",
+                    click: () => {
+                        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(params.selectionText)}`
+                        shell.openExternal(searchUrl)
+                    }
+                })
+                menuItems.push({ type: "separator" })
+            }
+            
+            // === Link Menu ===
+            if (params.linkURL && params.linkURL.length > 0) {
+                menuItems.push({
+                    label: "Link im Browser öffnen",
+                    click: () => {
+                        shell.openExternal(params.linkURL)
+                    }
+                })
+                menuItems.push({
+                    label: "Link-Adresse kopieren",
+                    click: () => {
+                        clipboard.writeText(params.linkURL)
+                    }
+                })
+                menuItems.push({ type: "separator" })
+            }
+            
+            // === Image Menu ===
+            if (params.mediaType === "image" && params.srcURL) {
+                menuItems.push({
+                    label: "Bild im Browser öffnen",
+                    click: () => {
+                        shell.openExternal(params.srcURL)
+                    }
+                })
+                menuItems.push({
+                    label: "Bild speichern unter...",
+                    click: () => {
+                        this.saveImageAs(params.srcURL)
+                    }
+                })
+                menuItems.push({
+                    label: "Bild kopieren",
+                    click: () => {
+                        this.copyImageToClipboard(params.srcURL)
+                    }
+                })
+                menuItems.push({
+                    label: "Bild-URL kopieren",
+                    click: () => {
+                        clipboard.writeText(params.srcURL)
+                    }
+                })
+                menuItems.push({ type: "separator" })
+            }
+            
+            // === General Actions ===
+            menuItems.push({
+                label: "Zurück",
+                accelerator: "Alt+Left",
+                enabled: this.contentView?.webContents.navigationHistory.canGoBack() ?? false,
+                click: () => {
+                    this.contentView?.webContents.goBack()
+                }
+            })
+            menuItems.push({
+                label: "Vorwärts",
+                accelerator: "Alt+Right",
+                enabled: this.contentView?.webContents.navigationHistory.canGoForward() ?? false,
+                click: () => {
+                    this.contentView?.webContents.goForward()
+                }
+            })
+            menuItems.push({
+                label: "Neu laden",
+                accelerator: "CmdOrCtrl+R",
+                click: () => {
+                    this.contentView?.webContents.reload()
+                }
+            })
+            
+            // Only show menu if we have items
+            if (menuItems.length > 0) {
+                // Remove trailing separator if present
+                if (menuItems[menuItems.length - 1].type === "separator") {
+                    menuItems.pop()
+                }
+                
+                const menu = Menu.buildFromTemplate(menuItems)
+                menu.popup({
+                    window: this.parentWindow ?? undefined,
+                    x: this.bounds.x + params.x,
+                    y: this.bounds.y + params.y
+                })
+            }
+            
+            // Also notify renderer (for any additional handling)
             this.sendToRenderer("content-view-context-menu", {
                 x: params.x,
                 y: params.y,
@@ -435,6 +548,105 @@ export class ContentViewManager {
                 mediaType: params.mediaType,
             })
         })
+    }
+    
+    /**
+     * Save image to file
+     */
+    private async saveImageAs(imageUrl: string): Promise<void> {
+        if (!this.parentWindow) return
+        
+        const { dialog } = await import("electron")
+        
+        // Extract filename from URL
+        const urlObj = new URL(imageUrl)
+        let filename = path.basename(urlObj.pathname) || "image"
+        
+        // Ensure extension
+        if (!filename.includes(".")) {
+            filename += ".jpg"
+        }
+        
+        const result = await dialog.showSaveDialog(this.parentWindow, {
+            defaultPath: filename,
+            filters: [
+                { name: "Bilder", extensions: ["jpg", "jpeg", "png", "gif", "webp", "bmp"] },
+                { name: "Alle Dateien", extensions: ["*"] }
+            ]
+        })
+        
+        if (result.canceled || !result.filePath) return
+        
+        try {
+            // Download image
+            const protocol = imageUrl.startsWith("https") ? https : http
+            const response = await new Promise<Buffer>((resolve, reject) => {
+                protocol.get(imageUrl, (res) => {
+                    // Handle redirects
+                    if (res.statusCode === 301 || res.statusCode === 302) {
+                        const redirectUrl = res.headers.location
+                        if (redirectUrl) {
+                            const redirectProtocol = redirectUrl.startsWith("https") ? https : http
+                            redirectProtocol.get(redirectUrl, (redirectRes) => {
+                                const chunks: Buffer[] = []
+                                redirectRes.on("data", chunk => chunks.push(chunk))
+                                redirectRes.on("end", () => resolve(Buffer.concat(chunks)))
+                                redirectRes.on("error", reject)
+                            }).on("error", reject)
+                            return
+                        }
+                    }
+                    
+                    const chunks: Buffer[] = []
+                    res.on("data", chunk => chunks.push(chunk))
+                    res.on("end", () => resolve(Buffer.concat(chunks)))
+                    res.on("error", reject)
+                }).on("error", reject)
+            })
+            
+            fs.writeFileSync(result.filePath, response)
+            console.log("[ContentViewManager] Image saved to:", result.filePath)
+        } catch (err) {
+            console.error("[ContentViewManager] Failed to save image:", err)
+        }
+    }
+    
+    /**
+     * Copy image to clipboard
+     */
+    private async copyImageToClipboard(imageUrl: string): Promise<void> {
+        try {
+            const protocol = imageUrl.startsWith("https") ? https : http
+            const response = await new Promise<Buffer>((resolve, reject) => {
+                protocol.get(imageUrl, (res) => {
+                    // Handle redirects
+                    if (res.statusCode === 301 || res.statusCode === 302) {
+                        const redirectUrl = res.headers.location
+                        if (redirectUrl) {
+                            const redirectProtocol = redirectUrl.startsWith("https") ? https : http
+                            redirectProtocol.get(redirectUrl, (redirectRes) => {
+                                const chunks: Buffer[] = []
+                                redirectRes.on("data", chunk => chunks.push(chunk))
+                                redirectRes.on("end", () => resolve(Buffer.concat(chunks)))
+                                redirectRes.on("error", reject)
+                            }).on("error", reject)
+                            return
+                        }
+                    }
+                    
+                    const chunks: Buffer[] = []
+                    res.on("data", chunk => chunks.push(chunk))
+                    res.on("end", () => resolve(Buffer.concat(chunks)))
+                    res.on("error", reject)
+                }).on("error", reject)
+            })
+            
+            const image = nativeImage.createFromBuffer(response)
+            clipboard.writeImage(image)
+            console.log("[ContentViewManager] Image copied to clipboard")
+        } catch (err) {
+            console.error("[ContentViewManager] Failed to copy image:", err)
+        }
     }
     
     /**
@@ -565,7 +777,7 @@ export class ContentViewManager {
         
         // Go back/forward
         ipcMain.handle("content-view-go-back", () => {
-            if (this.contentView?.webContents?.canGoBack()) {
+            if (this.contentView?.webContents?.navigationHistory.canGoBack()) {
                 this.contentView.webContents.goBack()
                 return true
             }
@@ -573,7 +785,7 @@ export class ContentViewManager {
         })
         
         ipcMain.handle("content-view-go-forward", () => {
-            if (this.contentView?.webContents?.canGoForward()) {
+            if (this.contentView?.webContents?.navigationHistory.canGoForward()) {
                 this.contentView.webContents.goForward()
                 return true
             }
@@ -594,11 +806,11 @@ export class ContentViewManager {
         
         // Can go back/forward queries
         ipcMain.handle("content-view-can-go-back", () => {
-            return this.contentView?.webContents?.canGoBack() ?? false
+            return this.contentView?.webContents?.navigationHistory.canGoBack() ?? false
         })
         
         ipcMain.handle("content-view-can-go-forward", () => {
-            return this.contentView?.webContents?.canGoForward() ?? false
+            return this.contentView?.webContents?.navigationHistory.canGoForward() ?? false
         })
         
         // Get current URL

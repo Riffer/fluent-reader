@@ -327,9 +327,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         });
         this.contentViewCleanup.push(unsubError);
         
-        // Context menu
+        // Context menu - add ContentView bounds offset to get window-relative coordinates
         const unsubContextMenu = window.contentView.onContextMenu((params) => {
-            const pos: [number, number] = [params.x, params.y];
+            // params.x/y are relative to WebContentsView, need to add bounds offset
+            const boundsX = this.lastContentViewBounds?.x ?? 0;
+            const boundsY = this.lastContentViewBounds?.y ?? 0;
+            const pos: [number, number] = [params.x + boundsX, params.y + boundsY];
+            
             if (params.selectionText) {
                 this.props.textMenu(pos, params.selectionText, params.linkURL);
             } else if (params.srcURL && params.mediaType === "image") {
