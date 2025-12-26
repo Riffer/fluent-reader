@@ -373,10 +373,9 @@ try {
     // Zeige Zoom-Overlay (immer wenn sich Zoom ändert)
     showZoomOverlay(zoomLevel);
     
-    // Sende Notification
+    // Sende Notification an Main-Prozess
     if (options.notify) {
       try { ipcRenderer.send('webview-zoom-changed', zoomLevel); } catch {}
-      try { ipcRenderer.sendToHost('webview-zoom-changed', zoomLevel); } catch {}
     }
   }
 
@@ -566,21 +565,6 @@ try {
   } catch (e) {
     console.warn('[ContentPreload] Could not load Auto Cookie-Consent setting:', e);
   }
-
-  // Fallback: postMessage von Embedder
-  window.addEventListener('message', (event) => {
-    try {
-      const data = event && event.data;
-      if (!data || typeof data !== 'object') return;
-      if (data.type === 'set-webview-zoom' && typeof data.zoomLevel === 'number') {
-        zoomLevel = data.zoomLevel;
-        // Bei Visual Zoom: Kein CSS Zoom anwenden
-        if (!visualZoomEnabled) {
-          applyZoom(zoomLevel, { notify: false });
-        }
-      }
-    } catch {}
-  });
 
   // Ctrl+Wheel Zoom (Touchpad) - zoomt vom Cursor aus
   window.addEventListener('wheel', (e) => {
@@ -1017,15 +1001,9 @@ try {
     // Skip navigation shortcuts in input mode (for login forms etc.)
     if (inputModeEnabled) return;
     
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      // Send message to parent window/renderer to handle navigation
-      try {
-        ipcRenderer.sendToHost('article-nav', {
-          direction: e.key === 'ArrowLeft' ? -1 : 1
-        });
-        e.preventDefault();
-      } catch {}
-    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    // Note: ArrowLeft/Right for article navigation handled via keyboard events in ContentViewManager
+    
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       // Handle up/down arrow scrolling with smooth continuous animation
       e.preventDefault();
       const newDirection = e.key === 'ArrowUp' ? -1 : 1;
