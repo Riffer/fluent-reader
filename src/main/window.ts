@@ -111,10 +111,9 @@ export class WindowManager {
         setupDatabaseIPC()
 
         // Weiterleitung von Zoom-Änderungen aus ContentView -> Renderer
-        // Legacy channel name kept for compatibility with content-preload.js
-        ipcMain.on("webview-zoom-changed", (_event, zoom: number) => {
+        ipcMain.on("content-view-zoom-changed", (_event, zoom: number) => {
             if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-                this.mainWindow.webContents.send("webview-zoom-changed", zoom)
+                this.mainWindow.webContents.send("content-view-zoom-changed", zoom)
             }
         })
 

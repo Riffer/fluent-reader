@@ -19,8 +19,8 @@ const limitedIpcRenderer = {
     // Vom Renderer an den Main-Prozess
     send: (channel: string, ...args: any[]) => {
         const allowedSendChannels = [
-            "webview-zoom-changed",  // Legacy name, used by ContentView preload
-            "set-webview-zoom",  // Legacy name, used by ContentView preload 
+            "content-view-zoom-changed",
+            "content-view-set-css-zoom", 
             "set-zoom-overlay-setting", 
             "set-global-mobile-mode",
             // Content View channels
@@ -41,8 +41,8 @@ const limitedIpcRenderer = {
     // Vom Main-Prozess an den Renderer
     on: (channel: string, listener: Function) => {
         const allowedOnChannels = [
-            "set-webview-zoom",  // Legacy name, used by ContentView preload
-            "webview-zoom-changed",  // Legacy name, used by ContentView preload 
+            "content-view-set-css-zoom",
+            "content-view-zoom-changed", 
             "set-zoom-overlay-setting", 
             "power-resume",
             // Content View channels

@@ -298,8 +298,8 @@ export class ContentViewManager {
             } else {
                 // CSS Zoom mode: Send mode flag and zoom level to apply CSS transform
                 wc.send('set-visual-zoom-mode', false)
-                wc.send('set-webview-zoom', level)
-                console.log("[ContentViewManager] EVENT: dom-ready → CSS Zoom mode: Sent set-webview-zoom:", level)
+                wc.send('content-view-set-css-zoom', level)
+                console.log("[ContentViewManager] EVENT: dom-ready → CSS Zoom mode: Sent content-view-set-css-zoom:", level)
             }
             
             // Apply emulation at dom-ready (earliest consistent point after Chromium reset)
@@ -1187,7 +1187,7 @@ export class ContentViewManager {
         this.cssZoomLevel = clampedLevel
         
         // Send to preload script
-        this.contentView.webContents.send('set-webview-zoom', clampedLevel)  // Legacy channel name
+        this.contentView.webContents.send('content-view-set-css-zoom', clampedLevel)
         console.log("[ContentViewManager] CSS Zoom via preload:", clampedLevel)
     }
     

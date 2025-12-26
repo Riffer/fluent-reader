@@ -157,7 +157,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
         // IPC-Listener für Zoom-Änderungen vom Preload-Script
         if ((window as any).ipcRenderer) {
-            (window as any).ipcRenderer.on('webview-zoom-changed', (event: any, zoomLevel: number) => {
+            (window as any).ipcRenderer.on('content-view-zoom-changed', (event: any, zoomLevel: number) => {
                 this.currentZoom = zoomLevel
                 this.setState({ zoom: zoomLevel })
                 this.props.updateDefaultZoom(this.props.source, zoomLevel);
@@ -1778,7 +1778,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // IPC-Listener cleanup
         if ((window as any).ipcRenderer) {
-            (window as any).ipcRenderer.removeAllListeners('webview-zoom-changed');
+            (window as any).ipcRenderer.removeAllListeners('content-view-zoom-changed');
         }
     }
 

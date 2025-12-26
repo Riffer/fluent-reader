@@ -375,7 +375,7 @@ try {
     
     // Sende Notification an Main-Prozess
     if (options.notify) {
-      try { ipcRenderer.send('webview-zoom-changed', zoomLevel); } catch {}
+      try { ipcRenderer.send('content-view-zoom-changed', zoomLevel); } catch {}
     }
   }
 
@@ -448,8 +448,8 @@ try {
 
   // Listener für externe Zoom-Befehle (von Keyboard - bewahre Scroll-Position)
   // ABER: Bei Visual Zoom nur das Level tracken, NICHT CSS zoom anwenden!
-  ipcRenderer.on('set-webview-zoom', (event, zoomLevel_) => {
-    console.log('[ContentPreload] Received set-webview-zoom:', zoomLevel_, 'visualZoom:', visualZoomEnabled);
+  ipcRenderer.on('content-view-set-css-zoom', (event, zoomLevel_) => {
+    console.log('[ContentPreload] Received content-view-set-css-zoom:', zoomLevel_, 'visualZoom:', visualZoomEnabled);
     zoomLevel = zoomLevel_;
     
     // Bei Visual Zoom: Kein CSS Zoom anwenden (Device Emulation macht den Zoom)
