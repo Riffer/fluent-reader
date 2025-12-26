@@ -12,8 +12,6 @@
 import { WebContentsView, ipcMain, app, session, Input } from "electron"
 import type { BrowserWindow } from "electron"
 import path from "path"
-import fs from "fs"
-import os from "os"
 
 // Content view bounds (will be updated by renderer)
 interface ContentViewBounds {
@@ -47,10 +45,6 @@ export class ContentViewManager {
     private pendingEmulationShow: boolean = false  // Track if we need to show ContentView after emulation is applied
     private mobileUserAgent: string = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     
-    // Temporary file for data: URL workaround (touch events break with data: URLs after navigation)
-    private tempHtmlDir: string = ""
-    private tempHtmlFile: string = ""
-    
     // Preload script path
     // In dev mode, webpack puts electron.js in dist/, so app.getAppPath() = fluent-reader/dist
     // In packaged mode, app.getAppPath() = resources/app, and preload is in dist/
@@ -63,83 +57,6 @@ export class ContentViewManager {
     
     constructor() {
         this.setupIpcHandlers()
-        this.setupTempDir()
-    }
-    
-    /**
-     * Setup temporary directory for data: URL → file: URL conversion
-     * This workaround is needed because data: URLs have broken touch event behavior
-     * in Electron's WebContentsView after navigation (events stop being delivered)
-     */
-    private setupTempDir(): void {
-        try {
-            // Create a unique temp directory for this app instance
-            this.tempHtmlDir = path.join(os.tmpdir(), `fluent-reader-content-${process.pid}`)
-            if (!fs.existsSync(this.tempHtmlDir)) {
-                fs.mkdirSync(this.tempHtmlDir, { recursive: true })
-            }
-            this.tempHtmlFile = path.join(this.tempHtmlDir, "article.html")
-            console.log("[ContentViewManager] Temp directory setup:", this.tempHtmlDir)
-        } catch (e) {
-            console.error("[ContentViewManager] Failed to setup temp directory:", e)
-        }
-    }
-    
-    /**
-     * Convert a data: URL to a file: URL by writing content to temp file
-     * Returns the file: URL, or the original URL if not a data: URL
-     */
-    private convertDataUrlToFileUrl(url: string): string {
-        // Only convert data: URLs
-        if (!url.startsWith("data:")) {
-            return url
-        }
-        
-        try {
-            // Parse the data: URL
-            // Format: data:[<mediatype>][;base64],<data>
-            const match = url.match(/^data:([^;,]+)?(;base64)?,(.*)$/)
-            if (!match) {
-                console.warn("[ContentViewManager] Could not parse data: URL")
-                return url
-            }
-            
-            const [, mediaType, isBase64, data] = match
-            let htmlContent: string
-            
-            if (isBase64) {
-                // Decode base64
-                htmlContent = Buffer.from(data, 'base64').toString('utf-8')
-            } else {
-                // URL-encoded
-                htmlContent = decodeURIComponent(data)
-            }
-            
-            // Write to temp file
-            fs.writeFileSync(this.tempHtmlFile, htmlContent, 'utf-8')
-            
-            // Return file: URL
-            const fileUrl = `file://${this.tempHtmlFile.replace(/\\/g, '/')}`
-            console.log("[ContentViewManager] Converted data: URL to file: URL:", fileUrl)
-            return fileUrl
-        } catch (e) {
-            console.error("[ContentViewManager] Failed to convert data: URL:", e)
-            return url
-        }
-    }
-    
-    /**
-     * Cleanup temp files on destroy
-     */
-    private cleanupTempFiles(): void {
-        try {
-            if (this.tempHtmlDir && fs.existsSync(this.tempHtmlDir)) {
-                fs.rmSync(this.tempHtmlDir, { recursive: true, force: true })
-                console.log("[ContentViewManager] Temp directory cleaned up")
-            }
-        } catch (e) {
-            console.warn("[ContentViewManager] Failed to cleanup temp files:", e)
-        }
     }
     
     /**
@@ -864,13 +781,11 @@ export class ContentViewManager {
             }
             
             // === STEP 2: Start navigation ===
-            // WORKAROUND: Convert data: URLs to file: URLs to fix touch event issues
-            // In Electron's WebContentsView, touch events stop being delivered to the
-            // preload script after navigating to a new data: URL. Loading from file: works.
-            const actualUrl = this.convertDataUrlToFileUrl(url)
-            this.currentUrl = url  // Keep original URL for reference
+            // Nuclear Option handles touch events by recreating WebContentsView
+            // No need for data: → file: URL conversion anymore
+            this.currentUrl = url
             console.log("[ContentViewManager] Starting loadURL (emulation will be applied after dom-ready)")
-            this.contentView.webContents.loadURL(actualUrl).catch(err => {
+            this.contentView.webContents.loadURL(url).catch(err => {
                 // Ignore aborted navigations
                 if (err.code !== "ERR_ABORTED") {
                     console.error("[ContentViewManager] Navigation error:", err)
@@ -1380,9 +1295,6 @@ export class ContentViewManager {
             this.contentView = null
         }
         this.parentWindow = null
-        
-        // Cleanup temp files
-        this.cleanupTempFiles()
         
         console.log("[ContentViewManager] Destroyed")
     }

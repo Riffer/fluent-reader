@@ -520,8 +520,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 // Local (RSS) or FullContent mode: Load HTML directly with bundled settings
                 const htmlDataUrl = this.articleView();
                 console.log('[ContentView] FIRST LOAD - Loading HTML content for mode:', SourceOpenTarget[this.state.contentMode]);
-                console.log('[ContentView] FIRST LOAD - htmlDataUrl starts with data:', htmlDataUrl.startsWith('data:'));
-                console.log('[ContentView] FIRST LOAD - htmlDataUrl prefix:', htmlDataUrl.substring(0, 50));
                 // Navigate with settings bundled - all settings applied BEFORE navigation starts
                 await window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
                 this.contentViewCurrentUrl = htmlDataUrl;
@@ -1378,10 +1376,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     // For Local (RSS) mode - ContentView loads HTML data URL with bundled settings
                     if (window.contentView) {
                         const htmlDataUrl = this.articleView();
-                        // Use navigateWithSettings with HIDE-SHOW strategy
                         console.log('[ContentView] Article changed (Local/RSS) - navigateWithSettings');
-                        console.log('[ContentView] RSS htmlDataUrl starts with data:', htmlDataUrl.startsWith('data:'));
-                        console.log('[ContentView] RSS htmlDataUrl prefix:', htmlDataUrl.substring(0, 50));
                         this.contentViewCurrentUrl = htmlDataUrl;
                         window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
                         // Focus ContentView
