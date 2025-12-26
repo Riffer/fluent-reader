@@ -158,6 +158,8 @@ export class ContentViewManager {
         // This is the OPTIMAL time to hide - user sees old content until server responds
         wc.on("did-navigate", (event, url) => {
             console.log("[ContentViewManager] EVENT: did-navigate -", url)
+            this.currentUrl = url
+            this.sendToRenderer("content-view-navigated", url)
             
             // LATE HIDE: Hide ContentView NOW - server has responded, new page is coming
             if (this.visualZoomEnabled && this.pendingEmulationShow && this.isVisible) {
@@ -266,11 +268,15 @@ export class ContentViewManager {
             
             console.error("[ContentViewManager] Main frame load failed:", errorCode, errorDescription)
             this.sendToRenderer("content-view-error", { errorCode, errorDescription, url: validatedURL })
-        })
-        
-        wc.on("did-navigate", (event, url) => {
-            this.currentUrl = url
-            this.sendToRenderer("content-view-navigated", url)
+            
+            // === RECOVERY: Show ContentView on load failure ===
+            // If we were waiting to show after emulation, we need to recover
+            if (this.pendingEmulationShow) {
+                console.log("[ContentViewManager] Load failed - recovering: showing ContentView despite error")
+                this.pendingEmulationShow = false
+                this.setVisible(true, false)
+                this.sendToRenderer("content-view-visual-zoom-ready")  // Hide loading spinner
+            }
         })
         
         wc.on("did-navigate-in-page", (event, url) => {
