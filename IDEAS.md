@@ -3,6 +3,58 @@
 ## 💡 Offene Ideen
 
 
+### Overlay-Menü Performance: Alternativen zum Screenshot-Workaround (27.12.2025)
+
+**Problem:**
+Das WebContentsView ist ein natives OS-Fenster, das über dem React-DOM liegt. Wenn Overlay-Menüs (Tools, Settings, Share-Dialog) geöffnet werden, muss das WebContentsView versteckt und durch einen Screenshot ersetzt werden. Bei langen/komplexen Artikeln dauert der Screenshot-Capture spürbar lange (Warten auf GPU Compositor).
+
+**Aktuelle Implementierung:**
+- `capturePage()` erfasst nur den sichtbaren Viewport (nicht das gesamte Dokument)
+- JPEG-Encoding (Q70) für Performance (~70ms vs ~590ms bei PNG)
+- Flaschenhals: Warten auf fertigen Frame vom Compositor
+
+**Alternative 1: Pre-Caching**
+- Screenshot im Idle-Moment erstellen (nach `did-finish-load`)
+- Bei Menü-Öffnung gecachten Screenshot nutzen
+- ⚠️ Problem: Bei gescrollten Seiten ist der Cache "falsch"
+
+**Alternative 2: Zweites WebContentsView als Menü-Overlay**
+```typescript
+// Z-Order über addChildView index:
+parentWindow.contentView.addChildView(articleView)    // index 0 (unten)
+parentWindow.contentView.addChildView(menuView)       // index 1 (oben)
+
+// Oder explizit:
+parentWindow.contentView.addChildView(menuView, 1)    // index bestimmt Z-Order
+```
+**Vorteile:**
+- ✅ Menü-View liegt **nativ über** dem Artikel-View
+- ✅ Kein Screenshot nötig
+- ✅ Volles HTML/CSS/React im Menü möglich (QR-Codes, Custom-Styling)
+- ✅ Transparenter Hintergrund möglich (`backgroundColor: '#00000000'`)
+
+**Herausforderungen:**
+- ⚠️ Separater WebContents = separater Prozess/Kontext
+- ⚠️ Kommunikation nur über IPC (kein direkter React-State-Zugriff)
+- ⚠️ Menü müsste eigenes HTML laden (oder data: URL)
+- ⚠️ Mehr Speicherverbrauch (zweiter Renderer-Prozess)
+- ⚠️ Click-Through für transparente Bereiche muss konfiguriert werden
+
+**Umsetzungsidee:**
+- Menü-View lazy erstellen (erst bei erstem Aufruf)
+- Wiederverwenden (nur show/hide statt create/destroy)
+- IPC-Bridge für Befehle an Haupt-Renderer
+
+**Alternative 3: Native Electron-Menüs (eingeschränkt)**
+- `Menu.popup()` erscheint über WebContentsView ohne Screenshot
+- ❌ Nicht optisch anpassbar (OS-natives Styling)
+- ❌ Keine Bilder/QR-Codes, Custom-Widgets, Eingabefelder
+- ✅ Könnte für einfache Aktionen (Tools-Schnellzugriff) genutzt werden
+
+**Status:** 📋 Recherche abgeschlossen, Umsetzung offen
+
+---
+
 ### Aktuelle Seiten-URL beim Teilen/Kopieren (26.12.2025)
 **Beschreibung:** Wenn der User innerhalb einer Webseite navigiert (Links folgt), wird beim "Link kopieren" im Kontextmenü immer noch die ursprüngliche Feed-URL verwendet, nicht die aktuelle Seiten-URL nach Navigation.
 

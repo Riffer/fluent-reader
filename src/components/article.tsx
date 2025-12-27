@@ -2325,10 +2325,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
 /* Base Styles */
 html, body { margin: 0; padding: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
-body { padding: 12px 16px 32px; overflow-x: hidden; overflow-y: auto; font-size: ${this.state.fontSize}px; box-sizing: border-box; width: 100%; }
+body { padding: 8px; overflow-x: hidden; overflow-y: auto; font-size: ${this.state.fontSize}px; box-sizing: border-box; width: 100%; }
 ${this.state.fontFamily ? `body { font-family: "${this.state.fontFamily}"; }` : ''}
 body.rtl { direction: rtl; }
-body.vertical { writing-mode: vertical-rl; padding: 32px; padding-right: 96px; overflow: scroll hidden; }
+body.vertical { writing-mode: vertical-rl; padding: 8px; padding-right: 96px; overflow: scroll hidden; }
 * { box-sizing: border-box; }
 
 /* Typography */
@@ -2390,7 +2390,7 @@ article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding:
 .comic-mode .title,
 .comic-mode .date {
     text-align: center;
-    padding: 0 16px;
+    padding: 0 8px;
 }
 .comic-mode p {
     text-align: center;
