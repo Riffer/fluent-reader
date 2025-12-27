@@ -26,6 +26,10 @@ try {
   // Mobile Mode Status
   let mobileMode = false;
   
+  // Original viewport width - stored when zoom container is created
+  // Used to prevent responsive styles from compensating zoom effect
+  let originalViewportWidth = null;
+  
   // Visual Zoom Mode: When enabled, touch events are NOT intercepted
   // so that native browser pinch-zoom works
   // Load initial value synchronously to prevent CSS zoom flash
@@ -188,6 +192,11 @@ try {
       wrapper.appendChild(container);
       document.body.appendChild(wrapper);
       
+      // Store original viewport width to prevent responsive compensation
+      if (originalViewportWidth === null) {
+        originalViewportWidth = window.innerWidth;
+      }
+      
       // Passe HTML und Body an
       document.documentElement.style.margin = '0';
       document.documentElement.style.padding = '0';
@@ -270,6 +279,28 @@ try {
     document.body.style.width = '';
     document.body.style.height = '';
     document.body.style.display = '';
+    
+    // Reset original viewport width
+    originalViewportWidth = null;
+  }
+
+  /**
+   * Apply or remove min-width freeze to prevent responsive compensation
+   * When zooming > 100%, set min-width to original viewport to prevent content shrinking
+   * When zooming <= 100%, remove min-width to allow normal responsive behavior
+   */
+  function applyViewportFreeze(zoomFactor) {
+    const container = document.getElementById('fr-zoom-container');
+    if (!container) return;
+    
+    if (zoomFactor > 1 && originalViewportWidth) {
+      // Zooming in: freeze content width to prevent responsive shrinking
+      // The container shrinks (viewport / zoomFactor), but content should stay at original width
+      container.style.minWidth = originalViewportWidth + 'px';
+    } else {
+      // Zooming out or 100%: allow normal responsive behavior
+      container.style.minWidth = '';
+    }
   }
 
   // Apply zoom to container - Zoom can originate from any point
@@ -327,6 +358,9 @@ try {
     
     // Wende Scale an
     container.style.transform = `scale(${newFactor})`;
+    
+    // Apply viewport freeze to prevent responsive compensation when zooming in
+    applyViewportFreeze(newFactor);
     
     // Berechne neue Scroll-Position
     requestAnimationFrame(() => {
