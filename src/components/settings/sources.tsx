@@ -212,9 +212,9 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
         event.preventDefault()
         let trimmed = this.state.newUrl.trim()
         if (urlTest(trimmed)) {
-            // Fehler werden bereits in addSource() behandelt und dem Benutzer angezeigt
+            // Errors are already handled in addSource() and displayed to the user
             this.props.addSource(trimmed).catch(() => {
-                // Fehler bereits in Redux-Action behandelt - hier nur Promise-Rejection unterdrücken
+                // Error already handled in Redux action - just suppress Promise rejection here
             })
         }
     }

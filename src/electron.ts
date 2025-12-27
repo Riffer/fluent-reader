@@ -12,15 +12,15 @@ import { initP2PLan, registerP2PLanIpcHandlers, shutdownP2P, onSystemSuspend, on
 // The main app (index.html) has a proper CSP defined
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
 
-// ===== Chromium-Flags für Visual Zoom (Pinch-to-Zoom) =====
-// WICHTIG: Diese müssen VOR app.whenReady() gesetzt werden!
+// ===== Chromium Flags for Visual Zoom (Pinch-to-Zoom) =====
+// IMPORTANT: These must be set BEFORE app.whenReady()!
 app.commandLine.appendSwitch('enable-pinch');
 app.commandLine.appendSwitch('enable-viewport');
 app.commandLine.appendSwitch('enable-features', 'PinchToZoom,TouchpadAndWheelScrollLatching');
 console.log('[Electron] Visual Zoom Chromium flags enabled');
 
-// ===== Crash Handler und Debugging =====
-// Fange unerwartete Exceptions ab
+// ===== Crash Handler and Debugging =====
+// Catch unexpected exceptions
 process.on('uncaughtException', (error) => {
     console.error('[CRASH] Uncaught Exception:', error)
     console.error('[CRASH] Stack:', error.stack)
@@ -30,10 +30,10 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('[CRASH] Unhandled Rejection at:', promise, 'reason:', reason)
 })
 
-// Aktiviere Crash Reporter für detaillierte Crash-Dumps
+// Enable Crash Reporter for detailed crash dumps
 crashReporter.start({
     productName: 'FluentReader',
-    submitURL: '', // Keine URL - speichert nur lokal
+    submitURL: '', // No URL - saves only locally
     uploadToServer: false,
     compress: false,
 })
@@ -148,8 +148,8 @@ if (process.platform === "darwin") {
 
 const winManager = new WindowManager()
 
-// GPU-Rendering: Früher deaktiviert wegen Crash-Problemen (exit_code=-1073740791)
-// Jetzt wieder aktiviert für flüssigeres Scrolling - bei Problemen auskommentieren
+// GPU Rendering: Previously disabled due to crash problems (exit_code=-1073740791)
+// Now re-enabled for smoother scrolling - comment out if issues occur
 // if (process.platform === "win32") {
 //     app.commandLine.appendSwitch("use-gl", "swiftshader");
 //     app.commandLine.appendSwitch("disable-gpu-compositing");
@@ -157,7 +157,7 @@ const winManager = new WindowManager()
 //     app.commandLine.appendSwitch("disable-gpu");
 // }
 
-// Touch-Support
+// Touch Support
 app.commandLine.appendSwitch("touch-events", "enabled");
 
 // Handle system sleep/hibernate - notify P2P peers

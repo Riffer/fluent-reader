@@ -56,22 +56,22 @@ export class WindowManager {
     }
 
     private init = () => {
-        // Unterdrücke ERR_ABORTED und ERR_FAILED Fehler die beim schnellen Artikelwechsel auftreten
+        // Suppress ERR_ABORTED and ERR_FAILED errors that occur during fast article switching
         process.on('unhandledRejection', (reason: any) => {
-            // ERR_ABORTED (-3): Navigation wurde abgebrochen
-            // ERR_FAILED (-2): Allgemeiner Fehler (oft bei schnellem Wechsel)
+            // ERR_ABORTED (-3): Navigation was aborted
+            // ERR_FAILED (-2): General error (often during fast switching)
             if (reason?.code === 'ERR_ABORTED' || reason?.errno === -3 ||
                 reason?.code === 'ERR_FAILED' || reason?.errno === -2) {
-                // Ignoriere diese Fehler - treten auf wenn Navigation während des Ladens abgebrochen wird
+                // Ignore these errors - occur when navigation is aborted during loading
                 return
             }
             console.error('Unhandled rejection:', reason)
         })
         
-        // Filtere Electron-interne GUEST_VIEW_MANAGER_CALL Fehler aus console.error
+        // Filter Electron-internal GUEST_VIEW_MANAGER_CALL errors from console.error
         const originalConsoleError = console.error
         console.error = (...args: any[]) => {
-            // Konvertiere args zu String für Prüfung
+            // Convert args to string for checking
             const message = args.map(a => String(a)).join(' ')
             // Filtere ERR_ABORTED und ERR_FAILED Fehler bei GUEST_VIEW_MANAGER_CALL
             if (message.includes('GUEST_VIEW_MANAGER_CALL') && 
@@ -110,14 +110,14 @@ export class WindowManager {
         initDatabase()
         setupDatabaseIPC()
 
-        // Weiterleitung von Zoom-Änderungen aus ContentView -> Renderer
+        // Forward zoom changes from ContentView -> Renderer
         ipcMain.on("content-view-zoom-changed", (_event, zoom: number) => {
             if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                 this.mainWindow.webContents.send("content-view-zoom-changed", zoom)
             }
         })
 
-        // App DevTools öffnen/schließen
+        // Open/close App DevTools
         ipcMain.handle("toggle-app-devtools", () => {
             if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                 if (this.mainWindow.webContents.isDevToolsOpened()) {
@@ -128,13 +128,13 @@ export class WindowManager {
             }
         })
 
-        // Speichert für welche webContentsIds die Emulation bereits aktiviert wurde
+        // Stores which webContentsIds have emulation already enabled
         const emulatedWebContentsIds = new Set<number>()
 
-        // Device Emulation für WebContents aktivieren (Mobile Mode)
+        // Enable Device Emulation for WebContents (Mobile Mode)
         // Note: ContentViewManager handles its own emulation, this is for legacy support
         ipcMain.handle("enable-device-emulation", (_event, webContentsId: number, params: any) => {
-            // Deduplizierung: Nur einmal pro webContentsId aktivieren
+            // Deduplication: Only enable once per webContentsId
             if (emulatedWebContentsIds.has(webContentsId)) {
                 console.log('[DeviceEmulation] Skipping (already enabled for webContentsId:', webContentsId, ')')
                 return true
@@ -144,7 +144,7 @@ export class WindowManager {
             try {
                 const wc = webContents.fromId(webContentsId)
                 if (wc && !wc.isDestroyed()) {
-                    // User-Agent ändern wenn angegeben
+                    // Change User-Agent if specified
                     if (params.userAgent) {
                         wc.setUserAgent(params.userAgent)
                         console.log('[DeviceEmulation] User-Agent set')
@@ -172,15 +172,15 @@ export class WindowManager {
             }
         })
 
-        // Device Emulation für WebContents deaktivieren
+        // Disable Device Emulation for WebContents
         ipcMain.handle("disable-device-emulation", (_event, webContentsId: number) => {
             try {
-                emulatedWebContentsIds.delete(webContentsId)  // Aus dem Set entfernen
+                emulatedWebContentsIds.delete(webContentsId)  // Remove from set
                 const wc = webContents.fromId(webContentsId)
                 if (wc && !wc.isDestroyed()) {
                     wc.disableDeviceEmulation()
-                    // User-Agent zurücksetzen auf Standard
-                    wc.setUserAgent('')  // Leerer String = Standard-User-Agent
+                    // Reset User-Agent to default
+                    wc.setUserAgent('')  // Empty string = default User-Agent
                     console.log('[DeviceEmulation] Disabled for webContentsId:', webContentsId)
                     return true
                 }
@@ -193,8 +193,8 @@ export class WindowManager {
 
         // ===== Cookie Persistence IPC Handlers =====
 
-        // Cookies für einen Host laden und in Session setzen
-        // WICHTIG: ContentView nutzt partition="sandbox" (ohne persist:)
+        // Load cookies for a host and set them in session
+        // IMPORTANT: ContentView uses partition="sandbox" (without persist:)
         ipcMain.handle("load-persisted-cookies", async (_event, url: string) => {
             const host = extractHost(url)
             if (!host) {
@@ -213,8 +213,8 @@ export class WindowManager {
             return { success: true, count }
         })
 
-        // Cookies für einen Host aus Session holen und speichern
-        // WICHTIG: ContentView nutzt partition="sandbox" (ohne persist:)
+        // Get cookies for a host from session and save them
+        // IMPORTANT: ContentView uses partition="sandbox" (without persist:)
         ipcMain.handle("save-persisted-cookies", async (_event, url: string) => {
             const host = extractHost(url)
             if (!host) {
@@ -234,7 +234,7 @@ export class WindowManager {
             return { success, count: cookies.length }
         })
 
-        // Gespeicherte Cookies für einen Host löschen
+        // Delete saved cookies for a host
         ipcMain.handle("delete-persisted-cookies", async (_event, url: string) => {
             const host = extractHost(url)
             if (!host) {
@@ -290,21 +290,21 @@ export class WindowManager {
                     webviewTag: true,
                     contextIsolation: true,
                     spellcheck: false,
-                    // GPU-Optimierungen für geschmeidiges Scrollen und Hardware-Beschleunigung
+                    // GPU optimizations for smooth scrolling and hardware acceleration
                     v8CacheOptions: "bypassHeatCheck",
                     preload: path.join(
                         app.getAppPath(),
                         (app.isPackaged ? "dist/" : "") + "preload.js"
                     ),
-                    // GPU-Unterstützung aktivieren für bessere Rendering-Performance
-                    // @ts-ignore - neuere Electron API für GPU-Aktualisierung
+                    // Enable GPU support for better rendering performance
+                    // @ts-ignore - newer Electron API for GPU updates
                     gpuPreference: 'high-performance',
                     enablePlugins: false,
                 } as any,
             })
             
-            // Zoom wird ausschließlich in ContentView verwaltet (via content-preload.js)
-            // NICHT auf dem Hauptfenster setzen!
+            // Zoom is managed exclusively in ContentView (via content-preload.js)
+            // DO NOT set on main window!
             this.mainWindowState.manage(this.mainWindow)
             this.mainWindow.on("ready-to-show", () => {
                 this.mainWindow.show()

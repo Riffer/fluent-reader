@@ -14,9 +14,9 @@ contextBridge.exposeInMainWorld("p2p", p2pBridge)
 contextBridge.exposeInMainWorld("p2pLan", p2pLanBridge)
 contextBridge.exposeInMainWorld("contentView", contentViewBridge)
 
-// ipcRenderer für ContentView-Zoom-Kommunikation (eingeschränkt auf benötigte Channels)
+// ipcRenderer for ContentView zoom communication (restricted to required channels)
 const limitedIpcRenderer = {
-    // Vom Renderer an den Main-Prozess
+    // From Renderer to Main process
     send: (channel: string, ...args: any[]) => {
         const allowedSendChannels = [
             "content-view-zoom-changed",
@@ -38,7 +38,7 @@ const limitedIpcRenderer = {
             ipcRenderer.send(channel, ...args)
         }
     },
-    // Vom Main-Prozess an den Renderer
+    // From Main process to Renderer
     on: (channel: string, listener: Function) => {
         const allowedOnChannels = [
             "content-view-set-css-zoom",
@@ -99,8 +99,8 @@ contextBridge.exposeInMainWorld("ipcRenderer", limitedIpcRenderer)
 const articleExtractorBridge = createArticleExtractorBridge(limitedIpcRenderer)
 contextBridge.exposeInMainWorld("articleExtractor", articleExtractorBridge)
 
-// Deaktiviere Standard-Zoom-Shortcuts im Hauptfenster
-// Der Zoom wird über ContentView-Preload-Script verwaltet
+// Disable default zoom shortcuts in main window
+// Zoom is managed via ContentView preload script
 if (typeof window !== 'undefined') {
     window.addEventListener('keydown', (e) => {
         if (e.ctrlKey || e.metaKey) {

@@ -315,14 +315,14 @@ export function fetchItems(
             console.log(`[fetchItems] Will fetch ${sources.length} sources:`, sources.map(s => s.name))
             
             for (let source of sources) {
-                // Erstelle das Haupt-Promise für fetchItems
+                // Create main promise for fetchItems
                 let fetchPromise = RSSSource.fetchItems(source)
                 
-                // Bei Erfolg: lastFetched aktualisieren
-                // Bei Fehler: nichts tun (wird später über Promise.allSettled behandelt)
+                // On success: update lastFetched
+                // On error: do nothing (handled later via Promise.allSettled)
                 fetchPromise.then(
                     () => dispatch(updateSource({ ...source, lastFetched: new Date() })),
-                    () => { /* Fehler wird über Promise.allSettled behandelt */ }
+                    () => { /* Error handled via Promise.allSettled */ }
                 )
                 
                 // Immer: Intermediate dispatch
@@ -341,7 +341,7 @@ export function fetchItems(
                     items.push(...r.value)
                 }
                 else {
-                    // Log mit Source-Info für bessere Diagnose
+                    // Log with source info for better diagnosis
                     const source = sources[i]
                     const errorMsg = r.reason instanceof Error ? r.reason.message : String(r.reason)
                     console.error(`[fetchItems] Error fetching "${source.name}" (${source.url}): ${errorMsg}`)

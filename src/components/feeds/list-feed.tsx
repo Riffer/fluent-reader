@@ -17,7 +17,7 @@ import { Card } from "../cards/card"
 
 class ListFeed extends React.Component<FeedProps> {
     componentDidMount() {
-        // Passive scroll listener für bessere Performance
+        // Passive scroll listener for better performance
         const scrollContainer = document.getElementById("refocus")
         if (scrollContainer) {
             scrollContainer.addEventListener('scroll', this.handleScroll, { passive: true })
@@ -107,7 +107,7 @@ class ListFeed extends React.Component<FeedProps> {
                         ignoreScrollingState
                         usePageCache
                         getPageHeight={() => {
-                            // Bessere Seitenhöhen-Berechnung für Virtualisierung
+                            // Better page height calculation for virtualization
                             return window.innerHeight
                         }}
                     />

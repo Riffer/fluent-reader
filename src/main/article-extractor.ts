@@ -9,18 +9,18 @@ import { initializeCookieTransformations } from "./cookie-transformations"
 function setupExtractorTransformations() {
     addTransformations([
         {
-            // Reddit: Entferne NSFW-Dialoge, App-Promo, QR-Codes, Modals, Cookie-Banner
+            // Reddit: Remove NSFW dialogs, app promo, QR codes, modals, cookie banners
             patterns: [/reddit\.com/],
             pre: (document: Document) => {
-                // NSFW/18+ Blocking Modals und Dialoge
+                // NSFW/18+ Blocking Modals and Dialogs
                 document.querySelectorAll('faceplate-modal, faceplate-dialog').forEach(el => el.remove())
                 document.querySelectorAll('#nsfw-qr-dialog, #blocking-modal').forEach(el => el.remove())
                 
-                // NSFW Blocking Container - nur "In App anzeigen" Buttons entfernen
+                // NSFW Blocking Container - only remove "View in App" buttons
                 document.querySelectorAll('xpromo-nsfw-blocking-container .viewInApp').forEach(el => el.remove())
                 document.querySelectorAll('xpromo-nsfw-blocking-container a[slot="view-in-app-button"]').forEach(el => el.remove())
                 
-                // Blurred container für NSFW - Blur entfernen und ungeblurrtes Bild anzeigen
+                // Blurred container for NSFW - remove blur and show unblurred image
                 document.querySelectorAll('shreddit-blurred-container').forEach(el => {
                     el.removeAttribute('blurred')
                     el.setAttribute('mode', 'revealed')
@@ -36,22 +36,22 @@ function setupExtractorTransformations() {
                     }
                 })
                 
-                // Modal-Wrapper mit Dialog-Rolle entfernen (App-Promo, Login-Prompts)
+                // Remove modal wrapper with dialog role (app promo, login prompts)
                 document.querySelectorAll('#wrapper[role="dialog"][aria-modal="true"]').forEach(el => el.remove())
                 
-                // App-Download Banner und Prompts
+                // App download banners and prompts
                 document.querySelectorAll('[data-testid="xpromo-nsfw-blocking-modal"]').forEach(el => el.remove())
                 document.querySelectorAll('[data-testid="xpromo-app-selector"]').forEach(el => el.remove())
                 document.querySelectorAll('.XPromoPopupRpl, .XPromoBlockingModal').forEach(el => el.remove())
                 
-                // Cookie/Consent/Datenschutz Banner
+                // Cookie/Consent/Privacy banners
                 document.querySelectorAll('#data-protection-consent-dialog').forEach(el => el.remove())
                 document.querySelectorAll('rpl-modal-card').forEach(el => el.remove())
                 document.querySelectorAll('.rpl-dialog').forEach(el => el.remove())
                 document.querySelectorAll('[data-testid="cookie-policy-banner"]').forEach(el => el.remove())
                 document.querySelectorAll('shreddit-cookie-banner').forEach(el => el.remove())
                 
-                // Weitere störende Elemente
+                // Other annoying elements
                 document.querySelectorAll('[class*="bottom-sheet"]').forEach(el => el.remove())
                 document.querySelectorAll('[class*="overlay-container"]').forEach(el => el.remove())
                 

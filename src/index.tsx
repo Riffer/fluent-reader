@@ -47,13 +47,13 @@ window.utils.initFontList().then(fonts => {
     window.fontList.push(...fonts)
 })
 
-// Auto-Refresh Feeds beim Aufwachen aus Standby/Sleep
+// Auto-Refresh Feeds when waking from standby/sleep
 window.utils.addPowerResumeListener(() => {
     console.log("[PowerResume] Triggering automatic feed refresh after system wake")
-    store.dispatch(fetchItems(true)) // background=true für stille Aktualisierung
+    store.dispatch(fetchItems(true)) // background=true for silent refresh
 })
 
-// Globaler F12-Handler für App Developer Tools
+// Global F12 handler for App Developer Tools
 document.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'F12') {
         e.preventDefault()

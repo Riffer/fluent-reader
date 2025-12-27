@@ -78,7 +78,7 @@ type ArticleState = {
     showZoomOverlay: boolean
     nsfwCleanupEnabled: boolean
     autoCookieConsentEnabled: boolean
-    inputModeEnabled: boolean  // Eingabe-Modus: Shortcuts deaktiviert für Login etc.
+    inputModeEnabled: boolean  // Input mode: Shortcuts disabled for login etc.
     showP2PShareDialog: boolean
     visualZoomEnabled: boolean  // Visual Zoom (Pinch-to-Zoom) ohne Mobile-Modus
     menuBlurScreenshot: string | null  // Screenshot for blur placeholder when menu is open
@@ -92,8 +92,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     currentZoom: number = 0  // Track zoom locally to avoid state lag
     private _isMounted = false
     private _isTogglingMode = false  // Flag to prevent componentDidUpdate from overriding state during toggle
-    private cookieSaveTimeout: NodeJS.Timeout | null = null  // Debounce für Cookie-Speicherung
-    private lastCookieSaveTime: number = 0  // Timestamp der letzten Cookie-Speicherung
+    private cookieSaveTimeout: NodeJS.Timeout | null = null  // Debounce for cookie saving
+    private lastCookieSaveTime: number = 0  // Timestamp of last cookie save
     
     // ContentView references and cleanup
     private contentViewPlaceholderRef: HTMLDivElement | null = null
@@ -124,10 +124,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     constructor(props: ArticleProps) {
         super(props)
-        // Initialisiere mit dem gespeicherten Feed-Zoom
+        // Initialize with stored feed zoom
         const initialZoom = props.source.defaultZoom || 0
         this.currentZoom = initialZoom
-        // Initialisiere lokalen Mobile-Mode State
+        // Initialize local Mobile Mode state
         this.localMobileMode = props.source.mobileMode || false
         this.state = {
             fontFamily: window.settings.getFont(),
@@ -151,7 +151,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             isNavigatingWithVisualZoom: false,
         }
 
-        // IPC-Listener für Zoom-Änderungen vom Preload-Script
+        // IPC listener for zoom changes from preload script
         if ((window as any).ipcRenderer) {
             (window as any).ipcRenderer.on('content-view-zoom-changed', (event: any, zoomLevel: number) => {
                 this.currentZoom = zoomLevel
@@ -572,7 +572,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
     
-    // Input Mode: Sendet Status an ContentView um Keyboard-Navigation zu deaktivieren
+    // Input Mode: Sends status to ContentView to disable keyboard navigation
     private setInputMode = (enabled: boolean) => {
         this.setState({ inputModeEnabled: enabled });
         // Send to ContentView
@@ -585,17 +585,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
-    // Lokaler State für Mobile Mode (für zuverlässiges IPC-Timing nach Reload)
+    // Local state for Mobile Mode (for reliable IPC timing after reload)
     private localMobileMode: boolean = false;
 
     private toggleMobileMode = async () => {
         const newMobileMode = !this.props.source.mobileMode;
-        this.localMobileMode = newMobileMode;  // Lokalen State sofort setzen
+        this.localMobileMode = newMobileMode;  // Set local state immediately
         this.props.updateMobileMode(this.props.source, newMobileMode);
         
         console.log('[Article] Mobile mode toggled:', newMobileMode ? 'ON' : 'OFF');
         
-        // Globalen Mobile-Mode Status setzen (für neue ContentViews bei Artikelwechsel)
+        // Set global Mobile Mode status (for new ContentViews on article change)
         this.setGlobalMobileMode(newMobileMode);
         
         // Use ContentView bridge - this handles User-Agent, Device Emulation, and reload
@@ -611,7 +611,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.props.updatePersistCookies(this.props.source, newValue);
         
         if (newValue) {
-            // Wenn aktiviert, sofort aktuelle Cookies speichern
+            // If enabled, immediately save current cookies
             console.log("[CookiePersist] Article: Saving cookies immediately after enabling")
             this.savePersistedCookies();
         }
@@ -620,13 +620,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     // Note: enableMobileEmulation and disableMobileEmulation removed
     // Mobile mode is now handled via window.contentView.setMobileMode()
 
-    // Setzt den globalen Mobile-Mode-Status im Main-Prozess
-    // Der Main-Prozess wendet dann automatisch Emulation auf neue ContentViews an
+    // Sets global Mobile Mode status in Main process
+    // Main process then automatically applies emulation to new ContentViews
     private setGlobalMobileMode = (enabled: boolean) => {
         const ipcRenderer = (window as any).ipcRenderer;
         if (ipcRenderer && typeof ipcRenderer.send === 'function') {
-            // FESTE Viewport-Breite für konsistentes Mobile-Verhalten
-            // 768px ist der Standard-Breakpoint für Mobile/Tablet
+            // FIXED viewport width for consistent mobile behavior
+            // 768px is the standard breakpoint for Mobile/Tablet
             const viewportWidth = 768;
             let viewportHeight = 844;
             
@@ -658,7 +658,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const newValue = !this.state.nsfwCleanupEnabled;
         window.settings.setNsfwCleanup(newValue);
         this.setState({ nsfwCleanupEnabled: newValue });
-        // Reload ContentView damit die Einstellung greift
+        // Reload ContentView so the setting takes effect
         this.contentReload();
     }
 
@@ -666,14 +666,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const newValue = !this.state.autoCookieConsentEnabled;
         window.settings.setAutoCookieConsent(newValue);
         this.setState({ autoCookieConsentEnabled: newValue });
-        // Reload ContentView damit die Einstellung greift
+        // Reload ContentView so the setting takes effect
         this.contentReload();
     }
 
     // ===== Cookie Persistence =====
     
     /**
-     * Lädt gespeicherte Cookies für den aktuellen Artikel (falls persistCookies aktiviert)
+     * Loads saved cookies for the current article (if persistCookies is enabled)
      */
     private loadPersistedCookies = async () => {
         if (!this.props.source.persistCookies) {
@@ -694,7 +694,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     
     /**
-     * Speichert aktuelle Cookies für den Artikel (falls persistCookies aktiviert)
+     * Saves current cookies for the article (if persistCookies is enabled)
      */
     private savePersistedCookies = async () => {
         if (!this.props.source.persistCookies) {
@@ -715,27 +715,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     
     /**
-     * Debounced Version von savePersistedCookies - verhindert zu häufiges Speichern
-     * bei vielen Navigation-Events (z.B. Reddit SPA)
+     * Debounced version of savePersistedCookies - prevents saving too frequently
+     * with many navigation events (e.g. Reddit SPA)
      */
     private savePersistedCookiesDebounced = () => {
         if (!this.props.source.persistCookies) {
             return
         }
         
-        // Wenn kürzlich gespeichert wurde, ignorieren
+        // If recently saved, ignore
         const now = Date.now()
         if (now - this.lastCookieSaveTime < 2000) {
             console.log("[CookiePersist] Article: Skipping save (debounced, last save was", now - this.lastCookieSaveTime, "ms ago)")
             return
         }
         
-        // Vorherigen Timeout löschen
+        // Clear previous timeout
         if (this.cookieSaveTimeout) {
             clearTimeout(this.cookieSaveTimeout)
         }
         
-        // Neuen Timeout setzen (500ms delay)
+        // Set new timeout (500ms delay)
         this.cookieSaveTimeout = setTimeout(() => {
             this.savePersistedCookies()
         }, 500)
@@ -1140,13 +1140,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.applyZoom(0);
                     break;
                 case "*":
-                    // Strg+Shift+8: Zoom vergrößern
+                    // Ctrl+Shift+8: Zoom in
                     if (input.shift) {
                         this.applyZoom((this.state.zoom || 0) + 1);
                     }
                     break;
                 case "_":
-                    // Strg+Shift+Minus: Zoom verkleinern
+                    // Ctrl+Shift+Minus: Zoom out
                     if (input.shift) {
                         this.applyZoom((this.state.zoom || 0) - 1);
                     }
@@ -1219,7 +1219,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             })
         }
         
-        // Globalen Mobile-Mode Status initial setzen (für den Fall dass bereits aktiviert)
+        // Set global Mobile Mode status initially (in case already enabled)
         this.setGlobalMobileMode(this.localMobileMode);
         
         // Setup ContentView listeners - now for ALL modes (not just Webpage)
@@ -1229,7 +1229,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Note: ContentView restoration is handled by explicit click on blur placeholder
         
-        // Persistierte Cookies laden beim ersten Mount
+        // Load persisted cookies on first mount
         if (this.props.source.persistCookies) {
             console.log("[CookiePersist] Article: Loading cookies on mount")
             this.loadPersistedCookies()
@@ -1240,12 +1240,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.loadFull()
         }
         
-        // Keyboard state tracking für Zoom
+        // Keyboard state tracking for zoom
         this.pressedZoomKeys = new Set<string>()
-        // Verwende den Feed-Zoom als Ausgangswert
+        // Use feed zoom as starting value
         this.currentZoom = this.props.source.defaultZoom || 0
         
-        // Entferne alte Listener falls vorhanden
+        // Remove old listeners if present
         if (this.globalKeydownListener) {
             document.removeEventListener('keydown', this.globalKeydownListener)
         }
@@ -1253,7 +1253,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             document.removeEventListener('keyup', this.globalKeyupListener)
         }
         
-        // Global keyboard listener für Zoom (auch außerhalb ContentView)
+        // Global keyboard listener for zoom (also outside ContentView)
         this.globalKeydownListener = (e: KeyboardEvent) => {
             // Lineare 10%-Schritte: -6 = 40%, 0 = 100%, 40 = 500%
             const MIN_ZOOM_LEVEL = -6
@@ -1304,23 +1304,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     componentDidUpdate = (prevProps: ArticleProps, prevState: ArticleState) => {
         if (prevProps.item._id != this.props.item._id) {
-            // Fehler-State zurücksetzen bei Artikelwechsel
+            // Reset error state on article change
             if (this.state.error) {
                 this.setState({ error: false, errorDescription: "" });
             }
             
-            // Eingabe-Modus bei Artikelwechsel zurücksetzen
+            // Reset input mode on article change
             if (this.state.inputModeEnabled) {
                 console.log('[InputMode] Article changed - disabling input mode');
                 this.setInputMode(false);
             }
             
-            // Feed-Liste zum neuen Artikel scrollen
+            // Scroll feed list to new article
             const card = document.querySelector(
                 `#refocus div[data-iid="${this.props.item._id}"]`
             ) as HTMLElement
             if (card && card.scrollIntoViewIfNeeded) {
-                card.scrollIntoViewIfNeeded(false) // false = nur scrollen wenn nötig, zentriert nicht
+                card.scrollIntoViewIfNeeded(false) // false = only scroll if needed, doesn't center
             } else if (card) {
                 card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
             }
@@ -1333,22 +1333,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 })
             }
             
-            // Synchronisiere lokalen Mobile-Mode State mit neuer Source
+            // Synchronize local Mobile Mode state with new source
             this.localMobileMode = this.props.source.mobileMode || false;
             console.log('[Article] Article changed - localMobileMode:', this.localMobileMode);
             
-            // WICHTIG: Globalen Mobile-Mode Status setzen BEVOR neuer ContentView initialisiert wird!
-            // Der Main-Prozess wendet dann automatisch die Emulation bei 'did-attach' an.
+            // IMPORTANT: Set global Mobile Mode status BEFORE new ContentView is initialized!
+            // Main process then automatically applies emulation on 'did-attach'.
             this.setGlobalMobileMode(this.localMobileMode);
             
-            // Synchronisiere currentZoom sofort bei Artikelwechsel
-            // Verwende den AKTUELLEN Zoom (this.currentZoom), nicht den gespeicherten aus props
-            // Der gespeicherte props.source.defaultZoom kann veraltet sein wenn der User gerade gezoomt hat
-            // Nur wenn wir zu einer ANDEREN Source wechseln, verwenden wir den gespeicherten Wert
+            // Synchronize currentZoom immediately on article change
+            // Use CURRENT zoom (this.currentZoom), not the stored one from props
+            // The stored props.source.defaultZoom may be outdated if user just zoomed
+            // Only when switching to a DIFFERENT source, we use the stored value
             const isSameSource = prevProps.source.sid === this.props.source.sid
             const savedZoom = isSameSource 
-                ? this.currentZoom  // Gleiche Source: behalte aktuellen Zoom
-                : (this.props.source.defaultZoom || 0)  // Andere Source: verwende gespeicherten Zoom
+                ? this.currentZoom  // Same source: keep current zoom
+                : (this.props.source.defaultZoom || 0)  // Different source: use stored zoom
             this.currentZoom = savedZoom
             this.setState({ zoom: savedZoom })
             
@@ -1361,7 +1361,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 window.contentView?.closeDevTools()
             } catch {}
             
-            // Cookies für neuen Artikel laden (falls persistCookies aktiviert)
+            // Load cookies for new article (if persistCookies is enabled)
             if (this.props.source.persistCookies) {
                 console.log("[CookiePersist] Article: Loading cookies for new article")
                 this.loadPersistedCookies()
@@ -1780,7 +1780,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Note: No global listeners to clean up - restoration is click-based
         
-        // Cookies speichern bevor die Komponente zerstört wird
+        // Save cookies before component is destroyed
         if (this.props.source.persistCookies) {
             console.log("[CookiePersist] Article: Saving cookies on unmount")
             window.utils.savePersistedCookies(this.props.item.link).catch(e => {
@@ -2386,12 +2386,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             ? this.state.fullContent
             : this.props.item.content
 
-        // Content-Analyse für Comic/Bild-Modus
+        // Content analysis for comic/image mode
         const imgCount = (articleContent.match(/<img/gi) || []).length
         const pictureCount = (articleContent.match(/<picture/gi) || []).length
         const totalImages = imgCount + pictureCount
         
-        // Text ohne HTML-Tags extrahieren um reine Textlänge zu ermitteln
+        // Extract text without HTML tags to determine pure text length
         const textOnly = articleContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
         const textLength = textOnly.length
         
@@ -2434,8 +2434,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const comicClass = isComicMode ? "comic-mode" : ""
         const singleImageClass = isSingleImage ? "single-image" : ""
 
-        // Baue HTML direkt mit eingebetteten Daten über JSON, nicht über Query-Parameter
-        // CSS ist vollständig inline eingebettet, da data: URLs keine file:// Ressourcen laden können
+        // Build HTML directly with embedded data via JSON, not via query parameters
+        // CSS is fully embedded inline since data: URLs cannot load file:// resources
         const htmlContent = `<!DOCTYPE html>
 <html>
 <head>
@@ -2504,7 +2504,7 @@ article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding:
   ::-webkit-scrollbar-thumb:active { background-color: #fff8; }
 }
 
-/* Comic Mode Styles - für Bilder-dominierte Inhalte */
+/* Comic Mode Styles - for image-dominated content */
 .comic-mode #main {
     max-width: 100%;
     padding: 0;
@@ -2526,7 +2526,7 @@ article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding:
     text-align: center;
 }
 
-/* Single Image Mode - einzelnes großes Bild */
+/* Single Image Mode - single large image */
 .single-image #main {
     max-width: 100%;
     display: flex;
@@ -2618,7 +2618,7 @@ window.__articleData = ${JSON.stringify({
 </body>
 </html>`
 
-        // Konvertiere zu base64 data URL um Längenbegrenzungen zu vermeiden
+        // Convert to base64 data URL to avoid length limitations
         return `data:text/html;base64,${btoa(unescape(encodeURIComponent(htmlContent)))}`
     }
 

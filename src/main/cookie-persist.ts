@@ -1,8 +1,8 @@
 /**
  * Cookie Persistence Service
  * 
- * Speichert und lädt Cookies pro Host in separaten JSON-Dateien.
- * Ermöglicht persistente Sessions für Feeds die Login benötigen.
+ * Stores and loads cookies per host in separate JSON files.
+ * Enables persistent sessions for feeds that require login.
  */
 
 import { app, session } from "electron"
@@ -10,7 +10,7 @@ import * as fs from "fs"
 import * as path from "path"
 import * as crypto from "crypto"
 
-// Typ für gespeicherte Cookie-Daten
+// Type for stored cookie data
 interface StoredCookieData {
     host: string
     lastUpdated: string
@@ -34,15 +34,15 @@ const ensureCookiesDir = (): void => {
 }
 
 /**
- * Konvertiert einen Hostnamen in einen sicheren Dateinamen
- * - Ersetzt ungültige Zeichen für Windows-Dateisysteme
- * - Kürzt zu lange Namen mit Hash-Suffix
+ * Converts a hostname to a safe filename
+ * - Replaces invalid characters for Windows file systems
+ * - Shortens names that are too long with a hash suffix
  */
 export function hostToFilename(host: string): string {
-    // Ungültige Zeichen für Windows-Dateisysteme ersetzen
+    // Replace invalid characters for Windows file systems
     let sanitized = host.replace(/[<>:"\/\\|?*]/g, "_")
 
-    // Maximale Länge beachten (255 chars inkl. .json)
+    // Observe maximum length (255 chars including .json)
     if (sanitized.length > 200) {
         const hash = crypto
             .createHash("md5")
@@ -56,12 +56,12 @@ export function hostToFilename(host: string): string {
 }
 
 /**
- * Extrahiert den Host aus einer URL (behält Subdomain bei)
+ * Extracts the host from a URL (preserves subdomain)
  */
 export function extractHost(url: string): string | null {
     try {
         const parsed = new URL(url)
-        return parsed.hostname // z.B. "www.reddit.com" oder "old.reddit.com"
+        return parsed.hostname // e.g. "www.reddit.com" or "old.reddit.com"
     } catch {
         console.error("[CookiePersist] Invalid URL:", url)
         return null
@@ -69,7 +69,7 @@ export function extractHost(url: string): string | null {
 }
 
 /**
- * Lädt gespeicherte Cookies für einen Host
+ * Loads saved cookies for a host
  */
 export async function loadCookiesForHost(
     host: string
@@ -107,7 +107,7 @@ export async function loadCookiesForHost(
 }
 
 /**
- * Speichert Cookies für einen Host
+ * Saves cookies for a host
  */
 export async function saveCookiesForHost(
     host: string,
@@ -120,7 +120,7 @@ export async function saveCookiesForHost(
     console.log("[CookiePersist] Saving", cookies.length, "cookies for host:", host)
     console.log("[CookiePersist] Cookie file path:", filepath)
 
-    // Cookie-Namen loggen (ohne Werte für Sicherheit)
+    // Log cookie names (without values for security)
     cookies.forEach((cookie, i) => {
         console.log(
             `[CookiePersist]   [${i + 1}] ${cookie.name} (domain: ${cookie.domain}, path: ${cookie.path})`
@@ -144,7 +144,7 @@ export async function saveCookiesForHost(
 }
 
 /**
- * Löscht gespeicherte Cookies für einen Host
+ * Deletes saved cookies for a host
  */
 export async function deleteCookiesForHost(host: string): Promise<boolean> {
     const filename = hostToFilename(host)
@@ -168,8 +168,8 @@ export async function deleteCookiesForHost(host: string): Promise<boolean> {
 }
 
 /**
- * Holt aktuelle Cookies aus der Session für einen Host
- * Sammelt alle Cookies die für die Domain relevant sind
+ * Gets current cookies from session for a host
+ * Collects all cookies relevant to the domain
  */
 export async function getCookiesFromSession(
     ses: Electron.Session,
@@ -191,7 +191,7 @@ export async function getCookiesFromSession(
             }
         }
         
-        // 1. Alle Cookies für die URL (http + https)
+        // 1. All cookies for the URL (http + https)
         try {
             const urlCookies = await ses.cookies.get({ url: `https://${host}` })
             console.log("[CookiePersist] Found", urlCookies.length, "cookies for https URL")
@@ -218,7 +218,7 @@ export async function getCookiesFromSession(
             console.log("[CookiePersist] Error getting dot-domain cookies:", e)
         }
         
-        // 4. Cookies für www. subdomain falls nicht bereits host
+        // 4. Cookies for www. subdomain if not already host
         if (!host.startsWith("www.")) {
             try {
                 const wwwCookies = await ses.cookies.get({ domain: "www." + baseDomain })
@@ -259,7 +259,7 @@ export async function getCookiesFromSession(
 }
 
 /**
- * Setzt Cookies in die Session für einen Host
+ * Sets cookies into session for a host
  */
 export async function setCookiesToSession(
     ses: Electron.Session,
@@ -272,7 +272,7 @@ export async function setCookiesToSession(
     
     for (const cookie of cookies) {
         try {
-            // URL für das Cookie konstruieren
+            // Construct URL for the cookie
             const protocol = cookie.secure ? "https" : "http"
             const domain = cookie.domain.startsWith(".") 
                 ? cookie.domain.substring(1) 

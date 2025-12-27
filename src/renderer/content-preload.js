@@ -28,8 +28,8 @@ try {
   // Mobile Mode Status
   let mobileMode = false;
   
-  // Visual Zoom Mode: Wenn aktiviert, werden Touch-Events NICHT abgefangen
-  // damit der native Browser-Pinch-Zoom funktioniert
+  // Visual Zoom Mode: When enabled, touch events are NOT intercepted
+  // so that native browser pinch-zoom works
   // Load initial value synchronously to prevent CSS zoom flash
   let visualZoomEnabled = false;
   try {
@@ -39,21 +39,21 @@ try {
     console.warn('[ContentPreload] Could not load Visual Zoom state:', e);
   }
 
-  // Overlay für Debug-Anzeige (Zoom, NSFW-Cleanup, etc.)
+  // Overlay for debug display (Zoom, NSFW-Cleanup, etc.)
   let infoOverlay = null;
   let infoOverlayTimeout = null;
   
-  // Status-Nachrichten die zusammen mit dem Zoom angezeigt werden
+  // Status messages displayed together with zoom
   let statusMessages = [];
 
   /**
-   * Fügt eine Status-Nachricht hinzu die beim nächsten Overlay-Update angezeigt wird
-   * @param {string} message - Die Status-Nachricht
-   * @param {number} duration - Wie lange die Nachricht im Status bleibt (ms)
+   * Adds a status message that will be shown on the next overlay update
+   * @param {string} message - The status message
+   * @param {number} duration - How long the message stays in status (ms)
    */
   function addStatusMessage(message, duration = 3000) {
     statusMessages.push(message);
-    // Nachricht nach duration wieder entfernen
+    // Remove message after duration
     setTimeout(() => {
       const index = statusMessages.indexOf(message);
       if (index > -1) {
@@ -142,17 +142,17 @@ try {
     return 1 + (level * 0.1);
   }
 
-  // Konvertierung: Faktor -> zoomLevel (linear)
+  // Conversion: Factor -> zoomLevel (linear)
   function factorToZoomLevel(factor) {
     return (factor - 1) / 0.1;
   }
 
-  // Erstelle Zoom-Container der gesamte Seite enthält
+  // Create zoom container that holds entire page
   function ensureZoomContainer() {
     let wrapper = document.getElementById('fr-zoom-wrapper');
     if (!wrapper) {
       console.log('[ContentPreload] Creating zoom container - viewport:', window.innerWidth, 'x', window.innerHeight);
-      // Erstelle Wrapper als Fixed Viewport (nicht scrollbar)
+      // Create wrapper as fixed viewport (not scrollable)
       wrapper = document.createElement('div');
       wrapper.id = 'fr-zoom-wrapper';
       wrapper.style.cssText = `
@@ -167,7 +167,7 @@ try {
         padding: 0;
       `;
       
-      // Erstelle inneren Container für Transform (dieser scrollt!)
+      // Create inner container for transform (this one scrolls!)
       let container = document.createElement('div');
       container.id = 'fr-zoom-container';
       container.style.cssText = `
@@ -256,7 +256,7 @@ try {
     
     console.log('[ContentPreload] Removing zoom container for Visual Zoom mode');
     
-    // Bewege alle Children zurück zum Body
+    // Move all children back to body
     while (container.firstChild) {
       document.body.appendChild(container.firstChild);
     }
@@ -282,12 +282,12 @@ try {
     console.log('[ContentPreload] Zoom container removed - native Visual Zoom should work now');
   }
 
-  // Wende Zoom auf Container an - Zoom kann von einem beliebigen Punkt aus erfolgen
-  // WICHTIG: Bei Visual Zoom (Device Emulation) wird diese Funktion NICHT ausgeführt,
-  // damit der native Browser-Pinch-Zoom funktioniert!
+  // Apply zoom to container - Zoom can originate from any point
+  // IMPORTANT: With Visual Zoom (Device Emulation) this function is NOT executed,
+  // so that native browser pinch-zoom works!
   function applyZoom(newZoomLevel, options = { notify: true, zoomPointX: null, zoomPointY: null, preserveScroll: true }) {
-    // Bei Visual Zoom: KEINE CSS-basierte Zoom-Manipulation!
-    // Der native Browser-Zoom (via enableDeviceEmulation) übernimmt.
+    // With Visual Zoom: NO CSS-based zoom manipulation!
+    // The native browser zoom (via enableDeviceEmulation) takes over.
     if (visualZoomEnabled) {
       console.log('[ContentPreload] applyZoom skipped - Visual Zoom is enabled');
       return;
@@ -327,11 +327,11 @@ try {
     const docZoomPointX = zoomPointX / oldFactor;
     const docZoomPointY = zoomPointY / oldFactor;
     
-    // Berechne neue Container-Größe basierend auf Skalierung
+    // Calculate new container size based on scaling
     const newContainerWidth = wrapper.clientWidth / newFactor;
     const newContainerHeight = wrapper.clientHeight / newFactor;
     
-    // Setze Container-Größe und Scroll-Overflow
+    // Set container size and scroll overflow
     container.style.width = newContainerWidth + 'px';
     container.style.height = newContainerHeight + 'px';
     container.style.overflow = 'auto';
@@ -342,9 +342,9 @@ try {
     // Berechne neue Scroll-Position
     requestAnimationFrame(() => {
       if (options.preserveScroll) {
-        // Für Tastatur-Zoom: Behalte einfach die aktuelle Scroll-Position
-        // (in ungeskaltem Raum) - ändere nichts an der Scroll-Position
-        // container.scrollLeft und container.scrollTop bleiben gleich
+        // For keyboard zoom: Simply keep current scroll position
+        // (in unscaled space) - don't change scroll position
+        // container.scrollLeft and container.scrollTop stay the same
       } else {
         // Der Zoom-Punkt (zoomPointX, zoomPointY) soll an der gleichen Stelle im Viewport bleiben
         // zoomPointX/Y sind in skaliertem Raum (mit oldFactor)
@@ -370,7 +370,7 @@ try {
       }
     });
     
-    // Zeige Zoom-Overlay (immer wenn sich Zoom ändert)
+    // Show zoom overlay (always when zoom changes)
     showZoomOverlay(zoomLevel);
     
     // Sende Notification an Main-Prozess
@@ -379,15 +379,15 @@ try {
     }
   }
 
-  // Initial: Warte auf DOM
-  // ABER: Überspringen wenn Visual Zoom aktiviert ist (dann macht Device Emulation den Zoom)
+  // Initial: Wait for DOM
+  // BUT: Skip if Visual Zoom is enabled (Device Emulation handles zoom)
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       if (!visualZoomEnabled) {
         applyZoom(zoomLevel, { notify: false });
       } else {
         console.log('[ContentPreload] Skipping initial CSS zoom - Visual Zoom mode active');
-        // Aber zeige trotzdem das Overlay wenn aktiviert (für Visual Zoom)
+        // But still show overlay if enabled (for Visual Zoom)
         if (showZoomOverlayEnabled) {
           showZoomOverlay(zoomLevel);
         }
@@ -400,7 +400,7 @@ try {
       applyZoom(zoomLevel, { notify: false });
     } else {
       console.log('[ContentPreload] Skipping initial CSS zoom - Visual Zoom mode active');
-      // Aber zeige trotzdem das Overlay wenn aktiviert (für Visual Zoom)
+      // But still show overlay if enabled (for Visual Zoom)
       if (showZoomOverlayEnabled) {
         showZoomOverlay(zoomLevel);
       }
@@ -409,7 +409,7 @@ try {
     logCurrentScale('Already loaded');
   }
   
-  // === SCALE OBSERVER für Debugging ===
+  // === SCALE OBSERVER for Debugging ===
   function logCurrentScale(reason) {
     const vv = window.visualViewport;
     const dpr = window.devicePixelRatio;
@@ -446,13 +446,13 @@ try {
     logCurrentScale('window resize');
   });
 
-  // Listener für externe Zoom-Befehle (von Keyboard - bewahre Scroll-Position)
-  // ABER: Bei Visual Zoom nur das Level tracken, NICHT CSS zoom anwenden!
+  // Listener for external zoom commands (from keyboard - preserve scroll position)
+  // BUT: With Visual Zoom only track the level, DO NOT apply CSS zoom!
   ipcRenderer.on('content-view-set-css-zoom', (event, zoomLevel_) => {
     console.log('[ContentPreload] Received content-view-set-css-zoom:', zoomLevel_, 'visualZoom:', visualZoomEnabled);
     zoomLevel = zoomLevel_;
     
-    // Bei Visual Zoom: Kein CSS Zoom anwenden (Device Emulation macht den Zoom)
+    // With Visual Zoom: Do not apply CSS zoom (Device Emulation handles zoom)
     if (!visualZoomEnabled) {
       // Ensure DOM is ready before applying zoom (important after navigation)
       if (document.readyState === 'loading') {
@@ -464,24 +464,24 @@ try {
       }
     }
     
-    // Zeige Zoom-Overlay beim Artikelwechsel, wenn aktiviert
+    // Show zoom overlay on article change if enabled
     if (showZoomOverlayEnabled) {
       showZoomOverlay(zoomLevel);
     }
   });
 
-  // Listener für Zoom-Overlay-Einstellung
+  // Listener for zoom overlay setting
   ipcRenderer.on('set-zoom-overlay-setting', (event, enabled) => {
     showZoomOverlayEnabled = !!enabled;
-    // Wenn aktiviert, zeige sofort das aktuelle Zoom-Level an
+    // If enabled, immediately show current zoom level
     if (showZoomOverlayEnabled) {
       showZoomOverlay(zoomLevel);
     }
   });
   
-  // Listener für Visual Zoom Level Update (für Overlay-Anzeige bei Device Emulation)
-  // Das CSS-basierte zoomLevel wird nicht verwendet bei Visual Zoom,
-  // aber wir brauchen trotzdem ein Level für die Overlay-Anzeige
+  // Listener for Visual Zoom level update (for overlay display with Device Emulation)
+  // The CSS-based zoomLevel is not used with Visual Zoom,
+  // but we still need a level for overlay display
   ipcRenderer.on('set-visual-zoom-level', (event, level) => {
     console.log('[ContentPreload] Visual Zoom level update:', level);
     zoomLevel = level;  // Update internal tracking
@@ -492,17 +492,17 @@ try {
     setTimeout(() => logCurrentScale('after set-visual-zoom-level'), 50);
   });
   
-  // Listener für Mobile Mode Status
+  // Listener for Mobile Mode Status
   ipcRenderer.on('set-mobile-mode', (event, enabled) => {
     const wasEnabled = mobileMode;
     mobileMode = !!enabled;
     console.log('[ContentPreload] Mobile mode changed:', wasEnabled ? 'ON' : 'OFF', '->', mobileMode ? 'ON' : 'OFF');
-    // Zeige kurz das Overlay um den Modus-Wechsel anzuzeigen (auch wenn Overlay sonst deaktiviert)
+    // Briefly show overlay to indicate mode change (even if overlay is otherwise disabled)
     if (wasEnabled !== mobileMode) {
       const factor = zoomLevelToFactor(zoomLevel);
       const percentage = Math.round(factor * 100);
       const modeIndicator = mobileMode ? ' (M)' : ' (D)';
-      // Temporär anzeigen auch wenn Overlay deaktiviert
+      // Temporarily show even if overlay is disabled
       const wasOverlayEnabled = showZoomOverlayEnabled;
       showZoomOverlayEnabled = true;
       updateOverlay(`Zoom: ${percentage}%${modeIndicator}`);
@@ -510,28 +510,28 @@ try {
     }
   });
 
-  // Listener für Visual Zoom Mode (aktiviert nativen Browser-Pinch-Zoom)
+  // Listener for Visual Zoom Mode (enables native browser pinch-zoom)
   ipcRenderer.on('set-visual-zoom-mode', (event, enabled) => {
     const wasEnabled = visualZoomEnabled;
     visualZoomEnabled = !!enabled;
     console.log('[ContentPreload] Visual Zoom mode changed:', wasEnabled ? 'ON' : 'OFF', '->', visualZoomEnabled ? 'ON' : 'OFF');
     
-    // Wenn Visual Zoom aktiviert wird, entferne den CSS Zoom-Container
-    // damit der native Browser-Pinch-Zoom (via enableDeviceEmulation) funktioniert
+    // When Visual Zoom is enabled, remove CSS zoom container
+    // so native browser pinch-zoom (via enableDeviceEmulation) works
     if (visualZoomEnabled) {
       removeZoomContainer();
     }
     
     if (wasEnabled !== visualZoomEnabled) {
-      // Zeige Statusmeldung
+      // Show status message
       const wasOverlayEnabled = showZoomOverlayEnabled;
       showZoomOverlayEnabled = true;
-      updateOverlay(visualZoomEnabled ? 'Visual Zoom: ON (Pinch-to-Zoom aktiv)' : 'Visual Zoom: OFF');
+      updateOverlay(visualZoomEnabled ? 'Visual Zoom: ON (Pinch-to-Zoom active)' : 'Visual Zoom: OFF');
       showZoomOverlayEnabled = wasOverlayEnabled;
     }
   });
 
-  // Listener für Input Mode Status (deaktiviert Keyboard-Navigation für Login-Formulare etc.)
+  // Listener for Input Mode Status (disables keyboard navigation for login forms etc.)
   let inputModeEnabled = false;
   ipcRenderer.on('set-input-mode', (event, enabled) => {
     inputModeEnabled = !!enabled;
@@ -548,7 +548,7 @@ try {
     window.location.href = url;
   });
 
-  // NSFW-Cleanup Einstellung - synchron beim Start laden
+  // NSFW-Cleanup setting - load synchronously at start
   let nsfwCleanupEnabled = false;
   try {
     nsfwCleanupEnabled = ipcRenderer.sendSync('get-nsfw-cleanup');
@@ -557,7 +557,7 @@ try {
     console.warn('[ContentPreload] Could not load NSFW-Cleanup setting:', e);
   }
 
-  // Auto Cookie-Consent Einstellung - synchron beim Start laden
+  // Auto Cookie-Consent setting - load synchronously at start
   let autoCookieConsentEnabled = false;
   try {
     autoCookieConsentEnabled = ipcRenderer.sendSync('get-auto-cookie-consent');
@@ -566,21 +566,21 @@ try {
     console.warn('[ContentPreload] Could not load Auto Cookie-Consent setting:', e);
   }
 
-  // Ctrl+Wheel Zoom (Touchpad) - zoomt vom Cursor aus
+  // Ctrl+Wheel Zoom (Touchpad) - zooms from cursor position
   window.addEventListener('wheel', (e) => {
     try {
       if (e.ctrlKey) {
-        // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
+        // With Visual Zoom: Pass events through for native browser zoom
         if (visualZoomEnabled) return;
         
         e.preventDefault();
         const delta = -e.deltaY;
-        // Touchpad-Kontrolle: Mit größeren Schritten (höhere Empfindlichkeit)
-        // Je größer dieser Wert, desto weniger empfindlich
+        // Touchpad control: With larger steps (higher sensitivity)
+        // The larger this value, the less sensitive
         const steps = (delta > 0 ? 1 : -1) * 0.125;
         
-        // TEMP: Scroll-Kompensation deaktiviert für Tests
-        // Berechne Maus-Position relativ zum Container
+        // TEMP: Scroll compensation disabled for testing
+        // Calculate mouse position relative to container
         // const container = document.querySelector('#fr-zoom-container');
         // const wrapper = container.parentElement;
         // if (container && wrapper) {
@@ -596,25 +596,25 @@ try {
     } catch {}
   }, { passive: false });
 
-  // Touch Pinch-Zoom - zoomt vom Mittelpunkt der beiden Finger
-  // WICHTIG: Bei aktiviertem Visual Zoom werden diese Events NICHT abgefangen,
-  // damit der native Browser-Pinch-Zoom (via enableDeviceEmulation) funktioniert
+  // Touch Pinch-Zoom - zooms from midpoint between both fingers
+  // IMPORTANT: When Visual Zoom is enabled, these events are NOT intercepted,
+  // so native browser pinch-zoom (via enableDeviceEmulation) works
   let lastDistance = 0;
   let touchStartZoomLevel = zoomLevel;
   let lastTouchMidpointX = 0;
   let lastTouchMidpointY = 0;
 
-  // Touch-Event-Registrierung als Funktion, die bei jeder Navigation aufgerufen wird
-  // Bei data: URLs wird der document bei jeder Navigation ersetzt, daher müssen
-  // die Event-Listener auf dem neuen document neu registriert werden
+  // Touch event registration as function that is called on each navigation
+  // For data: URLs the document is replaced on each navigation, so
+  // event listeners must be re-registered on the new document
   let touchEventsRegistered = false;
   
   function registerTouchEvents() {
-    // WICHTIG: In Electron Preload wird das document bei data: URL Navigationen ersetzt!
-    // Wir müssen die Events auf dem AKTUELLEN document registrieren
+    // IMPORTANT: In Electron Preload the document is replaced on data: URL navigations!
+    // We must register events on the CURRENT document
     const touchTarget = document;
     
-    // Prüfe ob bereits auf diesem document registriert
+    // Check if already registered on this document
     if (touchTarget._touchEventsRegistered) {
       console.log('[ContentPreload] Touch events already registered on this document');
       return;
@@ -624,7 +624,7 @@ try {
     touchTarget.addEventListener('touchstart', (e) => {
       console.log('[ContentPreload] touchstart received on document, touches:', e.touches.length, 'visualZoomEnabled:', visualZoomEnabled);
       try {
-        // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
+        // With Visual Zoom: Pass events through for native browser zoom
         if (visualZoomEnabled) return;
         
         if (e.touches.length === 2) {
@@ -637,7 +637,7 @@ try {
           touchStartZoomLevel = zoomLevel;
           console.log('[ContentPreload] 2-finger touch started, distance:', lastDistance, 'zoomLevel:', touchStartZoomLevel);
           
-          // Berechne Mittelpunkt der beiden Finger
+          // Calculate midpoint between both fingers
           lastTouchMidpointX = (touch1.clientX + touch2.clientX) / 2;
           lastTouchMidpointY = (touch1.clientY + touch2.clientY) / 2;
         }
@@ -646,7 +646,7 @@ try {
 
     touchTarget.addEventListener('touchmove', (e) => {
       try {
-        // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
+        // With Visual Zoom: Pass events through for native browser zoom
         if (visualZoomEnabled) {
           console.log('[ContentPreload] touchmove ignored (Visual Zoom)');
           return;
@@ -662,17 +662,17 @@ try {
             touch2.clientY - touch1.clientY
           );
           const scale = currentDistance / lastDistance;
-          // Halbe Geschwindigkeit für Touch-Screen (weniger empfindlich)
+          // Half speed for touchscreen (less sensitive)
           const scaleFactor = 1 + (scale - 1) / 2;
           const newFactor = zoomLevelToFactor(touchStartZoomLevel) * scaleFactor;
           console.log('[ContentPreload] touchmove applying zoom, newFactor:', newFactor);
           
-          // Berechne aktuellen Mittelpunkt der Finger
+          // Calculate current finger midpoint
           const currentMidX = (touch1.clientX + touch2.clientX) / 2;
           const currentMidY = (touch1.clientY + touch2.clientY) / 2;
           
-          // TEMP: Scroll-Kompensation deaktiviert für Tests
-          // Berechne Touch-Position relativ zum Container
+          // TEMP: Scroll compensation disabled for testing
+          // Calculate touch position relative to container
           // const container = document.querySelector('#fr-zoom-container');
           // const wrapper = container.parentElement;
           // if (container && wrapper) {
@@ -696,23 +696,23 @@ try {
     console.log('[ContentPreload] Touch event listeners registered on document (capture phase)');
   }
   
-  // Registriere Touch-Events sofort (für den initialen document)
+  // Register touch events immediately (for the initial document)
   registerTouchEvents();
   
-  // Bei jeder Navigation wird ein neues document erstellt - registriere dann erneut
-  // DOMContentLoaded feuert bei jeder Navigation, auch bei data: URLs
+  // On each navigation a new document is created - re-register then
+  // DOMContentLoaded fires on each navigation, also for data: URLs
   document.addEventListener('DOMContentLoaded', () => {
     console.log('[ContentPreload] DOMContentLoaded - re-registering touch events');
     registerTouchEvents();
   });
   
-  // Export für executeJavaScript Injection vom Main Process
-  // Nach Navigation kann der Main Process diese Funktion aufrufen um Touch-Events
-  // im neuen document-Kontext neu zu registrieren
+  // Export for executeJavaScript injection from Main Process
+  // After navigation the Main Process can call this function to re-register
+  // touch events in the new document context
   // 
-  // WICHTIG: Da contextIsolation=true ist, läuft der Preload in einem isolierten Kontext.
-  // executeJavaScript läuft im Main World und sieht ein anderes window-Objekt.
-  // Deshalb müssen wir contextBridge verwenden um die Funktion zu exponieren.
+  // IMPORTANT: Since contextIsolation=true, the preload runs in an isolated context.
+  // executeJavaScript runs in Main World and sees a different window object.
+  // Therefore we must use contextBridge to expose the function.
   const reRegisterTouchEvents = function() {
     console.log('[ContentPreload] __registerCssZoomTouchEvents called from main process');
     // Force re-registration by clearing the flag on current document
@@ -736,10 +736,10 @@ try {
     console.warn('[ContentPreload] contextBridge failed:', e);
   }
 
-  // macOS Gesture-Events
+  // macOS Gesture Events
   window.addEventListener('gesturechange', (e) => {
     try {
-      // Bei Visual Zoom: Events durchlassen für nativen Browser-Zoom
+      // With Visual Zoom: Pass events through for native browser zoom
       if (visualZoomEnabled) return;
       
       e.preventDefault();
@@ -1033,57 +1033,57 @@ try {
   
   const siteTransformations = [
     {
-      // Reddit: Entferne NSFW-Dialoge, App-Promo, QR-Codes, Modals, Cookie-Banner
+      // Reddit: Remove NSFW dialogs, app promo, QR codes, modals, cookie banners
       patterns: [/reddit\.com/],
       cleanup: () => {
-        // NSFW/18+ Blocking Modals und Dialoge
+        // NSFW/18+ Blocking Modals and Dialogs
         document.querySelectorAll('faceplate-modal, faceplate-dialog').forEach(el => el.remove());
         document.querySelectorAll('#nsfw-qr-dialog, #blocking-modal').forEach(el => el.remove());
         
-        // NSFW Blocking Container - Shadow DOM manipulieren
+        // NSFW Blocking Container - manipulate Shadow DOM
         document.querySelectorAll('xpromo-nsfw-blocking-container').forEach(container => {
-          // "In App anzeigen" Buttons im Light DOM entfernen
+          // Remove "View in App" buttons in Light DOM
           container.querySelectorAll('.viewInApp, a[slot="view-in-app-button"]').forEach(el => el.remove());
           
-          // Shadow DOM: Prompt ("18+ Inhalt" Text) verstecken
+          // Shadow DOM: Hide prompt ("18+ content" text)
           if (container.shadowRoot) {
             const prompt = container.shadowRoot.querySelector('.prompt');
             if (prompt) prompt.style.display = 'none';
           }
         });
         
-        // Blurred container für NSFW - Shadow DOM manipulieren
+        // Blurred container for NSFW - manipulate Shadow DOM
         document.querySelectorAll('shreddit-blurred-container').forEach(el => {
           el.removeAttribute('blurred');
           el.setAttribute('mode', 'revealed');
           
-          // Shadow DOM: Overlay und Blur entfernen
+          // Shadow DOM: Remove overlay and blur
           if (el.shadowRoot) {
-            // "18+ Inhalte anzeigen" Button/Overlay verstecken
+            // Hide "Show 18+ content" button/overlay
             const overlay = el.shadowRoot.querySelector('.overlay');
             if (overlay) overlay.style.display = 'none';
             
-            // Blur-Filter entfernen - alle möglichen Selektoren
+            // Remove blur filter - all possible selectors
             el.shadowRoot.querySelectorAll('.inner.blurred, .blurred, [class*="blur"]').forEach(blurredEl => {
               blurredEl.style.filter = 'none';
               blurredEl.style.webkitFilter = 'none';
               blurredEl.classList.remove('blurred');
             });
             
-            // Auch .inner direkt behandeln (falls ohne .blurred Klasse)
+            // Also handle .inner directly (in case without .blurred class)
             const inner = el.shadowRoot.querySelector('.inner');
             if (inner) {
               inner.style.filter = 'none';
               inner.style.webkitFilter = 'none';
             }
             
-            // Scrim (dunkles Overlay) entfernen
+            // Remove scrim (dark overlay)
             el.shadowRoot.querySelectorAll('.bg-scrim, .scrim, [class*="scrim"]').forEach(scrim => {
               scrim.style.display = 'none';
             });
           }
           
-          // Light DOM: Zeige revealed slot, verstecke blurred slot
+          // Light DOM: Show revealed slot, hide blurred slot
           const revealed = el.querySelector('[slot="revealed"]');
           const blurred = el.querySelector('[slot="blurred"]');
           if (revealed) {
@@ -1094,30 +1094,30 @@ try {
             blurred.style.display = 'none';
           }
           
-          // Auch direkte Kinder mit Blur behandeln
+          // Also handle direct children with blur
           el.querySelectorAll('[style*="blur"], [style*="filter"]').forEach(child => {
             child.style.filter = 'none';
             child.style.webkitFilter = 'none';
           });
         });
         
-        // Modal-Wrapper mit Dialog-Rolle entfernen (App-Promo, Login-Prompts)
+        // Remove modal wrapper with dialog role (app promo, login prompts)
         document.querySelectorAll('#wrapper[role="dialog"][aria-modal="true"]').forEach(el => el.remove());
         
-        // App-Download Banner und Prompts
+        // App download banners and prompts
         document.querySelectorAll('[data-testid="xpromo-nsfw-blocking-modal"]').forEach(el => el.remove());
         document.querySelectorAll('[data-testid="xpromo-app-selector"]').forEach(el => el.remove());
         document.querySelectorAll('.XPromoPopupRpl, .XPromoBlockingModal').forEach(el => el.remove());
         
-        // Weitere störende Elemente
+        // Other annoying elements
         document.querySelectorAll('[class*="bottom-sheet"]').forEach(el => el.remove());
         document.querySelectorAll('[class*="overlay-container"]').forEach(el => el.remove());
         
-        // Scrim/Backdrop entfernen (graue Overlay)
+        // Remove scrim/backdrop (gray overlay)
         document.querySelectorAll('[class*="scrim"]').forEach(el => el.remove());
         document.querySelectorAll('[class*="backdrop"]').forEach(el => el.remove());
         
-        // Body scroll wieder aktivieren falls blockiert
+        // Re-enable body scroll if blocked
         document.body.style.overflow = '';
         document.documentElement.style.overflow = '';
       }
@@ -1136,7 +1136,7 @@ try {
         try {
           // Check if Reddit blocking elements exist before cleanup
           if (/reddit\.com/.test(url)) {
-            // NSFW-Elemente
+            // NSFW elements
             const nsfwContainer = document.querySelector('xpromo-nsfw-blocking-container');
             const blurredContainer = document.querySelector('shreddit-blurred-container[blurred]');
             const nsfwPrompt = nsfwContainer?.shadowRoot?.querySelector('.prompt');
@@ -1177,10 +1177,10 @@ try {
       // Reddit Cookie-Consent
       patterns: [/reddit\.com/],
       consent: () => {
-        // Cookie/Consent/Datenschutz Banner - versuche "Ablehnen" zu klicken
+        // Cookie/Consent/Privacy Banner - try to click "Reject"
         const cookieDialog = document.querySelector('#data-protection-consent-dialog');
         if (cookieDialog) {
-          // Suche nach "Ablehnen" Button (secondary-button Slot)
+          // Search for "Reject" button (secondary-button slot)
           const rejectButton = cookieDialog.querySelector('[slot="secondary-button"]') ||
                                cookieDialog.querySelector('button[data-testid="reject-nonessential-cookies-button"]');
           if (rejectButton) {
@@ -1188,14 +1188,14 @@ try {
             console.log('[ContentPreload] Cookie-Consent: Clicked Reddit reject button');
             return true;
           } else {
-            // Fallback: Dialog entfernen wenn kein Button gefunden
+            // Fallback: Remove dialog if no button found
             cookieDialog.remove();
             console.log('[ContentPreload] Cookie-Consent: Removed Reddit cookie dialog (no button found)');
             return true;
           }
         }
         
-        // Weitere Cookie-Banner
+        // Other cookie banners
         let handled = false;
         document.querySelectorAll('[data-testid="cookie-policy-banner"]').forEach(el => { el.remove(); handled = true; });
         document.querySelectorAll('shreddit-cookie-banner').forEach(el => { el.remove(); handled = true; });
@@ -1203,7 +1203,7 @@ try {
         return handled;
       }
     },
-    // Hier können weitere Seiten hinzugefügt werden:
+    // More sites can be added here:
     // {
     //   patterns: [/example\.com/],
     //   consent: () => { /* ... */ return true; }
@@ -1264,7 +1264,7 @@ try {
           cookieConsentObserver.disconnect();
           cookieConsentObserver = null;
           console.log('[ContentPreload] Cookie-Consent complete, observer stopped');
-          showOverlayMessage('Cookie-Consent erledigt', 1500);
+          showOverlayMessage('Cookie-Consent done', 1500);
         }
       }, 100);
     });
@@ -1285,7 +1285,7 @@ try {
     }, 30000);
   }
 
-  // Observer und Cleanup werden erst gestartet wenn NSFW-Cleanup aktiviert ist
+  // Observer and cleanup are only started when NSFW-Cleanup is enabled
   let siteCleanupObserver = null;
   let siteCleanupStarted = false;
 
@@ -1312,7 +1312,7 @@ try {
           siteCleanupObserver.disconnect();
           siteCleanupObserver = null;
           console.log('[ContentPreload] Site cleanup complete, observer stopped');
-          showOverlayMessage('Site-Cleanup abgeschlossen', 2000);
+          showOverlayMessage('Site cleanup complete', 2000);
         }
       }, 50);
     });
@@ -1336,7 +1336,7 @@ try {
     }, 60000);
   }
 
-  // Cleanup automatisch starten wenn aktiviert (Einstellung wurde oben synchron geladen)
+  // Start cleanup automatically when enabled (setting was loaded synchronously above)
   if (nsfwCleanupEnabled && hasSiteTransformations()) {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', startSiteCleanup);
@@ -1345,7 +1345,7 @@ try {
     }
   }
 
-  // Auto Cookie-Consent automatisch starten wenn aktiviert
+  // Start Auto Cookie-Consent automatically when enabled
   if (autoCookieConsentEnabled && hasCookieConsentPatterns()) {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', startCookieConsent);
@@ -1355,5 +1355,5 @@ try {
   }
 
 } catch {
-  // Fehlerbehandlung: Stille Fehlerignorierung
+  // Error handling: Silent error suppression
 }
