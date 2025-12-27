@@ -230,14 +230,14 @@ async function migrateNeDB() {
             filename: "sources",
             autoload: true,
             onload: err => {
-                if (err) window.console.log(err)
+                if (err) console.error("[NeDB] Source load error:", err)
             },
         })
         const idb = new Datastore<RSSItem>({
             filename: "items",
             autoload: true,
             onload: err => {
-                if (err) window.console.log(err)
+                if (err) console.error("[NeDB] Items load error:", err)
             },
         })
         const [sourceDocs, itemDocs] = await Promise.all([

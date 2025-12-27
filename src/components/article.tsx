@@ -171,7 +171,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      */
     private applyZoom = (zoomLevel: number) => {
         if (!window.contentView) {
-            console.log('[Zoom] ContentView not available');
             return;
         }
         
@@ -184,11 +183,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             const factor = 1.0 + (clampedLevel * 0.1);
             this.contentViewZoomFactor = factor;
             window.contentView.setZoomFactor(factor);
-            console.log('[Zoom] Native zoom factor:', factor, 'from level:', clampedLevel);
         } else {
             // Visual Zoom OFF: use CSS-based zoom via preload
             window.contentView.setCssZoom(clampedLevel);
-            console.log('[Zoom] CSS zoom level:', clampedLevel);
         }
         
         // Update state and persist
@@ -225,8 +222,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const showOverlay = this.state.showZoomOverlay;
         const mobileMode = this.localMobileMode;
         const visualZoom = this.state.visualZoomEnabled;
-        
-        console.log('[ContentView] Sending settings: zoom:', zoomLevel, 'overlay:', showOverlay, 'mobile:', mobileMode, 'visualZoom:', visualZoom);
         
         // Send all settings to preload
         window.contentView.send('set-zoom-overlay-setting', showOverlay);
@@ -267,8 +262,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const newValue = !this.state.visualZoomEnabled;
         window.settings.setVisualZoom(newValue);
         
-        console.log('[VisualZoom] Toggle:', newValue ? 'ON (native zoom)' : 'OFF (CSS zoom)');
-        
         // Update state first
         if (this._isMounted) {
             this.setState({ visualZoomEnabled: newValue });
@@ -278,14 +271,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // This is necessary because the preload script reads the visual zoom setting
         // at initialization and sets up CSS/event handlers accordingly.
         if (window.contentView) {
-            console.log('[VisualZoom] Recreating WebContentsView to apply changes...');
             window.contentView.setVisualZoom(newValue);
             await window.contentView.recreate();
-            console.log('[VisualZoom] WebContentsView recreated successfully');
             
             // If we have an article loaded, reload it in the new view
             if (this.props.item) {
-                console.log('[VisualZoom] Reloading current article...');
                 // Small delay to ensure the view is fully initialized
                 setTimeout(() => {
                     this.reloadCurrentArticle();
@@ -306,13 +296,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (contentMode === SourceOpenTarget.Webpage) {
             // Webpage mode: Navigate to URL with bundled settings
             const targetUrl = this.props.item.link;
-            console.log('[VisualZoom] Reloading webpage:', targetUrl);
             this.contentViewCurrentUrl = targetUrl;
             window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
         } else {
             // Local (RSS) or FullContent mode: Load HTML directly with bundled settings
             const htmlDataUrl = this.articleView();
-            console.log('[VisualZoom] Reloading HTML content for mode:', SourceOpenTarget[contentMode]);
             this.contentViewCurrentUrl = htmlDataUrl;
             window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
         }
@@ -336,8 +324,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             console.warn('[ContentView] Cannot setup listeners - contentView bridge not available');
             return;
         }
-        
-        console.log('[ContentView] Setting up listeners');
         
         // Loading state
         const unsubLoading = window.contentView.onLoading((loading) => {
@@ -377,7 +363,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Navigation (for cookie persistence)
         const unsubNavigated = window.contentView.onNavigated((url) => {
             if (this.props.source.persistCookies && this.isWebpageMode) {
-                console.log("[CookiePersist] ContentView: Navigation to:", url);
                 this.savePersistedCookiesDebounced();
             }
         });
@@ -389,7 +374,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             // Show loading spinner when Visual Zoom navigation starts
             const onVisualZoomLoading = () => {
-                console.log('[ContentView] Visual Zoom loading started - showing spinner');
                 if (this._isMounted) {
                     this.setState({ isNavigatingWithVisualZoom: true });
                 }
@@ -399,7 +383,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             // Hide loading spinner when Visual Zoom is ready
             const onVisualZoomReady = () => {
-                console.log('[ContentView] Visual Zoom ready - hiding spinner');
                 if (this._isMounted) {
                     this.setState({ isNavigatingWithVisualZoom: false });
                 }
@@ -413,7 +396,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Cleanup ContentView listeners and hide it
      */
     private cleanupContentView = () => {
-        console.log('[ContentView] Cleaning up');
         
         // Remove all event listeners
         this.contentViewCleanup.forEach(cleanup => cleanup());
@@ -478,7 +460,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         
         this.lastContentViewBounds = bounds;
-        console.log('[ContentView] Updating bounds:', bounds);
         window.contentView.setBounds(bounds);
     }
     
@@ -498,8 +479,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             console.error('[ContentView] contentView bridge not available!');
             return;
         }
-        
-        console.log('[ContentView] Initializing for mode:', SourceOpenTarget[this.state.contentMode]);
         
         try {
             // Setup listeners if not already done
@@ -531,30 +510,25 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 // Webpage mode: Navigate to URL with bundled settings
                 const targetUrl = this.props.item.link;
                 if (this.contentViewCurrentUrl !== targetUrl) {
-                    console.log('[ContentView] FIRST LOAD - navigateWithSettings to:', targetUrl);
                     this.contentViewCurrentUrl = targetUrl;
                     await window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
                     // Mark ContentView as initialized (Device Emulation is now active)
                     this.contentViewInitialized = true;
-                    console.log('[ContentView] ContentView initialized, subsequent navigations will use JS navigation');
                 } else {
-                    console.log('[ContentView] URL unchanged, skipping navigation');
+                    // URL unchanged, skip navigation
                 }
             } else {
                 // Local (RSS) or FullContent mode: Load HTML directly with bundled settings
                 const htmlDataUrl = this.articleView();
-                console.log('[ContentView] FIRST LOAD - Loading HTML content for mode:', SourceOpenTarget[this.state.contentMode]);
                 // Navigate with settings bundled - all settings applied BEFORE navigation starts
                 await window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
                 this.contentViewCurrentUrl = htmlDataUrl;
                 // Mark ContentView as initialized (Device Emulation is now active)
                 this.contentViewInitialized = true;
-                console.log('[ContentView] ContentView initialized, subsequent navigations will use JS navigation');
             }
             
             // Settings are now bundled with navigation - no need for separate send
             // The preload reads settings via synchronous IPC on load
-            console.log('[ContentView] Navigation complete (settings bundled with navigate call)');
             
             // Show ContentView (if Visual Zoom is enabled, main process handles showing after emulation)
             // We still call setVisible(true) here - main process will handle the timing
@@ -593,26 +567,21 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.localMobileMode = newMobileMode;  // Set local state immediately
         this.props.updateMobileMode(this.props.source, newMobileMode);
         
-        console.log('[Article] Mobile mode toggled:', newMobileMode ? 'ON' : 'OFF');
-        
         // Set global Mobile Mode status (for new ContentViews on article change)
         this.setGlobalMobileMode(newMobileMode);
         
         // Use ContentView bridge - this handles User-Agent, Device Emulation, and reload
         if (window.contentView) {
-            console.log('[Article] Setting ContentView mobile mode:', newMobileMode);
             window.contentView.setMobileMode(newMobileMode);
         }
     }
 
     private togglePersistCookies = () => {
         const newValue = !this.props.source.persistCookies;
-        console.log("[CookiePersist] Article: Toggle persistCookies:", newValue, "source:", this.props.source.name)
         this.props.updatePersistCookies(this.props.source, newValue);
         
         if (newValue) {
             // If enabled, immediately save current cookies
-            console.log("[CookiePersist] Article: Saving cookies immediately after enabling")
             this.savePersistedCookies();
         }
     }
@@ -649,7 +618,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
             };
             
-            console.log('[MobileMode] Setting global mobile mode:', enabled, 'viewport:', viewportWidth, 'x', viewportHeight);
             ipcRenderer.send('set-global-mobile-mode', enabled, params);
         }
     }
@@ -677,19 +645,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      */
     private loadPersistedCookies = async () => {
         if (!this.props.source.persistCookies) {
-            console.log("[CookiePersist] Article: persistCookies disabled for source:", this.props.source.name)
             return
         }
         
         const url = this.props.item.link
-        console.log("[CookiePersist] Article: Loading cookies for article:", this.props.item.title)
-        console.log("[CookiePersist] Article: URL:", url)
         
         try {
-            const result = await window.utils.loadPersistedCookies(url)
-            console.log("[CookiePersist] Article: Load result:", result)
+            await window.utils.loadPersistedCookies(url)
         } catch (e) {
-            console.error("[CookiePersist] Article: Error loading cookies:", e)
+            console.error("[CookiePersist] Error loading cookies:", e)
         }
     }
     
@@ -702,15 +666,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         
         const url = this.props.item.link
-        console.log("[CookiePersist] Article: Saving cookies for article:", this.props.item.title)
-        console.log("[CookiePersist] Article: URL:", url)
         
         try {
-            const result = await window.utils.savePersistedCookies(url)
-            console.log("[CookiePersist] Article: Save result:", result)
+            await window.utils.savePersistedCookies(url)
             this.lastCookieSaveTime = Date.now()
         } catch (e) {
-            console.error("[CookiePersist] Article: Error saving cookies:", e)
+            console.error("[CookiePersist] Error saving cookies:", e)
         }
     }
     
@@ -726,7 +687,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // If recently saved, ignore
         const now = Date.now()
         if (now - this.lastCookieSaveTime < 2000) {
-            console.log("[CookiePersist] Article: Skipping save (debounced, last save was", now - this.lastCookieSaveTime, "ms ago)")
             return
         }
         
@@ -991,10 +951,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             disabled: !this.isWebpageMode,
                             onClick: () => {
                                 const newValue = !this.state.inputModeEnabled;
-                                console.log('[InputMode] Menu toggle:', newValue ? 'ENABLED' : 'DISABLED');
                                 // Cookies speichern beim Verlassen des Eingabe-Modus
                                 if (!newValue && this.props.source.persistCookies && this.isWebpageMode) {
-                                    console.log('[CookiePersist] Article: Saving cookies after leaving input mode (Menu)');
                                     this.savePersistedCookies();
                                 }
                                 this.setInputMode(newValue);
@@ -1049,7 +1007,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         {
             if(input.control)
             {
-                console.log("ctrl UP");
             }
         }
     }
@@ -1072,14 +1029,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         {
             if(input.control && !input.isAutoRepeat)
             {
-                console.log("ctrl DOWN");
             }
         }
         if (input.type === "keyUp")
         {
             if(input.control && !input.isAutoRepeat)
             {
-                console.log("ctrl UP");
             }
         }
 
@@ -1091,10 +1046,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Eingabe-Modus Toggle: Ctrl+I
             if (input.control && (input.key === 'i' || input.key === 'I')) {
                 const newValue = !this.state.inputModeEnabled;
-                console.log('[InputMode] Toggle:', newValue ? 'ENABLED (shortcuts off)' : 'DISABLED (shortcuts on)');
                 // Cookies speichern beim Verlassen des Eingabe-Modus (z.B. nach Login)
                 if (!newValue && this.props.source.persistCookies && this.isWebpageMode) {
-                    console.log('[CookiePersist] Article: Saving cookies after leaving input mode (Ctrl+I)');
                     this.savePersistedCookies();
                 }
                 this.setInputMode(newValue);
@@ -1104,12 +1057,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Im Eingabe-Modus: nur Escape und Ctrl+I erlauben
             if (this.state.inputModeEnabled) {
                 if (input.key === 'Escape') {
-                    console.log('[InputMode] Escape pressed - disabling input mode');
-                    console.log('[InputMode] persistCookies:', this.props.source.persistCookies, 'contentMode:', SourceOpenTarget[this.state.contentMode]);
                     this.setInputMode(false);
                     // Cookies speichern beim Verlassen des Eingabe-Modus (z.B. nach Login)
                     if (this.props.source.persistCookies && this.isWebpageMode) {
-                        console.log('[CookiePersist] Article: Saving cookies after leaving input mode');
                         this.savePersistedCookies();
                     }
                     return;
@@ -1158,13 +1108,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "m":
                 case "M":
                     // Toggle Mobile Mode
-                    console.log('[Article] M key pressed - toggling mobile mode, usesContentView:', this.usesContentView);
                     this.toggleMobileMode()
                     break
                 case "p":
                 case "P":
                     // Toggle Visual Zoom
-                    console.log('[Article] P key pressed - toggling Visual Zoom (ContentView)');
                     this.toggleVisualZoom()
                     break
                 case "H":
@@ -1231,7 +1179,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Load persisted cookies on first mount
         if (this.props.source.persistCookies) {
-            console.log("[CookiePersist] Article: Loading cookies on mount")
             this.loadPersistedCookies()
         }
         
@@ -1311,7 +1258,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             // Reset input mode on article change
             if (this.state.inputModeEnabled) {
-                console.log('[InputMode] Article changed - disabling input mode');
                 this.setInputMode(false);
             }
             
@@ -1327,15 +1273,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             // Cookies des alten Artikels speichern (falls persistCookies aktiviert war)
             if (prevProps.source.persistCookies) {
-                console.log("[CookiePersist] Article: Saving cookies before article change")
                 window.utils.savePersistedCookies(prevProps.item.link).catch(e => {
-                    console.error("[CookiePersist] Article: Error saving on article change:", e)
+                    console.error("[CookiePersist] Error saving on article change:", e)
                 })
             }
             
             // Synchronize local Mobile Mode state with new source
             this.localMobileMode = this.props.source.mobileMode || false;
-            console.log('[Article] Article changed - localMobileMode:', this.localMobileMode);
             
             // IMPORTANT: Set global Mobile Mode status BEFORE new ContentView is initialized!
             // Main process then automatically applies emulation on 'did-attach'.
@@ -1352,9 +1296,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.currentZoom = savedZoom
             this.setState({ zoom: savedZoom })
             
-            console.log('[Article] Zoom for article change: isSameSource:', isSameSource, 
-                'currentZoom:', this.currentZoom, 'savedZoom:', savedZoom)
-            
             // Close DevTools before article change to prevent crash
             // closeDevTools is safe to call even if DevTools is not opened
             try {
@@ -1363,7 +1304,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             // Load cookies for new article (if persistCookies is enabled)
             if (this.props.source.persistCookies) {
-                console.log("[CookiePersist] Article: Loading cookies for new article")
                 this.loadPersistedCookies()
             }
             
@@ -1384,7 +1324,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             // JS-Navigation test showed: Emulation is reset even with window.location.href
                             // So we use navigateWithSettings with HIDE-SHOW strategy:
                             // Main process hides view, navigates, applies emulation at dom-ready, then shows
-                            console.log('[ContentView] Article changed (Webpage) - navigateWithSettings to:', targetUrl);
                             this.contentViewCurrentUrl = targetUrl;
                             window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
                         }
@@ -1399,7 +1338,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     // For Local (RSS) mode - ContentView loads HTML data URL with bundled settings
                     if (window.contentView) {
                         const htmlDataUrl = this.articleView();
-                        console.log('[ContentView] Article changed (Local/RSS) - navigateWithSettings');
                         this.contentViewCurrentUrl = htmlDataUrl;
                         window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
                         // Focus ContentView
@@ -1417,27 +1355,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // If openTarget changes from OUTSIDE (not from toggleWebpage/toggleFull), update the state
             // Skip if we're currently toggling mode (to prevent race conditions)
             if (this._isTogglingMode) {
-                console.log('[Article] componentDidUpdate - openTarget changed but _isTogglingMode is true - IGNORING')
                 return
             }
             
             const targetContentMode = this.props.source.openTarget
             
-            console.log('[Article] componentDidUpdate - openTarget changed:',
-                'prev:', SourceOpenTarget[prevProps.source.openTarget], 
-                'new:', SourceOpenTarget[this.props.source.openTarget],
-                'current state contentMode:', SourceOpenTarget[this.state.contentMode],
-                'target contentMode:', SourceOpenTarget[targetContentMode])
-            
             // Only update if state doesn't already match the target
             if (this.state.contentMode !== targetContentMode) {
-                console.log('[Article] openTarget changed from outside, syncing state:', 
-                    'contentMode:', SourceOpenTarget[targetContentMode])
                 this.setState({
                     contentMode: targetContentMode,
                 })
-            } else {
-                console.log('[Article] openTarget changed but state already matches - skipping setState')
             }
         }
         
@@ -1460,7 +1387,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Small delay to let the CSS transition complete
             setTimeout(() => {
                 if (this._isMounted) {
-                    console.log('[Article] Menu state changed - updating ContentView bounds')
                     this.updateContentViewBounds()
                 }
             }, 300) // Match the CSS transition duration
@@ -1477,7 +1403,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (!window.contentView) return
         if (this.contentViewHiddenForMenu) return  // Already hidden
         
-        console.log(`[Article] ${reason} - capturing screenshot`)
         try {
             const screenshot = await window.contentView.captureScreen()
             if (screenshot && this._isMounted) {
@@ -1487,20 +1412,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     if (this._isMounted && window.contentView && (!shouldHideCheck || shouldHideCheck())) {
                         window.contentView.setVisible(false, true) // preserveContent for blur-div
                         this.contentViewHiddenForMenu = true
-                        console.log(`[Article] ContentView hidden for ${reason}`)
                     }
                 })
                 return
             }
         } catch (e) {
-            console.error(`[Article] Error capturing screenshot for ${reason}:`, e)
+            console.error('[Article] Error capturing screenshot:', e)
         }
         
         // Fallback: hide without screenshot (error case or no screenshot)
         if (!shouldHideCheck || shouldHideCheck()) {
             window.contentView.setVisible(false, true) // preserveContent for blur-div
             this.contentViewHiddenForMenu = true
-            console.log(`[Article] ContentView hidden for ${reason} (no screenshot)`)
         }
     }
     
@@ -1517,7 +1440,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         } else {
             // Redux overlay closed - check if we can restore
             if (this.contentViewHiddenForMenu && !this.fluentMenuOpen && !this.localDialogOpen) {
-                console.log('[Article] Redux overlay closed - restoring ContentView')
                 this.restoreContentView()
             }
         }
@@ -1540,7 +1462,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Local dialog closed - check if we can restore
             this.localDialogOpen = false
             if (this.contentViewHiddenForMenu && !this.fluentMenuOpen && !this.props.overlayActive) {
-                console.log('[Article] Local dialog closed - restoring ContentView')
                 this.restoreContentView()
             }
         }
@@ -1566,7 +1487,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Called by onMenuDismissed callback in menu props
      */
     private handleFluentMenuDismissed = () => {
-        console.log('[Article] Fluent UI menu dismissed')
         this.fluentMenuOpen = false
         
         // ContentView is now used for ALL modes - restore if it was hidden
@@ -1574,17 +1494,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (!this.contentViewHiddenForMenu) return  // Not hidden, nothing to do
         
         // Check if Redux overlay or local dialog is still active
-        if (this.props.overlayActive) {
-            console.log('[Article] Fluent menu dismissed but Redux overlay active - staying hidden')
-            return
-        }
-        if (this.localDialogOpen) {
-            console.log('[Article] Fluent menu dismissed but local dialog active - staying hidden')
+        if (this.props.overlayActive || this.localDialogOpen) {
             return
         }
         
         // Menu closed and no other overlay open - restore immediately
-        console.log('[Article] Fluent menu dismissed - restoring ContentView')
         this.restoreContentView()
     }
     
@@ -1596,7 +1510,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Handle click on blur placeholder to restore ContentView
      */
     private handleBlurPlaceholderClick = () => {
-        console.log('[Article] Blur placeholder clicked - restoring ContentView')
         this.restoreContentView()
     }
     
@@ -1612,10 +1525,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.blurHoverTimer = setTimeout(() => {
             // Don't auto-restore if a menu is still open
             if (this.props.overlayActive || this.fluentMenuOpen) {
-                console.log('[Article] Blur hover timeout - menu still open, not restoring')
                 return
             }
-            console.log('[Article] Blur hover timeout - auto-restoring ContentView')
             this.restoreContentView()
         }, this.BLUR_HOVER_DELAY)
     }
@@ -1677,18 +1588,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Check if any Redux overlay is still active (menu, settings, etc.)
         if (this.props.overlayActive) {
-            console.log('[Article] Mouse entered but Redux overlay active - staying hidden')
             return
         }
         
         // Check if any Fluent UI overlay is still visible
         const fluentOverlay = document.querySelector('.ms-Layer:not(:empty), .ms-ContextualMenu, [role="menu"]')
         if (fluentOverlay) {
-            console.log('[Article] Mouse entered but Fluent UI overlay active - staying hidden')
             return
         }
         
-        console.log('[Article] Mouse entered ContentView area - restoring')
         window.contentView.setVisible(true)
         this.contentViewHiddenForMenu = false
         
@@ -1734,14 +1642,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (window.contentView) {
             // Check if we're waiting to focus ContentView after mode switch
             if (this.pendingContentViewFocus) {
-                console.log('[VisualZoom] pendingContentViewFocus: focusing ContentView now');
                 this.pendingContentViewFocus = false;
                 // Multiple focus attempts to ensure it sticks
                 window.contentView.focus();
                 setTimeout(() => {
                     if (window.contentView && this._isMounted) {
                         window.contentView.focus();
-                        console.log('[VisualZoom] ✅ ContentView focused - press P to switch back');
                     }
                 }, 50);
                 setTimeout(() => {
@@ -1782,9 +1688,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Save cookies before component is destroyed
         if (this.props.source.persistCookies) {
-            console.log("[CookiePersist] Article: Saving cookies on unmount")
             window.utils.savePersistedCookies(this.props.item.link).catch(e => {
-                console.error("[CookiePersist] Article: Error saving on unmount:", e)
+                console.error("[CookiePersist] Error saving on unmount:", e)
             })
         }
         
@@ -1814,14 +1719,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     toggleWebpage = () => {
-        console.log('[Article] toggleWebpage called, current contentMode:', SourceOpenTarget[this.state.contentMode]);
-        
         // Set flag to prevent componentDidUpdate from overriding our state changes
         this._isTogglingMode = true;
         
         if (this.isWebpageMode) {
             // Switching FROM webpage mode TO Local (RSS) mode
-            console.log('[Article] Switching FROM Webpage TO Local mode');
             // Clear tracked URL so ContentView will reload with new content
             this.contentViewCurrentUrl = null;
             
@@ -1829,7 +1731,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             const sourceSnapshot = this.props.source;
             
             this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, () => {
-                console.log('[Article] State set to contentMode: Local');
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
@@ -1846,17 +1747,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.props.item.link.startsWith("http://")
         ) {
             // Switching TO webpage mode
-            console.log('[Article] Switching TO Webpage mode');
             // Clear tracked URL so ContentView will load the webpage
             this.contentViewCurrentUrl = null;
             
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
-            console.log('[Article] Source snapshot openTarget:', SourceOpenTarget[sourceSnapshot.openTarget]);
             
             this.setState({ contentMode: SourceOpenTarget.Webpage, contentVisible: false }, () => {
-                console.log('[Article] State set to contentMode: Webpage');
-                console.log('[Article] Current props.source.openTarget:', SourceOpenTarget[this.props.source.openTarget]);
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
@@ -1959,12 +1856,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 
                 // Fallback: if extractor produces no content OR content is mostly templates
                 if (!contentToUse || contentToUse.length === 0 || (hasTemplates && templateRatio > 0.05)) {
-                    console.log("[loadFull] Using fallback extraction:", {
-                        hasContent: !!contentToUse,
-                        contentLength: contentToUse?.length || 0,
-                        hasTemplates,
-                        templateRatio: templateRatio.toFixed(3)
-                    })
                     contentToUse = this.fallbackExtractContent(html)
                 }
                 
@@ -2004,13 +1895,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         ${footerHtml}
                     </article>
                 `
-                
-                // Debug: Log the content before setting state
-                console.log("=== FULL CONTENT DEBUG ===")
-                console.log("Content length:", contentToUse.length)
-                console.log("Has <article>:", contentToUse.includes("<article"))
-                console.log("First 500 chars:", contentToUse.substring(0, 500))
-                console.log("========================")
                 
                 if (this._isMounted) {
                     this.setState({ 
@@ -2279,7 +2163,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
             // If title is already present in extracted content, skip RSS summary but show separator
             if (titleInExtractor || rssInContent) {
-                console.log("Title already in extracted content, skipping RSS summary but showing separator")
                 return separator + extractedContent
             }
 
@@ -2366,11 +2249,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             if (images.length > 0) {
                 images.sort((a, b) => b.score - a.score)
                 const bestImage = images[0]
-                console.log("Best teaser image found:", {
-                    src: bestImage.src,
-                    score: bestImage.score,
-                    totalCandidates: images.length
-                })
                 return bestImage.html
             }
 
@@ -2399,14 +2277,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Oder: Nur Bilder ohne nennenswerten Text
         const isComicMode = totalImages > 0 && textLength < 200
         const isSingleImage = totalImages === 1 && textLength < 100
-        
-        console.log("Article content analysis:", {
-            url: this.props.item.link,
-            totalImages,
-            textLength,
-            isComicMode,
-            isSingleImage
-        })
 
         // Use extractor metadata if available (better alignment with extracted content)
         const displayTitle = this.isFullContentMode && this.state.extractorTitle ? this.state.extractorTitle : this.props.item.title
@@ -2588,9 +2458,6 @@ window.__articleData = ${JSON.stringify({
             });
         }
     });
-    if (overflowElements.length > 0) {
-        console.log('Elements causing horizontal overflow:', overflowElements);
-    }
     
     // Fixiere absolute URLs
     for (let e of main.querySelectorAll("*[src]")) {

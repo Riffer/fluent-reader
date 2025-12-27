@@ -81,7 +81,6 @@ export function initDatabase(): Database.Database {
     // Run migrations
     runMigrations()
 
-    console.log("[db-sqlite] Database initialized successfully")
     return db
 }
 
@@ -267,7 +266,6 @@ export function closeDatabase(): void {
     if (db) {
         db.close()
         db = null
-        console.log("[db-sqlite] Database closed")
     }
 }
 
@@ -410,7 +408,6 @@ export function getOrCreateP2PFeed(
     // Check if feed already exists
     const existing = getSourceByUrl(feedUrl)
     if (existing) {
-        console.log(`[db-sqlite] P2P Feed already exists: "${existing.name}" (sid=${existing.sid})`)
         return { sid: existing.sid, created: false }
     }
     
@@ -435,7 +432,6 @@ export function getOrCreateP2PFeed(
         persistCookies: 0 // SQLite boolean (0 = false)
     })
     
-    console.log(`[db-sqlite] Created P2P Feed: "${feedName}" (sid=${sid}, url=${feedUrl})`)
     return { sid, created: true }
 }
 
@@ -454,7 +450,6 @@ export function convertP2PFeedToActive(sid: number): void {
     if (!db) throw new Error("Database not initialized")
     db.prepare("UPDATE sources SET serviceRef = NULL WHERE sid = ? AND serviceRef = ?")
         .run(sid, P2P_SHARED_SERVICE_REF)
-    console.log(`[db-sqlite] Converted P2P Feed sid=${sid} to active feed`)
 }
 
 // ============================================

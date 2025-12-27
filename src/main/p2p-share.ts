@@ -151,7 +151,6 @@ let p2pConfig: P2PConfig
 export function initP2P(): void {
     p2pConfig = loadConfig()
     knownPeers = loadPeers()
-    console.log("[P2P] Initialized with " + knownPeers.length + " known peers")
 }
 
 export function getKnownPeers(): KnownPeer[] {
@@ -214,6 +213,4 @@ export function registerP2PIpcHandlers(): void {
     )
     
     ipcMain.handle("p2p:isValidUrl", (_, url: string) => isValidShareUrl(url))
-    
-    console.log("[P2P] IPC handlers registered")
 }

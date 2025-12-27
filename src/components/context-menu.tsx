@@ -158,7 +158,7 @@ export class ContextMenu extends React.Component<ContextMenuProps, ContextMenuSt
                 })
             }
         } catch (err) {
-            console.log("[ContextMenu] P2P status not available")
+            // P2P status not available
         }
     }
 
@@ -215,9 +215,7 @@ export class ContextMenu extends React.Component<ContextMenuProps, ContextMenuSt
             
             // Try to send with ACK, fall back to queue
             const result = await window.p2pLan.sendArticlesWithAck(peerId, [article])
-            if (result.success) {
-                console.log(`[ContextMenu] Shared article with ${displayName}`)
-            } else {
+            if (!result.success) {
                 // Queue for later
                 await window.p2pLan.sendArticleLinkWithQueue(
                     peerId, 
@@ -227,7 +225,6 @@ export class ContextMenu extends React.Component<ContextMenuProps, ContextMenuSt
                     article.feedUrl, 
                     article.feedIconUrl
                 )
-                console.log(`[ContextMenu] Queued article for ${displayName}`)
             }
         } catch (err) {
             console.error("[ContextMenu] P2P share failed:", err)

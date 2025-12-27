@@ -77,7 +77,6 @@ export const P2PShareDialog: React.FC<P2PShareDialogProps> = ({
             
             // Subscribe to connection state changes
             const unsubscribe = window.p2pLan.onConnectionStateChanged(async (newStatus) => {
-                console.log("[P2P Share Dialog] Connection state changed, refreshing peers...")
                 setStatus(newStatus)
                 // Refresh known peers when connection state changes
                 try {

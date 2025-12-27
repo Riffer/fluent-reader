@@ -33,7 +33,7 @@ const mapDispatchToProps = (dispatch: AppDispatch) => ({
         try {
             if (hooks.reauthenticate) return await hooks.reauthenticate(configs)
         } catch (err) {
-            console.log(err)
+            console.error("[ServiceTab] Reauthentication failed:", err)
             return configs
         }
     },
