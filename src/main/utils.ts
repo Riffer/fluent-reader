@@ -7,7 +7,6 @@ import fontList = require("font-list")
 
 export function setUtilsListeners(manager: WindowManager) {
     async function openExternal(url: string, background = false) {
-        console.log("openExternal:" + url)
         if (url.startsWith("https://") || url.startsWith("http://")) {
             if (background && process.platform === "darwin") {
                 shell.openExternal(url, { activate: false })
@@ -25,7 +24,6 @@ export function setUtilsListeners(manager: WindowManager) {
         contents.setWindowOpenHandler(details => {
             // Note: WebView tag check removed - ContentView handles its own links
             // via ContentViewManager.setupContextMenu() and setupNavigationEvents()
-            console.log("WindowOpenHandler:" + details.url)
             return {
                 action: manager.hasWindow() ? "deny" : "allow",
             }
@@ -33,7 +31,6 @@ export function setUtilsListeners(manager: WindowManager) {
         contents.on("will-navigate", (event, url) => {
             event.preventDefault()
             contents.loadURL(url);
-            console.log("will-navigate:" + url)
         })
     })
 
@@ -42,13 +39,11 @@ export function setUtilsListeners(manager: WindowManager) {
     })
 
     ipcMain.handle("open-external", (_, url: string, background: boolean) => {
-        console.log("from ipcMain.handle()")
         openExternal(url, background)
     })
 
     // Open URL in a new internal browser window
     ipcMain.handle("open-in-reader-window", (_, url: string, title: string = "Reader") => {
-        console.log("Opening in reader window:", url)
         const readerWindow = new BrowserWindow({
             width: 1000,
             height: 800,
@@ -151,7 +146,7 @@ export function setUtilsListeners(manager: WindowManager) {
                             "utf-8"
                         )
                     } catch (err) {
-                        console.log(err)
+                        console.error(err)
                     }
                 }
             }

@@ -136,18 +136,15 @@ export class WindowManager {
         ipcMain.handle("enable-device-emulation", (_event, webContentsId: number, params: any) => {
             // Deduplication: Only enable once per webContentsId
             if (emulatedWebContentsIds.has(webContentsId)) {
-                console.log('[DeviceEmulation] Skipping (already enabled for webContentsId:', webContentsId, ')')
                 return true
             }
             
-            console.log('[DeviceEmulation] Request received for webContentsId:', webContentsId)
             try {
                 const wc = webContents.fromId(webContentsId)
                 if (wc && !wc.isDestroyed()) {
                     // Change User-Agent if specified
                     if (params.userAgent) {
                         wc.setUserAgent(params.userAgent)
-                        console.log('[DeviceEmulation] User-Agent set')
                     }
                     
                     const emulationParams = {
@@ -158,13 +155,10 @@ export class WindowManager {
                         viewSize: params.viewSize || { width: 390, height: 844 },
                         scale: params.scale || 1
                     }
-                    console.log('[DeviceEmulation] Applying emulation:', JSON.stringify(emulationParams))
                     wc.enableDeviceEmulation(emulationParams)
                     emulatedWebContentsIds.add(webContentsId)
-                    console.log('[DeviceEmulation] SUCCESS - Enabled for webContentsId:', webContentsId)
                     return true
                 }
-                console.log('[DeviceEmulation] FAILED - webContents not found or destroyed')
                 return false
             } catch (e) {
                 console.error('[DeviceEmulation] Error:', e)
@@ -181,7 +175,6 @@ export class WindowManager {
                     wc.disableDeviceEmulation()
                     // Reset User-Agent to default
                     wc.setUserAgent('')  // Empty string = default User-Agent
-                    console.log('[DeviceEmulation] Disabled for webContentsId:', webContentsId)
                     return true
                 }
                 return false
@@ -198,7 +191,6 @@ export class WindowManager {
         ipcMain.handle("load-persisted-cookies", async (_event, url: string) => {
             const host = extractHost(url)
             if (!host) {
-                console.log("[CookiePersist] Invalid URL, cannot load cookies:", url)
                 return { success: false, count: 0 }
             }
 
@@ -218,7 +210,6 @@ export class WindowManager {
         ipcMain.handle("save-persisted-cookies", async (_event, url: string) => {
             const host = extractHost(url)
             if (!host) {
-                console.log("[CookiePersist] Invalid URL, cannot save cookies:", url)
                 return { success: false }
             }
 
@@ -226,7 +217,6 @@ export class WindowManager {
             const sandboxSession = session.fromPartition("sandbox")
             const cookies = await getCookiesFromSession(sandboxSession, host)
             if (cookies.length === 0) {
-                console.log("[CookiePersist] No cookies to save for host:", host)
                 return { success: true, count: 0 }
             }
 
@@ -238,7 +228,6 @@ export class WindowManager {
         ipcMain.handle("delete-persisted-cookies", async (_event, url: string) => {
             const host = extractHost(url)
             if (!host) {
-                console.log("[CookiePersist] Invalid URL, cannot delete cookies:", url)
                 return { success: false }
             }
 

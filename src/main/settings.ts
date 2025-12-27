@@ -336,7 +336,6 @@ export function addSourceToP2PGroup(sid: number): SourceGroup[] {
     
     if (groupIndex === -1) {
         // Create new P2P group at the beginning
-        console.log(`[settings] Creating new P2P group: "${P2P_GROUP_NAME}" (at start)`)
         const newGroup: SourceGroup = {
             isMultiple: true,
             sids: [sid],
@@ -348,10 +347,7 @@ export function addSourceToP2PGroup(sid: number): SourceGroup[] {
         // Add to existing group if not already present
         const group = groups[groupIndex]
         if (!group.sids.includes(sid)) {
-            console.log(`[settings] Adding source ${sid} to P2P group`)
             group.sids.push(sid)
-        } else {
-            console.log(`[settings] Source ${sid} already in P2P group`)
         }
     }
     
@@ -382,7 +378,6 @@ export function removeSourceFromP2PGroup(sid: number): SourceGroup[] | null {
     const groupIndex = findP2PGroupIndex()
     
     if (groupIndex === -1) {
-        console.log(`[settings] P2P group not found, nothing to remove`)
         return null
     }
     
@@ -390,13 +385,11 @@ export function removeSourceFromP2PGroup(sid: number): SourceGroup[] | null {
     const sidIndex = group.sids.indexOf(sid)
     
     if (sidIndex === -1) {
-        console.log(`[settings] Source ${sid} not in P2P group`)
         return null
     }
     
     // Remove the source from the group
     group.sids.splice(sidIndex, 1)
-    console.log(`[settings] Removed source ${sid} from P2P group`)
     
     // If group is now empty, optionally remove the group itself
     // For now, keep empty groups as they may be used again
