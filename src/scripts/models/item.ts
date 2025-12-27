@@ -276,27 +276,6 @@ export function fetchItems(
             let timenow = new Date().getTime()
             const sourcesState = getState().sources
             
-            // Debug: Log all sources and their fetch status
-            console.log('[fetchItems] Checking sources for fetch...')
-            const allSources = sids === null 
-                ? Object.values(sourcesState)
-                : sids.map(sid => sourcesState[sid])
-            
-            for (let s of allSources) {
-                const last = s.lastFetched ? s.lastFetched.getTime() : 0
-                const freqMs = (s.fetchFrequency || 0) * 60000
-                const nextFetch = last + freqMs
-                const shouldFetch = !s.serviceRef && (last > timenow || nextFetch <= timenow)
-                console.log(`[fetchItems] Source "${s.name}" (sid=${s.sid}):`, {
-                    serviceRef: s.serviceRef || 'none',
-                    lastFetched: s.lastFetched ? new Date(last).toISOString() : 'never',
-                    fetchFrequency: s.fetchFrequency || 0,
-                    nextFetchDue: new Date(nextFetch).toISOString(),
-                    now: new Date(timenow).toISOString(),
-                    shouldFetch
-                })
-            }
-            
             let sources =
                 sids === null
                     ? Object.values(sourcesState).filter(s => {
@@ -311,8 +290,6 @@ export function fetchItems(
                     : sids
                           .map(sid => sourcesState[sid])
                           .filter(s => !s.serviceRef)
-            
-            console.log(`[fetchItems] Will fetch ${sources.length} sources:`, sources.map(s => s.name))
             
             for (let source of sources) {
                 // Create main promise for fetchItems
@@ -349,12 +326,8 @@ export function fetchItems(
                 }
             })
             
-            console.log(`[fetchItems] Fetched ${fetchedCount} new items from ${sources.length} sources (after duplicate check)`)
-            
             try {
                 const inserted = await insertItems(items)
-                console.log(`[fetchItems] Final result: ${inserted.length} items inserted into DB`)
-                
                 dispatch(
                     fetchItemsSuccess(
                         inserted.reverse(),

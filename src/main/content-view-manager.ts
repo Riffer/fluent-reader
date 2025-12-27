@@ -142,7 +142,7 @@ export class ContentViewManager {
             }
             
             // Setup navigation events
-            this.setupNavigationEvents())
+            this.setupNavigationEvents()
             
             // Setup context menu
             this.setupContextMenu()
