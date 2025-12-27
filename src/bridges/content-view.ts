@@ -144,6 +144,15 @@ export const contentViewBridge = {
     },
     
     /**
+     * Recreate the WebContentsView completely
+     * This is needed when Visual Zoom setting changes, as the CSS layout
+     * and touch handling configuration need to be reinitialized.
+     */
+    recreate: (): Promise<boolean> => {
+        return ipcRenderer.invoke("content-view-recreate")
+    },
+    
+    /**
      * Get content view webContents ID
      */
     getId: (): Promise<number | null> => {
@@ -155,6 +164,20 @@ export const contentViewBridge = {
      */
     openDevTools: (): Promise<void> => {
         return ipcRenderer.invoke("content-view-open-devtools")
+    },
+    
+    /**
+     * Check if DevTools is opened for content view
+     */
+    isDevToolsOpened: (): Promise<boolean> => {
+        return ipcRenderer.invoke("content-view-is-devtools-opened")
+    },
+    
+    /**
+     * Close DevTools for content view
+     */
+    closeDevTools: (): Promise<void> => {
+        return ipcRenderer.invoke("content-view-close-devtools")
     },
     
     /**

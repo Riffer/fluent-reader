@@ -259,6 +259,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Toggle Visual Zoom mode
      * - Visual Zoom ON: Native pinch-to-zoom via Device Emulation
      * - Visual Zoom OFF: CSS-based zoom via preload
+     * 
+     * When toggled, the WebContentsView is recreated to apply the new
+     * CSS layout and touch handling configuration.
      */
     private toggleVisualZoom = async () => {
         const newValue = !this.state.visualZoomEnabled;
@@ -266,26 +269,60 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         console.log('[VisualZoom] Toggle:', newValue ? 'ON (native zoom)' : 'OFF (CSS zoom)');
         
-        // Update ContentView settings
-        if (window.contentView) {
-            window.contentView.setVisualZoom(newValue);
-            window.contentView.send('set-visual-zoom-mode', newValue);
-            
-            // Re-apply zoom with new mode
-            const zoomLevel = this.currentZoom;
-            if (newValue) {
-                // Switch to native zoom
-                const factor = 1.0 + (zoomLevel * 0.1);
-                window.contentView.setZoomFactor(factor);
-            } else {
-                // Switch to CSS zoom
-                window.contentView.setCssZoom(zoomLevel);
-            }
-        }
-        
+        // Update state first
         if (this._isMounted) {
             this.setState({ visualZoomEnabled: newValue });
         }
+        
+        // Recreate WebContentsView to apply new CSS layout and touch handling
+        // This is necessary because the preload script reads the visual zoom setting
+        // at initialization and sets up CSS/event handlers accordingly.
+        if (window.contentView) {
+            console.log('[VisualZoom] Recreating WebContentsView to apply changes...');
+            window.contentView.setVisualZoom(newValue);
+            await window.contentView.recreate();
+            console.log('[VisualZoom] WebContentsView recreated successfully');
+            
+            // If we have an article loaded, reload it in the new view
+            if (this.props.item) {
+                console.log('[VisualZoom] Reloading current article...');
+                // Small delay to ensure the view is fully initialized
+                setTimeout(() => {
+                    this.reloadCurrentArticle();
+                }, 100);
+            }
+        }
+    }
+    
+    /**
+     * Reload the current article in ContentView
+     * Used after WebContentsView recreation (e.g., Visual Zoom toggle)
+     */
+    private reloadCurrentArticle = () => {
+        if (!window.contentView || !this.props.item) return;
+        
+        const contentMode = this.state.contentMode;
+        
+        if (contentMode === SourceOpenTarget.Webpage) {
+            // Webpage mode: Navigate to URL with bundled settings
+            const targetUrl = this.props.item.link;
+            console.log('[VisualZoom] Reloading webpage:', targetUrl);
+            this.contentViewCurrentUrl = targetUrl;
+            window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
+        } else {
+            // Local (RSS) or FullContent mode: Load HTML directly with bundled settings
+            const htmlDataUrl = this.articleView();
+            console.log('[VisualZoom] Reloading HTML content for mode:', SourceOpenTarget[contentMode]);
+            this.contentViewCurrentUrl = htmlDataUrl;
+            window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
+        }
+        
+        // Focus ContentView after short delay
+        setTimeout(() => {
+            if (window.contentView) {
+                window.contentView.focus();
+            }
+        }, 100);
     }
 
     // ===== ContentView Methods (WebContentsView - now used for ALL display modes) =====
@@ -1319,10 +1356,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 'currentZoom:', this.currentZoom, 'savedZoom:', savedZoom)
             
             // Close DevTools before article change to prevent crash
+            // closeDevTools is safe to call even if DevTools is not opened
             try {
-                if (window.contentView && window.contentView.isDevToolsOpened()) {
-                    window.contentView.closeDevTools()
-                }
+                window.contentView?.closeDevTools()
             } catch {}
             
             // Cookies für neuen Artikel laden (falls persistCookies aktiviert)
@@ -1753,10 +1789,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         
         // Close DevTools before unmount to prevent crash
+        // closeDevTools is safe to call even if DevTools is not opened
         try {
-            if (window.contentView && window.contentView.isDevToolsOpened()) {
-                window.contentView.closeDevTools()
-            }
+            window.contentView?.closeDevTools()
         } catch {}
         
         let refocus = document.querySelector(

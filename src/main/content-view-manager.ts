@@ -760,6 +760,13 @@ export class ContentViewManager {
             console.log("[ContentViewManager] IPC: visual zoom done")
         })
         
+        // Recreate WebContentsView (needed when Visual Zoom setting changes)
+        ipcMain.handle("content-view-recreate", async () => {
+            console.log("[ContentViewManager] IPC: recreate WebContentsView requested")
+            this.recreateContentView()
+            return true
+        })
+        
         // Get webContents ID
         ipcMain.handle("content-view-get-id", () => {
             return this.contentView?.webContents?.id ?? null
@@ -768,6 +775,16 @@ export class ContentViewManager {
         // Open DevTools
         ipcMain.handle("content-view-open-devtools", () => {
             this.contentView?.webContents?.openDevTools()
+        })
+        
+        // Check if DevTools is opened
+        ipcMain.handle("content-view-is-devtools-opened", () => {
+            return this.contentView?.webContents?.isDevToolsOpened() ?? false
+        })
+        
+        // Close DevTools
+        ipcMain.handle("content-view-close-devtools", () => {
+            this.contentView?.webContents?.closeDevTools()
         })
         
         // Reload
