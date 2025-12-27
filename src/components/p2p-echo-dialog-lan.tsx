@@ -52,7 +52,6 @@ export const P2PEchoDialog: React.FC<P2PEchoDialogProps> = ({ hidden, onDismiss 
             
             // Listen for echo responses
             unsubscribeRef.current = window.p2pLan.onEchoResponse((data) => {
-                console.log("[P2P Echo] Response received:", data)
                 setResult({
                     success: true,
                     roundTripMs: data.roundTripMs,

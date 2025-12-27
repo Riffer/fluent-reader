@@ -31,7 +31,6 @@ window.utils.addMainContextListener((pos, text) => {
 // P2P Feeds Changed Listener - syncs SQLite P2P articles to Redux state
 if (window.p2pLan) {
     window.p2pLan.onFeedsChanged((data) => {
-        console.log("[P2P] Feeds changed event received:", data.newFeedIds.length, "feeds,", data.newArticles.length, "articles")
         store.dispatch(handleP2PFeedsChanged(
             data.newFeeds,
             data.newArticles,
@@ -39,7 +38,6 @@ if (window.p2pLan) {
             data.groups
         ))
     })
-    console.log("[P2P] Feeds changed listener registered")
 }
 
 window.fontList = [""]
@@ -49,7 +47,6 @@ window.utils.initFontList().then(fonts => {
 
 // Auto-Refresh Feeds when waking from standby/sleep
 window.utils.addPowerResumeListener(() => {
-    console.log("[PowerResume] Triggering automatic feed refresh after system wake")
     store.dispatch(fetchItems(true)) // background=true for silent refresh
 })
 

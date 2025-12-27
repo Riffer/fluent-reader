@@ -83,7 +83,6 @@ class P2PConnectionManager {
         try {
             const answerData = JSON.parse(answerJson)
             connection.peer.signal(answerData)
-            console.log(`[P2P] Answer applied for ${connection.displayName}`)
             return true
         } catch (e) {
             console.error("[P2P] Invalid answer data:", e)
@@ -95,7 +94,6 @@ class P2PConnectionManager {
     disconnect(peerHash: string): void {
         const connection = this.connections.get(peerHash)
         if (connection) {
-            console.log(`[P2P] Disconnecting from ${connection.displayName}`)
             connection.peer.destroy()
             this.connections.delete(peerHash)
         }
@@ -111,7 +109,6 @@ class P2PConnectionManager {
         
         try {
             connection.peer.send(JSON.stringify(message))
-            console.log(`[P2P] Sent ${message.type} to ${connection.displayName}`)
             return true
         } catch (e) {
             console.error("[P2P] Send error:", e)
@@ -129,7 +126,6 @@ class P2PConnectionManager {
                 }
             }
         })
-        console.log(`[P2P] Broadcast ${message.type} to ${sentCount} peers`)
         return sentCount
     }
 
@@ -157,8 +153,6 @@ class P2PConnectionManager {
                 this.disconnect(peerHash)
             }
 
-            console.log(`[P2P] Creating connection as ${isInitiator ? 'initiator' : 'receiver'} for ${displayName}`)
-
             const peer = new Peer({
                 initiator: isInitiator,
                 trickle: false,  // Wait for complete ICE gathering
@@ -176,13 +170,11 @@ class P2PConnectionManager {
 
             // When signaling data is ready (offer or answer)
             peer.on("signal", (data) => {
-                console.log(`[P2P] Signal ready for ${displayName}`)
                 resolve(JSON.stringify(data))
             })
 
             // Connection established
             peer.on("connect", () => {
-                console.log(`[P2P] Connected to ${displayName}`)
                 connection.connected = true
                 
                 // Update last seen in main process
@@ -202,7 +194,6 @@ class P2PConnectionManager {
             peer.on("data", (data) => {
                 try {
                     const message: ShareMessage = JSON.parse(data.toString())
-                    console.log(`[P2P] Received ${message.type} from ${displayName}`)
                     
                     // Handle echo requests automatically
                     if (message.type === "echo-request") {
@@ -229,7 +220,6 @@ class P2PConnectionManager {
 
             // Connection closed
             peer.on("close", () => {
-                console.log(`[P2P] Connection closed with ${displayName}`)
                 connection.connected = false
                 this.connections.delete(peerHash)
                 

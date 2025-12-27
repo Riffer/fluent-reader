@@ -57,7 +57,7 @@ function playNotificationSound(): void {
         // Clean up
         setTimeout(() => audioContext.close(), 500)
     } catch (err) {
-        console.log("[P2P Notification] Could not play notification sound:", err)
+        // Sound playback failed - not critical
     }
 }
 
@@ -107,17 +107,12 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
         if (listenerRegistered.current) return
         listenerRegistered.current = true
         
-        console.log("[P2P Notification] Registering article listener")
-        
         const unsubscribe = window.p2pLan.onArticleReceived((article) => {
-            console.log("[P2P Notification] Article received:", article.title)
-            
             // Check current setting (use getter to get fresh value)
             const shouldCollect = window.settings.getP2PCollectLinks()
             
             if (shouldCollect) {
                 // Add to log instead of showing dialog
-                console.log("[P2P Notification] Collecting link in log")
                 addToLog(article.title, article.url, article.peerName, article.articleId, article.sourceId)
                 playNotificationSound()
                 return
@@ -127,7 +122,6 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
                 if (prev) {
                     // Queue if already showing one
                     queueRef.current = [...queueRef.current, article]
-                    console.log("[P2P Notification] Queued, total in queue:", queueRef.current.length)
                     return prev
                 } else {
                     return article
@@ -137,8 +131,6 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
         
         // Register batch listener - batch articles always go directly to log
         const unsubscribeBatch = window.p2pLan.onArticlesReceivedBatch((data) => {
-            console.log(`[P2P Notification] Batch received: ${data.count} articles from ${data.peerName}`)
-            
             // Add all articles to log
             for (const article of data.articles) {
                 addToLog(article.title, article.url, data.peerName)
@@ -146,14 +138,9 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
             
             // Play notification sound for batch
             playNotificationSound()
-            
-            // Show a brief notification that multiple articles were received
-            // (could be a toast notification in the future)
-            console.log(`[P2P Notification] Added ${data.count} articles from ${data.peerName} to notification bell`)
         })
         
         return () => {
-            console.log("[P2P Notification] Unregistering article listeners")
             unsubscribe()
             unsubscribeBatch()
             listenerRegistered.current = false
@@ -174,13 +161,11 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
     const handleCopyLink = useCallback(() => {
         if (!incomingArticle) return
         navigator.clipboard.writeText(incomingArticle.url)
-        console.log("[P2P Notification] Link copied:", incomingArticle.url)
         handleDismiss()
     }, [incomingArticle, handleDismiss])
 
     const handleOpenInBrowser = useCallback(() => {
         if (!incomingArticle) return
-        console.log("[P2P Notification] Opening in browser:", incomingArticle.url)
         // Use Electron's shell to open external URLs
         window.utils.openExternal(incomingArticle.url)
         handleDismiss()
@@ -188,7 +173,6 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
 
     const handleOpenInReader = useCallback(() => {
         if (!incomingArticle) return
-        console.log("[P2P Notification] Opening in reader:", incomingArticle.url)
         // Open URL in internal reader window
         window.utils.openInReaderWindow(incomingArticle.url, incomingArticle.title)
         handleDismiss()
@@ -196,7 +180,6 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
 
     const handleLater = useCallback(() => {
         if (!incomingArticle) return
-        console.log("[P2P Notification] Saving for later:", incomingArticle.url)
         // Add to log menu (notification bell) for later viewing
         addToLog(incomingArticle.title, incomingArticle.url, incomingArticle.peerName, incomingArticle.articleId, incomingArticle.sourceId)
         handleDismiss()
@@ -205,10 +188,8 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
     const handleGoToArticle = useCallback(() => {
         if (!incomingArticle) return
         if (!incomingArticle.articleId || !incomingArticle.sourceId) {
-            console.log("[P2P Notification] Cannot navigate - no articleId/sourceId")
             return
         }
-        console.log("[P2P Notification] Navigating to article:", incomingArticle.articleId, "in source:", incomingArticle.sourceId)
         
         // Store values before dismissing
         const { sourceId, articleId, feedName } = incomingArticle

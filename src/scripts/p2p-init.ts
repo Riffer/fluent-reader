@@ -60,11 +60,7 @@ export function clearPendingArticles() {
  * Call this once at app startup
  */
 export function initP2PMessageHandlers(): void {
-    console.log("[P2P] Initializing message handlers")
-    
     p2pConnectionManager.setOnMessage((peerHash, message) => {
-        console.log(`[P2P] Received message type: ${message.type}`)
-        
         if (message.type === "article-link") {
             handleArticleLink(peerHash, message)
         }
@@ -85,8 +81,6 @@ function handleArticleLink(peerHash: string, message: ShareMessage): void {
         title: message.title,
         timestamp: message.timestamp
     }
-    
-    console.log(`[P2P] Article received from ${message.senderName}: ${message.title}`)
     
     if (articleReceivedCallback) {
         articleReceivedCallback(articleData)

@@ -82,11 +82,7 @@ export class ContentViewManager {
             (function() {
                 // cssZoomBridge is exposed by preload via contextBridge
                 if (window.cssZoomBridge && typeof window.cssZoomBridge.reRegisterTouchEvents === 'function') {
-                    console.log('[ContentViewManager] Calling cssZoomBridge.reRegisterTouchEvents()');
                     window.cssZoomBridge.reRegisterTouchEvents();
-                } else {
-                    console.log('[ContentViewManager] cssZoomBridge not found - contextBridge may not be ready');
-                    console.log('[ContentViewManager] Available on window:', Object.keys(window).filter(k => k.includes('css') || k.includes('zoom') || k.includes('bridge')));
                 }
             })();
         `
@@ -94,7 +90,6 @@ export class ContentViewManager {
         this.contentView.webContents.executeJavaScript(script).catch(err => {
             console.error("[ContentViewManager] Failed to inject touch listeners:", err)
         })
-        console.log("[ContentViewManager] Touch event injection requested")
     }
     
     /**
@@ -102,14 +97,11 @@ export class ContentViewManager {
      */
     public initialize(parentWindow: BrowserWindow): void {
         if (this.contentView) {
-            console.warn("[ContentViewManager] Already initialized")
             return
         }
         
         this.parentWindow = parentWindow
         this.createContentView()
-        
-        console.log("[ContentViewManager] Initialized with preload:", this.preloadPath)
     }
     
     /**
@@ -117,11 +109,8 @@ export class ContentViewManager {
      */
     private createContentView(): void {
         try {
-            console.log("[ContentViewManager] Creating WebContentsView...")
-            
             // Create sandbox session for content isolation
             const sandboxSession = session.fromPartition("sandbox")
-            console.log("[ContentViewManager] Sandbox session created")
             
             this.contentView = new WebContentsView({
                 webPreferences: {
@@ -135,48 +124,34 @@ export class ContentViewManager {
                     webviewTag: false,
                 }
             })
-            console.log("[ContentViewManager] WebContentsView instance created")
             
             // Set background color to prevent white flash on dark pages
             // Using transparent - let's see if this works
             this.contentView.setBackgroundColor('#00000000')  // Transparent
-            console.log("[ContentViewManager] Background color set to transparent")
             
             // Set initial bounds (hidden off-screen, or use saved bounds if recreating)
             if (this.bounds && this.isVisible) {
                 this.contentView.setBounds(this.bounds)
-                console.log("[ContentViewManager] Using saved bounds:", this.bounds)
             } else {
                 this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
-                console.log("[ContentViewManager] Initial bounds set (off-screen)")
             }
             
             // Add to parent window's content view
             if (this.parentWindow && !this.parentWindow.isDestroyed()) {
                 this.parentWindow.contentView.addChildView(this.contentView)
-                console.log("[ContentViewManager] Added to parent window")
             }
             
             // Setup navigation events
-            this.setupNavigationEvents()
-            console.log("[ContentViewManager] Navigation events setup")
+            this.setupNavigationEvents())
             
             // Setup context menu
             this.setupContextMenu()
-            console.log("[ContentViewManager] Context menu setup")
             
             // Forward ContentView console messages to main process
-            this.contentView.webContents.on('console-message', (event, level, message, line, sourceId) => {
-                if (message.includes('[ContentPreload]')) {
-                    console.log(`[ContentView] ${message}`)
-                }
-            })
+            // (disabled - too verbose)
             
             // Setup keyboard events forwarding
             this.setupKeyboardEvents()
-            console.log("[ContentViewManager] Keyboard events setup")
-            
-            console.log("[ContentViewManager] WebContentsView created successfully")
         } catch (e) {
             console.error("[ContentViewManager] Error creating WebContentsView:", e)
         }
@@ -189,8 +164,6 @@ export class ContentViewManager {
      * The ONLY reliable fix is to destroy and recreate the entire view.
      */
     private recreateContentView(): void {
-        console.log("[ContentViewManager] NUCLEAR OPTION: Recreating WebContentsView...")
-        
         if (!this.parentWindow || this.parentWindow.isDestroyed()) {
             console.error("[ContentViewManager] Cannot recreate - no parent window")
             return
@@ -206,7 +179,6 @@ export class ContentViewManager {
                 this.parentWindow.contentView.removeChildView(this.contentView)
                 // webContents is destroyed automatically when view is removed
                 this.contentView = null
-                console.log("[ContentViewManager] Old WebContentsView destroyed")
             } catch (e) {
                 console.error("[ContentViewManager] Error destroying old view:", e)
             }
@@ -226,8 +198,6 @@ export class ContentViewManager {
                 this.contentView.setBounds(savedBounds)
             }
         }
-        
-        console.log("[ContentViewManager] WebContentsView recreated successfully")
     }
     
     /**
@@ -241,48 +211,33 @@ export class ContentViewManager {
         // did-start-navigation is the VERY FIRST event - TOO EARLY, Chromium resets it
         wc.on("did-start-navigation", (event, url, isInPlace, isMainFrame) => {
             if (!isMainFrame) return  // Only main frame navigations
-            
-            console.log("[ContentViewManager] EVENT: did-start-navigation -", url)
         })
         
         // did-commit-navigation is when server responds and page starts loading
         // This is the OPTIMAL time to hide - user sees old content until server responds
         wc.on("did-navigate", (event, url) => {
-            console.log("[ContentViewManager] EVENT: did-navigate -", url)
             this.currentUrl = url
             this.sendToRenderer("content-view-navigated", url)
             
             // LATE HIDE: Hide ContentView NOW - server has responded, new page is coming
             if (this.visualZoomEnabled && this.pendingEmulationShow && this.isVisible) {
-                console.log("[ContentViewManager] LATE-HIDE: Server responded, hiding ContentView now")
                 this.setVisible(false, true)  // preserveContent=true for blur
                 this.sendToRenderer("content-view-visual-zoom-loading")
             }
         })
         
         wc.on("did-start-loading", () => {
-            console.log("[ContentViewManager] EVENT: did-start-loading")
             this.sendToRenderer("content-view-loading", true)
-            
-            // DISABLED - inconsistent, sometimes too early
-            // if (this.visualZoomEnabled && this.pageLoaded) {
-            //     console.log("[ContentViewManager] EVENT: did-start-loading → Applying emulation")
-            //     this.applyDeviceEmulationForCurrentMode(true)
-            // }
         })
         
         wc.on("did-stop-loading", () => {
-            console.log("[ContentViewManager] EVENT: did-stop-loading")
             this.sendToRenderer("content-view-loading", false)
         })
         
         // DISABLED for testing - only did-start-navigation
         wc.on("dom-ready", () => {
-            console.log("[ContentViewManager] EVENT: dom-ready -", this.currentUrl)
-            
             // Mark page as loaded (safe for device emulation now)
             if (!this.pageLoaded) {
-                console.log("[ContentViewManager] pageLoaded was: false → setting to true (dom-ready)")
                 this.pageLoaded = true
             }
             
@@ -294,60 +249,50 @@ export class ContentViewManager {
                 // Visual Zoom mode: Send mode flag and level for overlay display
                 wc.send('set-visual-zoom-mode', true)
                 wc.send('set-visual-zoom-level', level)
-                console.log("[ContentViewManager] EVENT: dom-ready → Sent set-visual-zoom-mode + level:", level)
             } else {
                 // CSS Zoom mode: Send mode flag and zoom level to apply CSS transform
                 wc.send('set-visual-zoom-mode', false)
                 wc.send('content-view-set-css-zoom', level)
-                console.log("[ContentViewManager] EVENT: dom-ready → CSS Zoom mode: Sent content-view-set-css-zoom:", level)
             }
             
             // Apply emulation at dom-ready (earliest consistent point after Chromium reset)
-            console.log("[ContentViewManager] EVENT: dom-ready → Calling applyVisualZoomIfEnabled()")
             this.applyVisualZoomIfEnabled()
             
             // HIDE-SHOW STRATEGY: Show ContentView after emulation is applied
             if (this.pendingEmulationShow && this.visualZoomEnabled) {
-                console.log("[ContentViewManager] EVENT: dom-ready → pendingEmulationShow: showing ContentView now")
                 this.pendingEmulationShow = false
                 // Small delay to ensure emulation has taken effect
                 setTimeout(() => {
                     this.setVisible(true, false)
                     // Notify renderer that ContentView is now visible (hide loading spinner)
                     this.sendToRenderer("content-view-visual-zoom-ready")
-                    console.log("[ContentViewManager] ContentView shown after emulation applied")
                     
                     // === FOCUS FIX: Move focus away, then back to ContentView ===
                     // First focus the main window to "reset" focus
                     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                         this.mainWindow.webContents.focus()
-                        console.log("[ContentViewManager] Focus moved to main window")
                     }
                     
                     // Then focus ContentView after a delay
                     setTimeout(() => {
                         if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
                             this.contentView.webContents.focus()
-                            console.log("[ContentViewManager] Focus set to ContentView")
                         }
                     }, 1)
                 }, 10)
             } else {
                 // === CSS ZOOM MODE: Aggressive workarounds for touch event delivery ===
                 // Without these, the ContentView won't receive touch events after navigation
-                console.log("[ContentViewManager] EVENT: dom-ready → CSS Zoom mode: Applying touch event workarounds")
                 setTimeout(() => {
                     if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
                         // WORKAROUND 1: Blur-Focus cycle to reset input routing
                         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                             this.mainWindow.webContents.focus()
-                            console.log("[ContentViewManager] Focus moved to main window (blur ContentView)")
                         }
                         
                         setTimeout(() => {
                             if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
                                 this.contentView.webContents.focus()
-                                console.log("[ContentViewManager] Focus returned to ContentView")
                                 
                                 // WORKAROUND 2: Re-apply bounds to trigger Chromium's input re-routing
                                 if (this.contentView && this.bounds) {
@@ -357,7 +302,6 @@ export class ContentViewManager {
                                     setTimeout(() => {
                                         if (this.contentView && !this.contentView.webContents.isDestroyed()) {
                                             this.contentView.setBounds(bounds)
-                                            console.log("[ContentViewManager] Re-applied bounds to reset input routing")
                                         }
                                     }, 1)
                                 }
@@ -372,19 +316,11 @@ export class ContentViewManager {
         })
         
         wc.on("did-finish-load", () => {
-            console.log("[ContentViewManager] EVENT: did-finish-load -", this.currentUrl)
             // pageLoaded should already be true from dom-ready
             if (!this.pageLoaded) {
-                console.log("[ContentViewManager] pageLoaded was: false → setting to true (did-finish-load fallback)")
                 this.pageLoaded = true
             }
             this.sendToRenderer("content-view-loaded", this.currentUrl)
-            
-            // DISABLED - testing did-start-navigation only
-            // if (this.visualZoomEnabled) {
-            //     console.log("[ContentViewManager] EVENT: did-finish-load → Verifying emulation is applied")
-            //     this.applyVisualZoomIfEnabled()
-            // }
             this.emulationAppliedBeforeLoad = false  // Reset flag
         })
         
@@ -394,7 +330,6 @@ export class ContentViewManager {
             
             // Only report main frame errors, not subresource errors (ads, tracking, etc.)
             if (!isMainFrame) {
-                console.log("[ContentViewManager] Subresource load failed (ignored):", validatedURL)
                 return
             }
             
@@ -404,7 +339,6 @@ export class ContentViewManager {
             // === RECOVERY: Show ContentView on load failure ===
             // If we were waiting to show after emulation, we need to recover
             if (this.pendingEmulationShow) {
-                console.log("[ContentViewManager] Load failed - recovering: showing ContentView despite error")
                 this.pendingEmulationShow = false
                 this.setVisible(true, false)
                 this.sendToRenderer("content-view-visual-zoom-ready")  // Hide loading spinner
@@ -605,7 +539,6 @@ export class ContentViewManager {
             })
             
             fs.writeFileSync(result.filePath, response)
-            console.log("[ContentViewManager] Image saved to:", result.filePath)
         } catch (err) {
             console.error("[ContentViewManager] Failed to save image:", err)
         }
@@ -643,7 +576,6 @@ export class ContentViewManager {
             
             const image = nativeImage.createFromBuffer(response)
             clipboard.writeImage(image)
-            console.log("[ContentViewManager] Image copied to clipboard")
         } catch (err) {
             console.error("[ContentViewManager] Failed to copy image:", err)
         }
@@ -668,36 +600,29 @@ export class ContentViewManager {
      * Setup IPC handlers for renderer communication
      */
     private setupIpcHandlers(): void {
-        console.log("[ContentViewManager] Setting up IPC handlers...")
-        
         // Navigate to URL (legacy - prefer navigateWithSettings for new code)
         ipcMain.handle("content-view-navigate", async (event, url: string) => {
-            console.log("[ContentViewManager] IPC: navigate to", url)
             return this.navigate(url)
         })
         
         // Navigate with all settings bundled - eliminates race conditions
         ipcMain.handle("content-view-navigate-with-settings", async (event, url: string, settings: NavigationSettings) => {
-            console.log("[ContentViewManager] IPC: navigateWithSettings to", url, "settings:", settings)
             return this.navigateWithSettings(url, settings)
         })
         
         // Update bounds
         ipcMain.on("content-view-set-bounds", (event, bounds: ContentViewBounds) => {
-            console.log("[ContentViewManager] IPC: set bounds", bounds)
             this.setBounds(bounds)
         })
         
         // Show/hide content view
         // Second parameter: preserveContent (default false) - set true for blur-div situations
         ipcMain.on("content-view-set-visible", (event, visible: boolean, preserveContent: boolean = false) => {
-            console.log("[ContentViewManager] IPC: set visible", visible, "preserveContent:", preserveContent)
             this.setVisible(visible, preserveContent)
         })
         
         // Clear content view (load about:blank)
         ipcMain.on("content-view-clear", () => {
-            console.log("[ContentViewManager] IPC: clear")
             this.clear()
         })
         
@@ -708,7 +633,6 @@ export class ContentViewManager {
         
         // EXPERIMENTAL: Navigate via JavaScript (to test if Device Emulation survives)
         ipcMain.handle("content-view-navigate-via-js", async (event, url: string) => {
-            console.log("[ContentViewManager] IPC: navigate-via-js to", url)
             return this.navigateViaJs(url)
         })
         
@@ -720,22 +644,18 @@ export class ContentViewManager {
         // Set zoom factor (for +/- keyboard shortcuts - uses CSS zoom or Device Emulation)
         // IMPORTANT: This must be synchronous (sendSync) to ensure zoom is set BEFORE navigation starts
         ipcMain.on("content-view-set-zoom-factor", (event, factor: number) => {
-            console.log("[ContentViewManager] IPC: set zoom factor", factor)
             this.setZoomFactor(factor)
             event.returnValue = true  // For sendSync - ensures caller waits
         })
         
         // Set CSS zoom level directly (for preload-based zoom when Visual Zoom is OFF)
         ipcMain.on("content-view-set-css-zoom", (event, level: number) => {
-            console.log("[ContentViewManager] IPC: set css zoom level", level)
             this.setCssZoom(level)
         })
         
         // Get current CSS zoom level (synchronous - for preload initial load)
         ipcMain.on("get-css-zoom-level", (event) => {
-            const level = this.getCssZoomLevel()
-            console.log("[ContentViewManager] IPC sync: get-css-zoom-level →", level)
-            event.returnValue = level
+            event.returnValue = this.getCssZoomLevel()
         })
         
         // Get current CSS zoom level (async)
@@ -750,19 +670,16 @@ export class ContentViewManager {
         
         // Enable/disable visual zoom
         ipcMain.on("content-view-set-visual-zoom", (event, enabled: boolean) => {
-            console.log("[ContentViewManager] IPC: set visual zoom", enabled)
             this.visualZoomEnabled = enabled
             if (enabled) {
                 this.enableVisualZoom()
             } else {
                 this.disableVisualZoom()
             }
-            console.log("[ContentViewManager] IPC: visual zoom done")
         })
         
         // Recreate WebContentsView (needed when Visual Zoom setting changes)
         ipcMain.handle("content-view-recreate", async () => {
-            console.log("[ContentViewManager] IPC: recreate WebContentsView requested")
             this.recreateContentView()
             return true
         })
@@ -842,7 +759,6 @@ export class ContentViewManager {
         
         // Set mobile mode
         ipcMain.on("content-view-set-mobile-mode", (event, enabled: boolean) => {
-            console.log("[ContentViewManager] IPC: content-view-set-mobile-mode received, enabled:", enabled)
             this.setMobileMode(enabled)
         })
         
@@ -911,7 +827,6 @@ export class ContentViewManager {
      * Navigate content view to URL
      */
     public navigate(url: string): boolean {
-        console.log("[ContentViewManager] navigate called:", url)
         if (!this.contentView) {
             console.error("[ContentViewManager] Cannot navigate - not initialized")
             return false
@@ -919,14 +834,12 @@ export class ContentViewManager {
         
         try {
             this.currentUrl = url
-            console.log("[ContentViewManager] Navigating to:", url)
             
             // CRITICAL: Apply device emulation BEFORE loading the page
             // This prevents the "jump" when the page loads with wrong viewport
             // and then gets resized after did-finish-load
             // BUT: Only if a page was already loaded (not on first load - that crashes!)
             if (this.visualZoomEnabled && this.pageLoaded) {
-                console.log("[ContentViewManager] Pre-navigation: Applying device emulation (subsequent load)")
                 this.applyDeviceEmulationForCurrentMode(true)  // Force before page load
                 this.emulationAppliedBeforeLoad = true  // Skip did-finish-load emulation
             } else {
@@ -940,7 +853,6 @@ export class ContentViewManager {
                 }
             })
             
-            console.log("[ContentViewManager] loadURL called successfully")
             return true
         } catch (e) {
             console.error("[ContentViewManager] navigate error:", e)
@@ -959,13 +871,6 @@ export class ContentViewManager {
      * 4. Preload reads final settings via synchronous IPC on load
      */
     public navigateWithSettings(url: string, settings: NavigationSettings): boolean {
-        console.log("[ContentViewManager] ==========================================")
-        console.log("[ContentViewManager] navigateWithSettings called:", url)
-        console.log("[ContentViewManager] Settings:", JSON.stringify(settings))
-        console.log("[ContentViewManager] Current state: pageLoaded:", this.pageLoaded, 
-            "currentZoomFactor:", this.keyboardZoomFactor,
-            "visualZoomEnabled:", this.visualZoomEnabled)
-        
         if (!this.contentView) {
             console.error("[ContentViewManager] Cannot navigate - not initialized")
             return false
@@ -981,11 +886,6 @@ export class ContentViewManager {
             this.cssZoomLevel = (this.keyboardZoomFactor - 1.0) / 0.1
             // showZoomOverlay is read by preload via sync IPC, no need to store here
             
-            console.log("[ContentViewManager] Settings applied:",
-                "visualZoom:", this.visualZoomEnabled,
-                "mobileMode:", this.mobileMode,
-                "zoomFactor:", this.keyboardZoomFactor)
-            
             // === LATE-HIDE STRATEGY ===
             // Instead of hiding BEFORE navigation (user sees nothing during network wait),
             // we now hide in did-navigate event (when server responds).
@@ -994,7 +894,6 @@ export class ContentViewManager {
             if (this.visualZoomEnabled) {
                 // Set flag for did-navigate handler to know it should hide
                 this.pendingEmulationShow = true
-                console.log("[ContentViewManager] LATE-HIDE: Will hide in did-navigate event (after server responds)")
             }
             
             // === NUCLEAR OPTION for CSS Zoom Mode ===
@@ -1005,7 +904,6 @@ export class ContentViewManager {
             // touch events in the preload. Visual Zoom mode uses Device Emulation which
             // has its own touch handling.
             if (!this.visualZoomEnabled && this.pageLoaded) {
-                console.log("[ContentViewManager] CSS Zoom mode: Using NUCLEAR OPTION - recreating WebContentsView")
                 this.recreateContentView()
             }
             
@@ -1013,7 +911,6 @@ export class ContentViewManager {
             // Nuclear Option handles touch events by recreating WebContentsView
             // No need for data: → file: URL conversion anymore
             this.currentUrl = url
-            console.log("[ContentViewManager] Starting loadURL (emulation will be applied after dom-ready)")
             this.contentView.webContents.loadURL(url).catch(err => {
                 // Ignore aborted navigations
                 if (err.code !== "ERR_ABORTED") {
@@ -1021,8 +918,6 @@ export class ContentViewManager {
                 }
             })
             
-            console.log("[ContentViewManager] navigateWithSettings: loadURL called successfully")
-            console.log("[ContentViewManager] ==========================================")
             return true
         } catch (e) {
             console.error("[ContentViewManager] navigateWithSettings error:", e)
@@ -1036,8 +931,6 @@ export class ContentViewManager {
      * (as opposed to loadURL() which resets it)
      */
     public navigateViaJs(url: string): boolean {
-        console.log("[ContentViewManager] navigateViaJs called:", url)
-        
         if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
             console.error("[ContentViewManager] Cannot navigate - webContents not ready")
             return false
@@ -1046,7 +939,6 @@ export class ContentViewManager {
         // Send URL to preload script - it will do window.location.href = url
         this.currentUrl = url
         this.contentView.webContents.send('navigate-via-js', url)
-        console.log("[ContentViewManager] Sent navigate-via-js to preload")
         return true
     }
     
@@ -1072,7 +964,6 @@ export class ContentViewManager {
         
         if (this.contentView && this.isVisible) {
             this.contentView.setBounds(bounds)
-            console.log("[ContentViewManager] Bounds updated:", bounds)
             
             // Only reapply device emulation if page is loaded (like POC)
             if (this.pageLoaded) {
@@ -1088,23 +979,18 @@ export class ContentViewManager {
      *                          Set to true for blur-div situations where content should be preserved.
      */
     public setVisible(visible: boolean, preserveContent: boolean = false): void {
-        console.log("[ContentViewManager] setVisible called:", visible, "preserveContent:", preserveContent)
         this.isVisible = visible
         
         if (!this.contentView) {
-            console.log("[ContentViewManager] setVisible: no contentView!")
             return
         }
         
         try {
             if (visible) {
-                console.log("[ContentViewManager] setVisible: applying bounds", this.bounds)
                 this.contentView.setBounds(this.bounds)
-                console.log("[ContentViewManager] Shown at:", this.bounds)
             } else {
                 // Move off-screen to hide
                 this.contentView.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
-                console.log("[ContentViewManager] Hidden")
                 
                 // Clear content unless preserveContent is true (blur-div situation)
                 if (!preserveContent) {
@@ -1123,7 +1009,6 @@ export class ContentViewManager {
         if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
             return
         }
-        console.log("[ContentViewManager] Clearing content")
         this.currentUrl = ""
         this.pageLoaded = false
         this.contentView.webContents.loadURL("about:blank")
@@ -1146,13 +1031,11 @@ export class ContentViewManager {
      */
     public setZoomFactor(factor: number): void {
         if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
-            console.log("[ContentViewManager] setZoomFactor: webContents not ready")
             return
         }
         
         // Skip if emulation was already applied before navigation (async IPC arrived late)
         if (this.emulationAppliedBeforeLoad) {
-            console.log("[ContentViewManager] setZoomFactor: skipping - emulation already applied pre-navigation")
             // Still update the factor for next time
             this.keyboardZoomFactor = Math.max(0.25, Math.min(5.0, factor))
             // Keep cssZoomLevel in sync (don't round)
@@ -1173,7 +1056,6 @@ export class ContentViewManager {
             if (this.visualZoomEnabled) {
                 // With Device Emulation, use scale parameter
                 this.applyDeviceEmulationWithScale(clampedFactor)
-                console.log("[ContentViewManager] Zoom via Device Emulation scale:", clampedFactor)
                 // Send zoom level to preload for overlay display (don't round)
                 const level = (clampedFactor - 1.0) / 0.1
                 this.contentView.webContents.send('set-visual-zoom-level', level)
@@ -1195,7 +1077,6 @@ export class ContentViewManager {
      */
     public setCssZoom(level: number): void {
         if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
-            console.log("[ContentViewManager] setCssZoom: webContents not ready")
             return
         }
         
@@ -1205,7 +1086,6 @@ export class ContentViewManager {
         
         // Send to preload script
         this.contentView.webContents.send('content-view-set-css-zoom', clampedLevel)
-        console.log("[ContentViewManager] CSS Zoom via preload:", clampedLevel)
     }
     
     /**
@@ -1251,7 +1131,6 @@ export class ContentViewManager {
         try {
             this.contentView.webContents.loadURL('about:blank')
             this.pageLoaded = false
-            console.log("[ContentViewManager] Content cleared")
         } catch (e) {
             console.error("[ContentViewManager] clear error:", e)
         }
@@ -1262,13 +1141,11 @@ export class ContentViewManager {
      * Only sets the flag - actual emulation is applied after did-finish-load
      */
     public enableVisualZoom(): void {
-        console.log("[ContentViewManager] enableVisualZoom called - setting flag only")
         this.visualZoomEnabled = true
         
         // Notify preload to disable CSS-based zoom wrapper
         if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
             this.contentView.webContents.send('set-visual-zoom-mode', true)
-            console.log("[ContentViewManager] Sent set-visual-zoom-mode to preload")
         }
         
         // Device emulation will be applied in did-finish-load handler
@@ -1281,14 +1158,11 @@ export class ContentViewManager {
      * This is the KEY to enabling pinch-to-zoom!
      */
     private applyDeviceEmulation(): void {
-        console.log("[ContentViewManager] applyDeviceEmulation called - visualZoomEnabled:", this.visualZoomEnabled)
         if (!this.visualZoomEnabled || !this.contentView) {
-            console.log("[ContentViewManager] applyDeviceEmulation: skipping (disabled or no view)")
             return
         }
         
         // Use the central method that handles all modes
-        console.log("[ContentViewManager] applyDeviceEmulation: → calling applyDeviceEmulationForCurrentMode()")
         this.applyDeviceEmulationForCurrentMode()
     }
     
@@ -1296,7 +1170,6 @@ export class ContentViewManager {
      * Called after page load - reapply device emulation (like POC does)
      */
     private applyVisualZoomIfEnabled(): void {
-        console.log("[ContentViewManager] applyVisualZoomIfEnabled called")
         this.applyDeviceEmulation()
     }
     
@@ -1308,15 +1181,11 @@ export class ContentViewManager {
         if (!this.contentView) return
         
         this.visualZoomEnabled = false
-        console.log("[ContentViewManager] Visual zoom disabled (flag set)")
         
         // Only disable device emulation if a page has been loaded
         // Calling disableDeviceEmulation() on empty webContents causes V8 crash!
         if (this.pageLoaded && this.contentView.webContents && !this.contentView.webContents.isDestroyed()) {
             this.contentView.webContents.disableDeviceEmulation()
-            console.log("[ContentViewManager] Device emulation disabled")
-        } else {
-            console.log("[ContentViewManager] Skipping disableDeviceEmulation - page not loaded yet")
         }
     }
     
@@ -1333,11 +1202,9 @@ export class ContentViewManager {
         if (enabled) {
             // Set mobile user agent
             wc.setUserAgent(this.mobileUserAgent)
-            console.log("[ContentViewManager] Mobile user agent set")
         } else {
             // Reset to desktop user agent
             wc.setUserAgent("")
-            console.log("[ContentViewManager] Desktop user agent set")
         }
         
         // Only apply device emulation if a page has been loaded
@@ -1351,21 +1218,14 @@ export class ContentViewManager {
                 // Only disable emulation if both visual zoom and mobile mode are off
                 wc.disableDeviceEmulation()
             }
-        } else {
-            console.log("[ContentViewManager] Skipping device emulation - page not loaded yet")
         }
-        
-        console.log("[ContentViewManager] Mobile mode:", enabled, "Visual zoom:", this.visualZoomEnabled)
         
         // Inform preload script
         this.sendToContentView("set-mobile-mode", enabled)
         
         // Reload page so the server sees the new User-Agent
         if (this.pageLoaded) {
-            console.log("[ContentViewManager] Reloading page for User-Agent change...")
             wc.reload()
-        } else {
-            console.log("[ContentViewManager] Page not loaded, skipping reload")
         }
     }
     
@@ -1385,21 +1245,14 @@ export class ContentViewManager {
         const wc = this.contentView?.webContents
         if (!wc || wc.isDestroyed()) return
         
-        console.log("[ContentViewManager] applyDeviceEmulationForCurrentMode called:",
-            "forceBeforeLoad:", forceBeforeLoad,
-            "keyboardZoomFactor:", this.keyboardZoomFactor,
-            "pageLoaded:", this.pageLoaded)
-        
         // Safety check: don't apply device emulation before page is loaded
         // UNLESS forceBeforeLoad is set (for pre-navigation setup to prevent jump)
         if (!this.pageLoaded && !forceBeforeLoad) {
-            console.log("[ContentViewManager] applyDeviceEmulationForCurrentMode: page not loaded yet, skipping")
             return
         }
         
         const { width, height } = this.bounds
         if (width <= 0 || height <= 0) {
-            console.log("[ContentViewManager] applyDeviceEmulationForCurrentMode: invalid bounds")
             return
         }
         
@@ -1407,10 +1260,6 @@ export class ContentViewManager {
         let viewportWidth = width
         let viewportHeight = height
         let effectiveScale = this.keyboardZoomFactor
-        
-        console.log("[ContentViewManager] Calculating emulation:",
-            "physicalSize:", width, "x", height,
-            "initialScale:", effectiveScale)
         
         if (this.mobileMode) {
             // Mobile viewport is fixed at 768px (or less if screen is smaller)
@@ -1431,15 +1280,7 @@ export class ContentViewManager {
                 // New viewport = physical / effectiveScale
                 viewportWidth = Math.round(width / effectiveScale)
                 viewportHeight = Math.round(height / effectiveScale)
-                console.log("[ContentViewManager] ADAPTIVE: Scale", effectiveScale.toFixed(2),
-                    "exceeds critical", criticalScale.toFixed(2),
-                    "→ reducing viewport to", viewportWidth, "x", viewportHeight)
             }
-            
-            console.log("[ContentViewManager] Mobile auto-scale:",
-                "baseScale:", baseScale.toFixed(2),
-                "keyboardZoom:", this.keyboardZoomFactor,
-                "effectiveScale:", effectiveScale.toFixed(2))
         } else {
             // Normal mode (non-mobile)
             // EXPERIMENTAL: Adaptive viewport when scale exceeds 1.0
@@ -1449,9 +1290,6 @@ export class ContentViewManager {
                 // Reduce viewport proportionally to prevent overflow
                 viewportWidth = Math.round(width / effectiveScale)
                 viewportHeight = Math.round(height / effectiveScale)
-                console.log("[ContentViewManager] ADAPTIVE: Scale", effectiveScale.toFixed(2),
-                    "exceeds critical", criticalScale.toFixed(2),
-                    "→ reducing viewport to", viewportWidth, "x", viewportHeight)
             }
         }
         
@@ -1464,10 +1302,6 @@ export class ContentViewManager {
                 deviceScaleFactor: 1,
                 scale: effectiveScale,
             })
-            console.log("[ContentViewManager] Device emulation applied:",
-                "viewport:", viewportWidth, "x", viewportHeight,
-                "scale:", effectiveScale.toFixed(2),
-                "mobile:", this.mobileMode)
         } catch (e) {
             console.error("[ContentViewManager] applyDeviceEmulationForCurrentMode error:", e)
         }
