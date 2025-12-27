@@ -118,10 +118,9 @@ export class RSSSource {
     static async fetchItems(source: RSSSource) {
         try {
             let feed = await parseRSS(source.url)
-            console.log(`[fetchItems] "${source.name}": RSS returned ${feed.items?.length ?? 0} items`)
             return await this.checkItems(source, feed.items)
         } catch (e) {
-            // Erweitere Fehlermeldung um Source-Info
+            // Extend error message with source info
             const errorMsg = e instanceof Error ? e.message : String(e)
             console.error(`[fetchItems] Error fetching "${source.name}" (${source.url}): ${errorMsg}`)
             throw e
@@ -433,7 +432,7 @@ export function deleteSource(
             dispatch(deleteSourceDone(source))
             window.settings.saveGroups(getState().groups)
         } catch (err) {
-            console.log(err)
+            console.error(err)
         } finally {
             if (!batch) dispatch(saveSettings())
         }
