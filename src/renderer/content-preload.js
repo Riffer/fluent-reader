@@ -11,7 +11,6 @@ try {
   // Load initial zoom level synchronously (to prevent 100% flash)
   try {
     zoomLevel = ipcRenderer.sendSync('get-css-zoom-level') || 0;
-    console.log('[ContentPreload] Initial zoom level loaded:', zoomLevel);
   } catch (e) {
     console.warn('[ContentPreload] Could not load initial zoom level:', e);
   }
@@ -20,7 +19,6 @@ try {
   let showZoomOverlayEnabled = false;
   try {
     showZoomOverlayEnabled = ipcRenderer.sendSync('get-zoom-overlay');
-    console.log('[ContentPreload] Zoom Overlay initial state:', showZoomOverlayEnabled ? 'ON' : 'OFF');
   } catch (e) {
     console.warn('[ContentPreload] Could not load Zoom Overlay state:', e);
   }
@@ -34,7 +32,6 @@ try {
   let visualZoomEnabled = false;
   try {
     visualZoomEnabled = ipcRenderer.sendSync('get-visual-zoom');
-    console.log('[ContentPreload] Visual Zoom initial state:', visualZoomEnabled ? 'ON' : 'OFF');
   } catch (e) {
     console.warn('[ContentPreload] Could not load Visual Zoom state:', e);
   }
@@ -132,7 +129,6 @@ try {
     const factor = zoomLevelToFactor(level);
     const percentage = Math.round(factor * 100);
     const modeIndicator = mobileMode ? ' (M)' : ' (D)';
-    console.log('[ContentPreload] showZoomOverlay: level=', level, 'factor=', factor, 'percentage=', percentage, '%', 'zoomLevel var=', zoomLevel);
     updateOverlay(`Zoom: ${percentage}%${modeIndicator}`);
   }
 
@@ -151,7 +147,6 @@ try {
   function ensureZoomContainer() {
     let wrapper = document.getElementById('fr-zoom-wrapper');
     if (!wrapper) {
-      console.log('[ContentPreload] Creating zoom container - viewport:', window.innerWidth, 'x', window.innerHeight);
       // Create wrapper as fixed viewport (not scrollable)
       wrapper = document.createElement('div');
       wrapper.id = 'fr-zoom-wrapper';
@@ -250,11 +245,8 @@ try {
     const style = document.getElementById('fr-zoom-style');
     
     if (!wrapper || !container) {
-      console.log('[ContentPreload] removeZoomContainer: no container found');
       return;
     }
-    
-    console.log('[ContentPreload] Removing zoom container for Visual Zoom mode');
     
     // Move all children back to body
     while (container.firstChild) {
@@ -278,8 +270,6 @@ try {
     document.body.style.width = '';
     document.body.style.height = '';
     document.body.style.display = '';
-    
-    console.log('[ContentPreload] Zoom container removed - native Visual Zoom should work now');
   }
 
   // Apply zoom to container - Zoom can originate from any point
@@ -289,7 +279,6 @@ try {
     // With Visual Zoom: NO CSS-based zoom manipulation!
     // The native browser zoom (via enableDeviceEmulation) takes over.
     if (visualZoomEnabled) {
-      console.log('[ContentPreload] applyZoom skipped - Visual Zoom is enabled');
       return;
     }
     
@@ -386,70 +375,26 @@ try {
       if (!visualZoomEnabled) {
         applyZoom(zoomLevel, { notify: false });
       } else {
-        console.log('[ContentPreload] Skipping initial CSS zoom - Visual Zoom mode active');
         // But still show overlay if enabled (for Visual Zoom)
         if (showZoomOverlayEnabled) {
           showZoomOverlay(zoomLevel);
         }
       }
-      // Log initial scaling info
-      logCurrentScale('DOMContentLoaded');
     });
   } else {
     if (!visualZoomEnabled) {
       applyZoom(zoomLevel, { notify: false });
     } else {
-      console.log('[ContentPreload] Skipping initial CSS zoom - Visual Zoom mode active');
       // But still show overlay if enabled (for Visual Zoom)
       if (showZoomOverlayEnabled) {
         showZoomOverlay(zoomLevel);
       }
     }
-    // Log initial scaling info
-    logCurrentScale('Already loaded');
   }
-  
-  // === SCALE OBSERVER for Debugging ===
-  function logCurrentScale(reason) {
-    const vv = window.visualViewport;
-    const dpr = window.devicePixelRatio;
-    const innerW = window.innerWidth;
-    const innerH = window.innerHeight;
-    const outerW = window.outerWidth;
-    const outerH = window.outerHeight;
-    
-    let msg = `[ContentPreload] SCALE (${reason}): `;
-    msg += `innerSize=${innerW}x${innerH}, `;
-    msg += `outerSize=${outerW}x${outerH}, `;
-    msg += `DPR=${dpr.toFixed(2)}`;
-    
-    if (vv) {
-      msg += `, visualViewport: ${Math.round(vv.width)}x${Math.round(vv.height)} scale=${vv.scale.toFixed(2)}`;
-    }
-    
-    console.log(msg);
-  }
-  
-  // Observe visualViewport changes
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', () => {
-      logCurrentScale('visualViewport resize');
-    });
-    window.visualViewport.addEventListener('scroll', () => {
-      // Only log on significant scale changes, not scroll
-      // logCurrentScale('visualViewport scroll');
-    });
-  }
-  
-  // Also log on window resize
-  window.addEventListener('resize', () => {
-    logCurrentScale('window resize');
-  });
 
   // Listener for external zoom commands (from keyboard - preserve scroll position)
   // BUT: With Visual Zoom only track the level, DO NOT apply CSS zoom!
   ipcRenderer.on('content-view-set-css-zoom', (event, zoomLevel_) => {
-    console.log('[ContentPreload] Received content-view-set-css-zoom:', zoomLevel_, 'visualZoom:', visualZoomEnabled);
     zoomLevel = zoomLevel_;
     
     // With Visual Zoom: Do not apply CSS zoom (Device Emulation handles zoom)
@@ -483,20 +428,16 @@ try {
   // The CSS-based zoomLevel is not used with Visual Zoom,
   // but we still need a level for overlay display
   ipcRenderer.on('set-visual-zoom-level', (event, level) => {
-    console.log('[ContentPreload] Visual Zoom level update:', level);
     zoomLevel = level;  // Update internal tracking
     if (showZoomOverlayEnabled) {
       showZoomOverlay(level);
     }
-    // Log scale after receiving zoom level
-    setTimeout(() => logCurrentScale('after set-visual-zoom-level'), 50);
   });
   
   // Listener for Mobile Mode Status
   ipcRenderer.on('set-mobile-mode', (event, enabled) => {
     const wasEnabled = mobileMode;
     mobileMode = !!enabled;
-    console.log('[ContentPreload] Mobile mode changed:', wasEnabled ? 'ON' : 'OFF', '->', mobileMode ? 'ON' : 'OFF');
     // Briefly show overlay to indicate mode change (even if overlay is otherwise disabled)
     if (wasEnabled !== mobileMode) {
       const factor = zoomLevelToFactor(zoomLevel);
@@ -514,7 +455,6 @@ try {
   ipcRenderer.on('set-visual-zoom-mode', (event, enabled) => {
     const wasEnabled = visualZoomEnabled;
     visualZoomEnabled = !!enabled;
-    console.log('[ContentPreload] Visual Zoom mode changed:', wasEnabled ? 'ON' : 'OFF', '->', visualZoomEnabled ? 'ON' : 'OFF');
     
     // When Visual Zoom is enabled, remove CSS zoom container
     // so native browser pinch-zoom (via enableDeviceEmulation) works
@@ -535,15 +475,10 @@ try {
   let inputModeEnabled = false;
   ipcRenderer.on('set-input-mode', (event, enabled) => {
     inputModeEnabled = !!enabled;
-    console.log('[ContentPreload] Input mode changed:', inputModeEnabled ? 'ON (navigation disabled)' : 'OFF (navigation enabled)');
   });
 
   // EXPERIMENTAL: JavaScript-based navigation (to test if Device Emulation survives)
   ipcRenderer.on('navigate-via-js', (event, url) => {
-    console.log('[ContentPreload] Received navigate-via-js:', url);
-    console.log('[ContentPreload] Current emulation state before JS navigation:');
-    logCurrentScale('before JS navigation');
-    
     // Navigate using JavaScript - this might preserve Device Emulation!
     window.location.href = url;
   });
@@ -552,7 +487,6 @@ try {
   let nsfwCleanupEnabled = false;
   try {
     nsfwCleanupEnabled = ipcRenderer.sendSync('get-nsfw-cleanup');
-    console.log('[ContentPreload] NSFW-Cleanup loaded:', nsfwCleanupEnabled ? 'enabled' : 'disabled');
   } catch (e) {
     console.warn('[ContentPreload] Could not load NSFW-Cleanup setting:', e);
   }
@@ -561,7 +495,6 @@ try {
   let autoCookieConsentEnabled = false;
   try {
     autoCookieConsentEnabled = ipcRenderer.sendSync('get-auto-cookie-consent');
-    console.log('[ContentPreload] Auto Cookie-Consent loaded:', autoCookieConsentEnabled ? 'enabled' : 'disabled');
   } catch (e) {
     console.warn('[ContentPreload] Could not load Auto Cookie-Consent setting:', e);
   }
@@ -616,13 +549,11 @@ try {
     
     // Check if already registered on this document
     if (touchTarget._touchEventsRegistered) {
-      console.log('[ContentPreload] Touch events already registered on this document');
       return;
     }
     touchTarget._touchEventsRegistered = true;
     
     touchTarget.addEventListener('touchstart', (e) => {
-      console.log('[ContentPreload] touchstart received on document, touches:', e.touches.length, 'visualZoomEnabled:', visualZoomEnabled);
       try {
         // With Visual Zoom: Pass events through for native browser zoom
         if (visualZoomEnabled) return;
@@ -635,7 +566,6 @@ try {
             touch2.clientY - touch1.clientY
           );
           touchStartZoomLevel = zoomLevel;
-          console.log('[ContentPreload] 2-finger touch started, distance:', lastDistance, 'zoomLevel:', touchStartZoomLevel);
           
           // Calculate midpoint between both fingers
           lastTouchMidpointX = (touch1.clientX + touch2.clientX) / 2;
@@ -648,12 +578,10 @@ try {
       try {
         // With Visual Zoom: Pass events through for native browser zoom
         if (visualZoomEnabled) {
-          console.log('[ContentPreload] touchmove ignored (Visual Zoom)');
           return;
         }
         
         if (e.touches.length === 2 && lastDistance > 0) {
-          console.log('[ContentPreload] touchmove 2-finger, lastDistance:', lastDistance);
           e.preventDefault();
           const touch1 = e.touches[0];
           const touch2 = e.touches[1];
@@ -665,7 +593,6 @@ try {
           // Half speed for touchscreen (less sensitive)
           const scaleFactor = 1 + (scale - 1) / 2;
           const newFactor = zoomLevelToFactor(touchStartZoomLevel) * scaleFactor;
-          console.log('[ContentPreload] touchmove applying zoom, newFactor:', newFactor);
           
           // Calculate current finger midpoint
           const currentMidX = (touch1.clientX + touch2.clientX) / 2;
@@ -689,11 +616,8 @@ try {
     }, { passive: false, capture: true });
 
     touchTarget.addEventListener('touchend', () => {
-      console.log('[ContentPreload] touchend received');
       lastDistance = 0;
     }, { capture: true });
-
-    console.log('[ContentPreload] Touch event listeners registered on document (capture phase)');
   }
   
   // Register touch events immediately (for the initial document)
@@ -702,7 +626,6 @@ try {
   // On each navigation a new document is created - re-register then
   // DOMContentLoaded fires on each navigation, also for data: URLs
   document.addEventListener('DOMContentLoaded', () => {
-    console.log('[ContentPreload] DOMContentLoaded - re-registering touch events');
     registerTouchEvents();
   });
   
@@ -714,10 +637,8 @@ try {
   // executeJavaScript runs in Main World and sees a different window object.
   // Therefore we must use contextBridge to expose the function.
   const reRegisterTouchEvents = function() {
-    console.log('[ContentPreload] __registerCssZoomTouchEvents called from main process');
     // Force re-registration by clearing the flag on current document
     if (document._touchEventsRegistered) {
-      console.log('[ContentPreload] Clearing old touch registration flag');
       delete document._touchEventsRegistered;
     }
     registerTouchEvents();
@@ -731,7 +652,6 @@ try {
     contextBridge.exposeInMainWorld('cssZoomBridge', {
       reRegisterTouchEvents: reRegisterTouchEvents
     });
-    console.log('[ContentPreload] contextBridge exposed cssZoomBridge.reRegisterTouchEvents');
   } catch (e) {
     console.warn('[ContentPreload] contextBridge failed:', e);
   }
@@ -1185,12 +1105,10 @@ try {
                                cookieDialog.querySelector('button[data-testid="reject-nonessential-cookies-button"]');
           if (rejectButton) {
             rejectButton.click();
-            console.log('[ContentPreload] Cookie-Consent: Clicked Reddit reject button');
             return true;
           } else {
             // Fallback: Remove dialog if no button found
             cookieDialog.remove();
-            console.log('[ContentPreload] Cookie-Consent: Removed Reddit cookie dialog (no button found)');
             return true;
           }
         }
@@ -1247,8 +1165,6 @@ try {
     if (cookieConsentStarted || !hasCookieConsentPatterns()) return;
     cookieConsentStarted = true;
     
-    console.log('[ContentPreload] Starting Auto Cookie-Consent');
-    
     // Initial consent handling
     applyCookieConsent();
     
@@ -1263,7 +1179,6 @@ try {
         if (done && cookieConsentObserver) {
           cookieConsentObserver.disconnect();
           cookieConsentObserver = null;
-          console.log('[ContentPreload] Cookie-Consent complete, observer stopped');
           showOverlayMessage('Cookie-Consent done', 1500);
         }
       }, 100);
@@ -1293,8 +1208,6 @@ try {
     if (siteCleanupStarted || !hasSiteTransformations()) return;
     siteCleanupStarted = true;
     
-    console.log('[ContentPreload] Starting site cleanup');
-    
     // Initial cleanup
     applySiteCleanup();
     
@@ -1311,7 +1224,6 @@ try {
         if (cleanupDone && siteCleanupObserver) {
           siteCleanupObserver.disconnect();
           siteCleanupObserver = null;
-          console.log('[ContentPreload] Site cleanup complete, observer stopped');
           showOverlayMessage('Site cleanup complete', 2000);
         }
       }, 50);
