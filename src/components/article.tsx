@@ -2432,8 +2432,8 @@ a { color: var(--primary); text-decoration: none; }
 a:hover, a:active { color: var(--primary-alt); text-decoration: underline; }
 
 /* Main Container */
-#main { display: none; width: 100%; margin: 0; max-width: 700px; margin: 0 auto; }
-body.vertical #main { max-width: unset; max-height: 700px; margin: auto 0; }
+#main { display: none; width: 100%; margin: 0; max-width: 100%; margin: 0 auto; }
+body.vertical #main { max-width: unset; max-height: 100%; margin: auto 0; }
 #main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -2442,7 +2442,7 @@ body.vertical #main { max-width: unset; max-height: 700px; margin: auto 0; }
 #main > p.date { color: var(--gray); font-size: 0.875rem; margin-block-start: 0.5rem; }
 
 /* Article Content */
-#main > article { max-width: 800px; margin: 20px auto 0; padding: 0 16px; }
+#main > article { max-width: 1024px; margin: 8px auto 0; padding: 0 8px; }
 article { line-height: 1.6; }
 body.vertical article { line-height: 1.5; }
 body.vertical article p { text-indent: 2rem; }
