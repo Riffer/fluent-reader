@@ -1074,30 +1074,39 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     break
                 case "ArrowLeft":
                 case "ArrowRight":
-                    this.props.offsetItem(input.key === "ArrowLeft" ? -1 : 1)
+                    // Debounce: ignore key repeat for article navigation
+                    if (!input.isAutoRepeat) {
+                        this.props.offsetItem(input.key === "ArrowLeft" ? -1 : 1)
+                    }
                     break
                 case "l":
                 case "L":
                     this.toggleWebpage()
                     break
                 case "+":
-                    this.applyZoom((this.state.zoom || 0) + 1);
+                    // Debounce: ignore key repeat for zoom
+                    if (!input.isAutoRepeat) {
+                        this.applyZoom((this.state.zoom || 0) + 1);
+                    }
                     break;
                 case "-":
-                    this.applyZoom((this.state.zoom || 0) - 1);
+                    // Debounce: ignore key repeat for zoom
+                    if (!input.isAutoRepeat) {
+                        this.applyZoom((this.state.zoom || 0) - 1);
+                    }
                     break;
                 case "#":
                     this.applyZoom(0);
                     break;
                 case "*":
                     // Ctrl+Shift+8: Zoom in
-                    if (input.shift) {
+                    if (input.shift && !input.isAutoRepeat) {
                         this.applyZoom((this.state.zoom || 0) + 1);
                     }
                     break;
                 case "_":
                     // Ctrl+Shift+Minus: Zoom out
-                    if (input.shift) {
+                    if (input.shift && !input.isAutoRepeat) {
                         this.applyZoom((this.state.zoom || 0) - 1);
                     }
                     break;
