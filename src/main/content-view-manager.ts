@@ -896,14 +896,14 @@ export class ContentViewManager {
                 this.pendingEmulationShow = true
             }
             
-            // === NUCLEAR OPTION for CSS Zoom Mode ===
-            // Electron's WebContentsView has a bug where touch events stop being delivered
-            // to the preload script after navigating to a new page. The ONLY reliable fix
-            // is to destroy and recreate the entire WebContentsView for each navigation.
-            // This is only needed for CSS Zoom mode (visualZoom=false) where we handle
-            // touch events in the preload. Visual Zoom mode uses Device Emulation which
-            // has its own touch handling.
-            if (!this.visualZoomEnabled && this.pageLoaded) {
+            // === NUCLEAR OPTION for ALL Navigation ===
+            // Recreate WebContentsView on every article change to:
+            // 1. Eliminate stale event listeners from previous navigation
+            // 2. Clear browser stack/history to prevent race conditions
+            // 3. Ensure clean state for Device Emulation (Visual Zoom) or CSS Zoom
+            // Originally only used for CSS Zoom (touch event delivery bug), but
+            // also fixes article-skipping issues when navigating quickly in Visual Zoom mode.
+            if (this.pageLoaded) {
                 this.recreateContentView()
             }
             
