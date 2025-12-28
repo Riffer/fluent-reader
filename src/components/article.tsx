@@ -103,6 +103,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private contentViewCurrentUrl: string | null = null  // Track current URL to avoid double navigation
     private pendingContentViewFocus: boolean = false  // Track if we need to focus ContentView after load
     private contentViewInitialized: boolean = false  // Track if Device Emulation is already set (for JS navigation experiment)
+    
+    // Navigation-Lock: Prevents phantom keyDown events after recreateContentView
+    // When ContentView is recreated during article navigation, the new view sends
+    // a duplicate keyDown event for any still-pressed keys (~60-70ms later).
+    // We track which key triggered navigation and block duplicates for 150ms.
+    private lastNavigationKey: string = ''
+    private lastNavigationTime: number = 0
 
     // Helper getters for content mode checks
     private get isWebpageMode(): boolean {
@@ -1011,19 +1018,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
     }
 
-    // Track last processed key event to prevent duplicates
-    private lastKeyEventTime: number = 0;
-    private lastKeyEventKey: string = '';
-
     keyDownHandler = (input: Electron.Input) => {
-        // Debounce duplicate events from multiple sources
-        const now = Date.now();
-        const eventKey = `${input.type}-${input.key}-${input.control}-${input.shift}-${input.alt}`;
-        if (now - this.lastKeyEventTime < 50 && eventKey === this.lastKeyEventKey) {
-            return; // Ignore duplicate event within 50ms
+        // Navigation-Lock: Block phantom keyDown events during article navigation
+        // When recreateContentView creates a new WebContentsView, it sends a duplicate
+        // keyDown for any still-pressed key (~60-70ms after original).
+        // Block same key for 150ms after navigation.
+        if (input.key === 'ArrowLeft' || input.key === 'ArrowRight') {
+            const now = Date.now()
+            if (input.key === this.lastNavigationKey && now - this.lastNavigationTime < 150) {
+                return  // Ignore phantom event from recreateContentView
+            }
         }
-        this.lastKeyEventTime = now;
-        this.lastKeyEventKey = eventKey;
 
         if (input.type === "keyDown")
         {
@@ -1074,8 +1079,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     break
                 case "ArrowLeft":
                 case "ArrowRight":
-                    // Debounce: ignore key repeat for article navigation
+                    // Ignore key repeat (held key) for article navigation
                     if (!input.isAutoRepeat) {
+                        // Record which key triggered navigation for phantom-event blocking
+                        this.lastNavigationKey = input.key
+                        this.lastNavigationTime = Date.now()
                         this.props.offsetItem(input.key === "ArrowLeft" ? -1 : 1)
                     }
                     break
