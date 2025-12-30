@@ -53,6 +53,7 @@ const limitedIpcRenderer = {
             "content-view-title",
             "content-view-context-menu",
             "content-view-input",
+            "content-view-js-dialog",  // JavaScript alert/confirm/prompt from articles
         ]
         if (allowedOnChannels.includes(channel)) {
             ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))

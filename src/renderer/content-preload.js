@@ -4,6 +4,50 @@
 try {
   const { ipcRenderer, contextBridge } = require('electron');
 
+  // ===== JavaScript Dialog Interceptor =====
+  // Intercept alert/confirm/prompt from article pages to prevent mysterious empty dialogs
+  // and to log what the website is trying to show the user.
+  // These dialogs would otherwise appear as native Electron dialogs.
+  
+  // Store original functions before any page script can modify them
+  const originalAlert = window.alert;
+  const originalConfirm = window.confirm;
+  const originalPrompt = window.prompt;
+  
+  // Override alert() - just log and suppress (or show in console)
+  window.alert = function(message) {
+    const msg = message !== undefined ? String(message) : '';
+    console.warn('[ContentPreload] Website called alert():', msg || '(empty message)');
+    // Log via IPC for main process visibility
+    try {
+      ipcRenderer.send('content-view-js-dialog', { type: 'alert', message: msg });
+    } catch (e) {}
+    // Suppress the dialog - don't call originalAlert
+    // If you want to allow alerts, uncomment: return originalAlert.call(window, message);
+  };
+  
+  // Override confirm() - log and return false (deny)
+  window.confirm = function(message) {
+    const msg = message !== undefined ? String(message) : '';
+    console.warn('[ContentPreload] Website called confirm():', msg || '(empty message)');
+    try {
+      ipcRenderer.send('content-view-js-dialog', { type: 'confirm', message: msg });
+    } catch (e) {}
+    // Return false to deny the action
+    return false;
+  };
+  
+  // Override prompt() - log and return null (cancelled)
+  window.prompt = function(message, defaultValue) {
+    const msg = message !== undefined ? String(message) : '';
+    console.warn('[ContentPreload] Website called prompt():', msg || '(empty message)', 'default:', defaultValue);
+    try {
+      ipcRenderer.send('content-view-js-dialog', { type: 'prompt', message: msg, defaultValue: defaultValue });
+    } catch (e) {}
+    // Return null to indicate cancelled
+    return null;
+  };
+
   let zoomLevel = 0; // zoomLevel: 0 = 100%, 1 = 110%, -1 = 90%, etc. (lineare 10%-Schritte)
   const MIN_ZOOM_LEVEL = -6;  // 40% minimum zoom (100% - 6*10%)
   const MAX_ZOOM_LEVEL = 40;  // 500% maximum zoom (100% + 40*10%)

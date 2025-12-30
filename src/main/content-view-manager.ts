@@ -782,6 +782,22 @@ export class ContentViewManager {
             }
         })
         
+        // JavaScript Dialog Interceptor - log alerts/confirms/prompts from article pages
+        ipcMain.on("content-view-js-dialog", (event, data: { type: string, message: string, defaultValue?: string }) => {
+            const url = this.currentUrl || 'unknown'
+            console.log(`[ContentViewManager] JavaScript ${data.type}() from article:`, {
+                url: url,
+                message: data.message || '(empty)',
+                defaultValue: data.defaultValue
+            })
+            // Send to main window console for visibility in app DevTools
+            this.sendToRenderer("content-view-js-dialog", {
+                type: data.type,
+                message: data.message,
+                url: url
+            })
+        })
+        
         // Capture screenshot of content view
         ipcMain.handle("content-view-capture-screen", async () => {
             return await this.captureScreen()

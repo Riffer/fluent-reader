@@ -446,6 +446,19 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         });
         this.contentViewCleanup.push(unsubContextMenu);
         
+        // JavaScript Dialog Interceptor - log alerts/confirms/prompts from article pages
+        // These are suppressed in content-preload.js but we log them here for debugging
+        const jsDialogHandler = (_event: any, data: { type: string, message: string, url: string }) => {
+            console.warn(`[Article] Website JavaScript ${data.type}():`, {
+                url: data.url,
+                message: data.message || '(empty message)'
+            });
+        };
+        (window as any).ipcRenderer?.on("content-view-js-dialog", jsDialogHandler);
+        this.contentViewCleanup.push(() => {
+            (window as any).ipcRenderer?.removeListener("content-view-js-dialog", jsDialogHandler);
+        });
+        
         // Keyboard input forwarding
         const unsubInput = window.contentView.onInput((input) => {
             this.keyDownHandler(input);
