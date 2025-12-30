@@ -239,7 +239,7 @@
     display: block;
     position: absolute;
     height: 100%;
-    border-left: 2px solid var(--primary);
+    border-left: 4px solid var(--primary);
 }
 .list-card.read,
 .list-card.read p.snippet {

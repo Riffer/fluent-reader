@@ -1458,12 +1458,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Note: Legacy WebView code removed - ContentView is the only display method
         // ContentView is initialized via ref callback in render()
         
-        // Scroll to current article card in feed list
+        // Scroll to current article card in feed list (use false to prevent centering/wobble)
         let card = document.querySelector(
             `#refocus div[data-iid="${this.props.item._id}"]`
         ) as HTMLElement
-        // @ts-ignore
-        if (card) card.scrollIntoViewIfNeeded()
+        if (card) this.scrollCardIntoViewStable(card)
     }
     componentDidUpdate = (prevProps: ArticleProps, prevState: ArticleState) => {
         if (prevProps.item._id != this.props.item._id) {
@@ -1477,15 +1476,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 this.setInputMode(false);
             }
             
-            // Scroll feed list to new article
+            // Scroll feed list to new article (use stable scroll to prevent wobble at edges)
             const card = document.querySelector(
                 `#refocus div[data-iid="${this.props.item._id}"]`
             ) as HTMLElement
-            if (card && card.scrollIntoViewIfNeeded) {
-                card.scrollIntoViewIfNeeded(false) // false = only scroll if needed, doesn't center
-            } else if (card) {
-                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-            }
+            if (card) this.scrollCardIntoViewStable(card)
             
             // Cookies des alten Artikels speichern (falls persistCookies aktiviert war)
             if (prevProps.source.persistCookies) {
@@ -1903,6 +1898,37 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if ((window as any).ipcRenderer) {
             (window as any).ipcRenderer.removeAllListeners('content-view-zoom-changed');
         }
+    }
+
+    /**
+     * Stable scroll method that avoids wobble at container edges.
+     * Only scrolls if the card is actually outside the visible area.
+     * Uses a small margin to prevent edge-case oscillation.
+     */
+    scrollCardIntoViewStable = (card: HTMLElement) => {
+        const scrollContainer = document.getElementById('refocus')
+        if (!scrollContainer) return
+        
+        const containerRect = scrollContainer.getBoundingClientRect()
+        const cardRect = card.getBoundingClientRect()
+        
+        // Add a small margin (5px) to prevent edge-case wobble
+        const margin = 5
+        
+        // Check if card is already fully visible with margin
+        const isAboveView = cardRect.top < containerRect.top + margin
+        const isBelowView = cardRect.bottom > containerRect.bottom - margin
+        
+        if (isAboveView) {
+            // Card is above visible area - scroll to show at top
+            const scrollTop = scrollContainer.scrollTop + (cardRect.top - containerRect.top) - margin
+            scrollContainer.scrollTop = Math.max(0, scrollTop)
+        } else if (isBelowView) {
+            // Card is below visible area - scroll to show at bottom
+            const scrollTop = scrollContainer.scrollTop + (cardRect.bottom - containerRect.bottom) + margin
+            scrollContainer.scrollTop = scrollTop
+        }
+        // If card is already visible, do nothing (prevents wobble)
     }
 
     toggleWebpage = () => {

@@ -1,4 +1,2 @@
 
 * heise: in der Visual Zoom Variante scheint das Scrolling per Cursor Up/Down nicht normal zu funktioniern (der Scroll läuft extrem kleinteilig)
-
-* Youtube (und andere Video-Player) sollen bei F11 (also Vergrößerung auf den gesamten Schrim) auch wirklich den ganzen Bildschirm einnehmen - da könnte mit der WebContentsView-Variante sogar recht einfach sein, da sie sowieso über dem originären Fenster schwebt
