@@ -704,8 +704,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const ipcRenderer = (window as any).ipcRenderer;
         if (ipcRenderer && typeof ipcRenderer.send === 'function') {
             // FIXED viewport width for consistent mobile behavior
-            // 768px is the standard breakpoint for Mobile/Tablet
-            const viewportWidth = 768;
+            // 767px triggers CSS responsive breakpoints (just below common 768px tablet breakpoint)
+            const viewportWidth = 767;
             let viewportHeight = 844;
             
             // Try to get height from ContentView placeholder

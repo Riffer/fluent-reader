@@ -1156,7 +1156,7 @@ export class ContentViewManager {
         let effectiveScale = this.keyboardZoomFactor
         
         if (this.mobileMode && width > 0) {
-            const mobileViewport = Math.min(768, width)
+            const mobileViewport = Math.min(767, width)
             viewportWidth = mobileViewport
             
             const baseScale = width / mobileViewport
@@ -1261,7 +1261,7 @@ export class ContentViewManager {
     
     /**
      * Set mobile mode (viewport emulation only - no User-Agent change)
-     * Triggers CSS responsive breakpoints by emulating a narrow viewport (768px)
+     * Triggers CSS responsive breakpoints by emulating a narrow viewport (767px)
      * No page reload needed - works client-side only!
      */
     public setMobileMode(enabled: boolean): void {
@@ -1318,12 +1318,12 @@ export class ContentViewManager {
         let effectiveScale = this.keyboardZoomFactor
         
         if (this.mobileMode) {
-            // Mobile viewport is fixed at 768px (or less if screen is smaller)
-            const mobileViewport = Math.min(768, width)
+            // Mobile viewport is fixed at 767px (or less if screen is smaller)
+            const mobileViewport = Math.min(767, width)
             viewportWidth = mobileViewport
             
             // Auto-scale to fill available width, then apply keyboard zoom on top
-            // Example: width=1086, mobileViewport=768 → baseScale = 1086/768 ≈ 1.41
+            // Example: width=1086, mobileViewport=767 → baseScale = 1086/767 ≈ 1.42
             const baseScale = width / mobileViewport
             effectiveScale = baseScale * this.keyboardZoomFactor
             
