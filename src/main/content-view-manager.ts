@@ -99,6 +99,27 @@ export class ContentViewManager {
     }
     
     /**
+     * Suppress JavaScript dialogs (alert/confirm/prompt) from article pages
+     * This must run in the MAIN WORLD (not preload) to override the page's functions
+     * Prevents mysterious empty "Error:" dialogs from websites
+     */
+    private injectDialogSuppression(): void {
+        if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
+            return
+        }
+        
+        this.contentView.webContents.executeJavaScript(`
+            (function() {
+                if (window.__dialogsSuppressed) return;
+                window.__dialogsSuppressed = true;
+                window.alert = function(msg) { console.warn('[Suppressed alert]', msg); };
+                window.confirm = function(msg) { console.warn('[Suppressed confirm]', msg); return false; };
+                window.prompt = function(msg) { console.warn('[Suppressed prompt]', msg); return null; };
+            })();
+        `).catch(() => {})  // Ignore errors (e.g., if page navigates away)
+    }
+    
+    /**
      * Initialize the content view and attach to parent window
      */
     public initialize(parentWindow: BrowserWindow): void {
@@ -225,6 +246,9 @@ export class ContentViewManager {
             this.currentUrl = url
             this.sendToRenderer("content-view-navigated", url)
             
+            // Suppress JavaScript dialogs EARLY (before any page script runs)
+            this.injectDialogSuppression()
+            
             // LATE HIDE: Hide ContentView NOW - server has responded, new page is coming
             // Apply to both Visual Zoom AND Mobile Mode (viewport emulation)
             if ((this.visualZoomEnabled || this.mobileMode) && this.pendingEmulationShow && this.isVisible) {
@@ -248,16 +272,8 @@ export class ContentViewManager {
                 this.pageLoaded = true
             }
             
-            // Suppress JavaScript dialogs (alert/confirm/prompt) from article pages
-            // This must run in the MAIN WORLD (not preload) to override the page's functions
-            // Prevents mysterious empty "Error:" dialogs from websites
-            wc.executeJavaScript(`
-                (function() {
-                    window.alert = function(msg) { console.warn('[Suppressed alert]', msg); };
-                    window.confirm = function(msg) { console.warn('[Suppressed confirm]', msg); return false; };
-                    window.prompt = function(msg) { console.warn('[Suppressed prompt]', msg); return null; };
-                })();
-            `).catch(() => {})  // Ignore errors (e.g., if page navigates away)
+            // Suppress JavaScript dialogs again at dom-ready (backup)
+            this.injectDialogSuppression()
             
             // Send zoom settings to preload based on mode
             // Don't round - preserve fractional values from pinch-zoom (e.g., 3.5 = 135%)
