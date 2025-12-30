@@ -15,6 +15,7 @@ import path from "path"
 import https from "https"
 import http from "http"
 import fs from "fs"
+import { isMobileUserAgentEnabled } from "./settings"
 
 // Content view bounds (will be updated by renderer)
 interface ContentViewBounds {
@@ -220,7 +221,8 @@ export class ContentViewManager {
             this.sendToRenderer("content-view-navigated", url)
             
             // LATE HIDE: Hide ContentView NOW - server has responded, new page is coming
-            if (this.visualZoomEnabled && this.pendingEmulationShow && this.isVisible) {
+            // Apply to both Visual Zoom AND Mobile Mode (viewport emulation)
+            if ((this.visualZoomEnabled || this.mobileMode) && this.pendingEmulationShow && this.isVisible) {
                 this.setVisible(false, true)  // preserveContent=true for blur
                 this.sendToRenderer("content-view-visual-zoom-loading")
             }
@@ -259,7 +261,8 @@ export class ContentViewManager {
             this.applyVisualZoomIfEnabled()
             
             // HIDE-SHOW STRATEGY: Show ContentView after emulation is applied
-            if (this.pendingEmulationShow && this.visualZoomEnabled) {
+            // Apply to both Visual Zoom AND Mobile Mode (viewport emulation)
+            if (this.pendingEmulationShow && (this.visualZoomEnabled || this.mobileMode)) {
                 this.pendingEmulationShow = false
                 // Small delay to ensure emulation has taken effect
                 setTimeout(() => {
@@ -762,6 +765,11 @@ export class ContentViewManager {
             this.setMobileMode(enabled)
         })
         
+        // Get mobile mode (synchronous - for preload initial load)
+        ipcMain.on("get-mobile-mode", (event) => {
+            event.returnValue = this.mobileMode
+        })
+        
         // Focus content view
         ipcMain.on("content-view-focus", () => {
             if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
@@ -886,12 +894,21 @@ export class ContentViewManager {
             this.cssZoomLevel = (this.keyboardZoomFactor - 1.0) / 0.1
             // showZoomOverlay is read by preload via sync IPC, no need to store here
             
+            // === STEP 1b: Apply Mobile User-Agent if globally enabled ===
+            // This is separate from Mobile Mode (viewport) - it sends mobile UA to server
+            if (isMobileUserAgentEnabled()) {
+                this.contentView.webContents.setUserAgent(this.mobileUserAgent)
+            } else {
+                this.contentView.webContents.setUserAgent("")  // Reset to default
+            }
+            
             // === LATE-HIDE STRATEGY ===
             // Instead of hiding BEFORE navigation (user sees nothing during network wait),
             // we now hide in did-navigate event (when server responds).
             // This lets the user see the OLD content while waiting for the server.
             // Flow: loadURL() → [user sees old page] → did-navigate (HIDE) → dom-ready (SHOW)
-            if (this.visualZoomEnabled) {
+            // Apply to both Visual Zoom AND Mobile Mode (viewport emulation)
+            if (this.visualZoomEnabled || this.mobileMode) {
                 // Set flag for did-navigate handler to know it should hide
                 this.pendingEmulationShow = true
             }
@@ -1153,17 +1170,20 @@ export class ContentViewManager {
     }
     
     /**
-     * Apply device emulation for visual zoom
+     * Apply device emulation for visual zoom or mobile mode
      * ONLY called after did-finish-load (like in POC)
-     * This is the KEY to enabling pinch-to-zoom!
+     * This is the KEY to enabling pinch-to-zoom and mobile viewport!
      */
     private applyDeviceEmulation(): void {
-        if (!this.visualZoomEnabled || !this.contentView) {
+        if (!this.contentView) {
             return
         }
         
-        // Use the central method that handles all modes
-        this.applyDeviceEmulationForCurrentMode()
+        // Apply emulation if Visual Zoom OR Mobile Mode is enabled
+        if (this.visualZoomEnabled || this.mobileMode) {
+            // Use the central method that handles all modes
+            this.applyDeviceEmulationForCurrentMode()
+        }
     }
     
     /**
@@ -1190,43 +1210,29 @@ export class ContentViewManager {
     }
     
     /**
-     * Set mobile mode (changes user agent, optionally viewport)
-     * Works alongside Visual Zoom - just adds mobile user agent
+     * Set mobile mode (viewport emulation only - no User-Agent change)
+     * Triggers CSS responsive breakpoints by emulating a narrow viewport (768px)
+     * No page reload needed - works client-side only!
      */
     public setMobileMode(enabled: boolean): void {
         if (!this.contentView) return
         
         this.mobileMode = enabled
-        const wc = this.contentView.webContents
-        
-        if (enabled) {
-            // Set mobile user agent
-            wc.setUserAgent(this.mobileUserAgent)
-        } else {
-            // Reset to desktop user agent
-            wc.setUserAgent("")
-        }
         
         // Only apply device emulation if a page has been loaded
         // Device emulation on empty webContents causes crashes!
         if (this.pageLoaded) {
-            // Re-apply device emulation with current settings
-            // This ensures Visual Zoom keeps working with the correct scale
-            if (this.visualZoomEnabled) {
+            if (this.visualZoomEnabled || enabled) {
+                // Apply device emulation with mobile viewport
                 this.applyDeviceEmulationForCurrentMode()
-            } else if (!enabled) {
-                // Only disable emulation if both visual zoom and mobile mode are off
-                wc.disableDeviceEmulation()
+            } else {
+                // Both visual zoom and mobile mode are off - disable emulation
+                this.contentView.webContents.disableDeviceEmulation()
             }
         }
         
-        // Inform preload script
+        // Inform preload script (for overlay)
         this.sendToContentView("set-mobile-mode", enabled)
-        
-        // Reload page so the server sees the new User-Agent
-        if (this.pageLoaded) {
-            wc.reload()
-        }
     }
     
     /**

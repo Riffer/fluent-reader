@@ -23,8 +23,13 @@ try {
     console.warn('[ContentPreload] Could not load Zoom Overlay state:', e);
   }
   
-  // Mobile Mode Status
+  // Mobile Mode Status - load synchronously to prevent wrong overlay display
   let mobileMode = false;
+  try {
+    mobileMode = ipcRenderer.sendSync('get-mobile-mode');
+  } catch (e) {
+    console.warn('[ContentPreload] Could not load Mobile Mode state:', e);
+  }
   
   // Original viewport width - stored when zoom container is created
   // Used to prevent responsive styles from compensating zoom effect

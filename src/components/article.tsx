@@ -81,6 +81,7 @@ type ArticleState = {
     inputModeEnabled: boolean  // Input mode: Shortcuts disabled for login etc.
     showP2PShareDialog: boolean
     visualZoomEnabled: boolean  // Visual Zoom (Pinch-to-Zoom) ohne Mobile-Modus
+    mobileUserAgentEnabled: boolean  // Global: Send mobile User-Agent to server
     menuBlurScreenshot: string | null  // Screenshot for blur placeholder when menu is open
     isNavigatingWithVisualZoom: boolean  // Show loading spinner during Visual Zoom navigation
 }
@@ -104,12 +105,28 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private pendingContentViewFocus: boolean = false  // Track if we need to focus ContentView after load
     private contentViewInitialized: boolean = false  // Track if Device Emulation is already set (for JS navigation experiment)
     
-    // Navigation-Lock: Prevents phantom keyDown events after recreateContentView
-    // When ContentView is recreated during article navigation, the new view sends
-    // a duplicate keyDown event for any still-pressed keys (~60-70ms later).
-    // We track which key triggered navigation and block duplicates for 150ms.
-    private lastNavigationKey: string = ''
-    private lastNavigationTime: number = 0
+    // Unified Key Debounce: Prevents duplicate key processing from multiple sources
+    // Problem 1: OS sends keydown to BOTH BrowserWindow (document.keydown) AND
+    //            ContentView (before-input-event → IPC), causing double execution
+    // Problem 2: recreateContentView sends phantom keyDown for still-pressed keys
+    // Solution: Track processed keys with timestamp, block duplicates within 100ms
+    private lastProcessedKey: string = ''
+    private lastProcessedKeyTime: number = 0
+    
+    // Check if this key was already processed recently (returns true if should be blocked)
+    private isDuplicateKey(key: string): boolean {
+        const now = Date.now()
+        if (key === this.lastProcessedKey && now - this.lastProcessedKeyTime < 100) {
+            return true  // Duplicate - block it
+        }
+        return false
+    }
+    
+    // Mark key as processed
+    private markKeyProcessed(key: string): void {
+        this.lastProcessedKey = key
+        this.lastProcessedKeyTime = Date.now()
+    }
 
     // Helper getters for content mode checks
     private get isWebpageMode(): boolean {
@@ -154,6 +171,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             inputModeEnabled: false,
             showP2PShareDialog: false,
             visualZoomEnabled: window.settings.getVisualZoom(),
+            mobileUserAgentEnabled: window.settings.getMobileUserAgent(),
             menuBlurScreenshot: null,
             isNavigatingWithVisualZoom: false,
         }
@@ -255,6 +273,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         window.settings.setZoomOverlay(newValue);
         this.setState({ showZoomOverlay: newValue });
         this.sendZoomOverlaySettingToContentView(newValue);
+    }
+
+    /**
+     * Toggle Mobile User-Agent (global setting)
+     * When enabled, sends mobile User-Agent to server on page load.
+     * Requires reload to take effect.
+     */
+    private toggleMobileUserAgent = () => {
+        if (!this._isMounted) return;
+        const newValue = !this.state.mobileUserAgentEnabled;
+        window.settings.setMobileUserAgent(newValue);
+        this.setState({ mobileUserAgentEnabled: newValue });
+        
+        // Reload current page to apply new User-Agent
+        if (window.contentView) {
+            window.contentView.reload();
+        }
     }
 
     /**
@@ -904,13 +939,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         },
                         {
                             key: "toggleMobileMode",
-                            text: "Mobile Ansicht",
+                            text: "Mobile Ansicht (Viewport)",
                             iconProps: { iconName: (this.props.source.mobileMode || false) ? "CheckMark" : "" },
                             canCheck: true,
                             checked: this.props.source.mobileMode || false,
                             // Mobile Mode works with ContentView (all modes except External)
                             disabled: !this.usesContentView,
                             onClick: this.toggleMobileMode,
+                        },
+                        {
+                            key: "toggleMobileUserAgent",
+                            text: "Mobile User-Agent (global)",
+                            iconProps: { iconName: this.state.mobileUserAgentEnabled ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.state.mobileUserAgentEnabled,
+                            // User-Agent requires reload, works with ContentView
+                            disabled: !this.usesContentView,
+                            onClick: this.toggleMobileUserAgent,
                         },
                         {
                             key: "toggleVisualZoom",
@@ -1019,15 +1064,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     keyDownHandler = (input: Electron.Input) => {
-        // Navigation-Lock: Block phantom keyDown events during article navigation
-        // When recreateContentView creates a new WebContentsView, it sends a duplicate
-        // keyDown for any still-pressed key (~60-70ms after original).
-        // Block same key for 150ms after navigation.
-        if (input.key === 'ArrowLeft' || input.key === 'ArrowRight') {
-            const now = Date.now()
-            if (input.key === this.lastNavigationKey && now - this.lastNavigationTime < 150) {
-                return  // Ignore phantom event from recreateContentView
-            }
+        // Unified Key Debounce: Block if same key was processed recently
+        // (either by this handler or by globalKeydownListener)
+        if (this.isDuplicateKey(input.key)) {
+            return
         }
 
         if (input.type === "keyDown")
@@ -1081,60 +1121,57 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "ArrowRight":
                     // Ignore key repeat (held key) for article navigation
                     if (!input.isAutoRepeat) {
-                        // Record which key triggered navigation for phantom-event blocking
-                        this.lastNavigationKey = input.key
-                        this.lastNavigationTime = Date.now()
+                        this.markKeyProcessed(input.key)
                         this.props.offsetItem(input.key === "ArrowLeft" ? -1 : 1)
                     }
                     break
                 case "l":
                 case "L":
+                    this.markKeyProcessed(input.key)
                     this.toggleWebpage()
                     break
                 case "+":
-                    // Debounce: ignore key repeat for zoom
+                case "=":
+                    // Zoom handled by both IPC and globalKeydownListener - use debounce
                     if (!input.isAutoRepeat) {
-                        this.applyZoom((this.state.zoom || 0) + 1);
+                        this.markKeyProcessed(input.key)
+                        this.applyZoom((this.state.zoom || 0) + 1)
                     }
-                    break;
+                    break
                 case "-":
-                    // Debounce: ignore key repeat for zoom
-                    if (!input.isAutoRepeat) {
-                        this.applyZoom((this.state.zoom || 0) - 1);
-                    }
-                    break;
-                case "#":
-                    this.applyZoom(0);
-                    break;
-                case "*":
-                    // Ctrl+Shift+8: Zoom in
-                    if (input.shift && !input.isAutoRepeat) {
-                        this.applyZoom((this.state.zoom || 0) + 1);
-                    }
-                    break;
                 case "_":
-                    // Ctrl+Shift+Minus: Zoom out
-                    if (input.shift && !input.isAutoRepeat) {
-                        this.applyZoom((this.state.zoom || 0) - 1);
+                    if (!input.isAutoRepeat) {
+                        this.markKeyProcessed(input.key)
+                        this.applyZoom((this.state.zoom || 0) - 1)
                     }
-                    break;
+                    break
+                case "#":
+                    this.markKeyProcessed(input.key)
+                    this.applyZoom(0)
+                    break
                 case "w":
                 case "W":
+                    this.markKeyProcessed(input.key)
                     this.toggleFull()
                     break
                 case "m":
                 case "M":
                     // Toggle Mobile Mode
+                    this.markKeyProcessed(input.key)
                     this.toggleMobileMode()
                     break
                 case "p":
                 case "P":
                     // Toggle Visual Zoom
+                    this.markKeyProcessed(input.key)
                     this.toggleVisualZoom()
                     break
                 case "H":
                 case "h":
-                    if (!input.meta) this.props.toggleHidden(this.props.item)
+                    if (!input.meta) {
+                        this.markKeyProcessed(input.key)
+                        this.props.toggleHidden(this.props.item)
+                    }
                     break
                 default:
                     const keyboardEvent = new KeyboardEvent("keydown", {
@@ -1229,20 +1266,29 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Ignoriere repeat Events (Taste wird gehalten)
             if (e.repeat) return
             
+            // Unified Key Debounce: Block if same key was processed recently
+            // (either by this handler or by keyDownHandler via IPC)
+            if (this.isDuplicateKey(e.key)) {
+                return
+            }
+            
             e.preventDefault()
             this.pressedZoomKeys.add(e.key)
             
             if (e.key === '+' || e.key === '=') {
+                this.markKeyProcessed(e.key)
                 const newZoom = Math.min(MAX_ZOOM_LEVEL, this.currentZoom + 1)
                 this.currentZoom = newZoom
                 this.setState({ zoom: newZoom })
                 this.applyZoom(newZoom)
             } else if (e.key === '-' || e.key === '_') {
+                this.markKeyProcessed(e.key)
                 const newZoom = Math.max(MIN_ZOOM_LEVEL, this.currentZoom - 1)
                 this.currentZoom = newZoom
                 this.setState({ zoom: newZoom })
                 this.applyZoom(newZoom)
             } else if (e.key === '#') {
+                this.markKeyProcessed(e.key)
                 this.currentZoom = 0
                 this.setState({ zoom: 0 })
                 this.applyZoom(0)
@@ -1295,8 +1341,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 })
             }
             
-            // Synchronize local Mobile Mode state with new source
-            this.localMobileMode = this.props.source.mobileMode || false;
+            // Synchronize local Mobile Mode state ONLY when switching to a different source
+            // Don't reset if same source - user may have just toggled Mobile Mode
+            const isSameSource = prevProps.source.sid === this.props.source.sid
+            if (!isSameSource) {
+                this.localMobileMode = this.props.source.mobileMode || false;
+            }
             
             // IMPORTANT: Set global Mobile Mode status BEFORE new ContentView is initialized!
             // Main process then automatically applies emulation on 'did-attach'.
@@ -1306,7 +1356,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Use CURRENT zoom (this.currentZoom), not the stored one from props
             // The stored props.source.defaultZoom may be outdated if user just zoomed
             // Only when switching to a DIFFERENT source, we use the stored value
-            const isSameSource = prevProps.source.sid === this.props.source.sid
             const savedZoom = isSameSource 
                 ? this.currentZoom  // Same source: keep current zoom
                 : (this.props.source.defaultZoom || 0)  // Different source: use stored zoom

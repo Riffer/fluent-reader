@@ -256,6 +256,20 @@ ipcMain.handle("set-visual-zoom", (_, flag: boolean) => {
     store.set(VISUAL_ZOOM_STORE_KEY, flag)
 })
 
+// Mobile User-Agent (global setting - sends mobile UA to server)
+const MOBILE_USER_AGENT_STORE_KEY = "mobileUserAgentEnabled"
+ipcMain.on("get-mobile-user-agent", event => {
+    event.returnValue = store.get(MOBILE_USER_AGENT_STORE_KEY, false)
+})
+ipcMain.handle("set-mobile-user-agent", (_, flag: boolean) => {
+    store.set(MOBILE_USER_AGENT_STORE_KEY, flag)
+})
+
+// Export function for ContentViewManager to check Mobile User-Agent setting
+export function isMobileUserAgentEnabled(): boolean {
+    return store.get(MOBILE_USER_AGENT_STORE_KEY, false) as boolean
+}
+
 // P2P Room persistence
 const P2P_ROOM_CODE_STORE_KEY = "p2pRoomCode"
 const P2P_DISPLAY_NAME_STORE_KEY = "p2pDisplayName"

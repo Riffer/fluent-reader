@@ -166,6 +166,13 @@ const settingsBridge = {
         ipcRenderer.invoke("set-visual-zoom", flag)
     },
 
+    getMobileUserAgent: (): boolean => {
+        return ipcRenderer.sendSync("get-mobile-user-agent")
+    },
+    setMobileUserAgent: (flag: boolean) => {
+        ipcRenderer.invoke("set-mobile-user-agent", flag)
+    },
+
     getAll: () => {
         return ipcRenderer.sendSync("get-all-settings") as Object
     },
