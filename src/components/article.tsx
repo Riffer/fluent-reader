@@ -25,7 +25,8 @@ import {
     setOverlayVisible, 
     OverlayStateManager, 
     OVERLAY_VISIBILITY_EVENT,
-    OverlayVisibilityEvent 
+    OverlayVisibilityEvent,
+    setVideoFullscreen 
 } from "../scripts/overlay-visibility"
 
 const FONT_SIZE_OPTIONS = [8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20]
@@ -90,6 +91,7 @@ type ArticleState = {
     mobileUserAgentEnabled: boolean  // Global: Send mobile User-Agent to server
     menuBlurScreenshot: string | null  // Screenshot for blur placeholder when menu is open
     isNavigatingWithVisualZoom: boolean  // Show loading spinner during Visual Zoom navigation
+    videoFullscreen: boolean  // Video playing in fullscreen mode (ContentView fills window)
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -196,6 +198,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             mobileUserAgentEnabled: window.settings.getMobileUserAgent(),
             menuBlurScreenshot: null,
             isNavigatingWithVisualZoom: false,
+            videoFullscreen: false,
         }
 
         // IPC listener for zoom changes from preload script
@@ -494,6 +497,21 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             };
             ipc.on('content-view-visual-zoom-ready', onVisualZoomReady);
             this.contentViewCleanup.push(() => ipc.removeAllListeners('content-view-visual-zoom-ready'));
+            
+            // Video fullscreen state changes
+            // When video enters fullscreen, ContentView expands to fill window
+            // We also notify the overlay system so P2P dialogs go to bell instead
+            const onVideoFullscreen = (_: any, isFullscreen: boolean) => {
+                console.log('[Article] Video fullscreen:', isFullscreen);
+                // Update global overlay state
+                setVideoFullscreen(isFullscreen);
+                // Track locally for any future use
+                if (this._isMounted) {
+                    this.setState({ videoFullscreen: isFullscreen });
+                }
+            };
+            ipc.on('content-view-video-fullscreen', onVideoFullscreen);
+            this.contentViewCleanup.push(() => ipc.removeAllListeners('content-view-video-fullscreen'));
         }
     }
     

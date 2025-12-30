@@ -18,7 +18,7 @@ import {
     Link,
     useTheme,
 } from "@fluentui/react"
-import { setOverlayVisible } from "../scripts/overlay-visibility"
+import { setOverlayVisible, VIDEO_FULLSCREEN_EVENT } from "../scripts/overlay-visibility"
 
 /**
  * Play a subtle notification sound when articles are added to the bell
@@ -91,8 +91,15 @@ interface P2PIncomingNotificationProps {
 export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = ({ addToLog, navigateToArticle }) => {
     const [incomingArticle, setIncomingArticle] = useState<IncomingArticle | null>(null)
     const [collectLinksInLog, setCollectLinksInLog] = useState<boolean>(false)
+    const [videoFullscreen, setVideoFullscreen] = useState<boolean>(false)
+    const videoFullscreenRef = useRef<boolean>(false)  // Ref to access current value in callbacks
     const queueRef = useRef<IncomingArticle[]>([])
     const listenerRegistered = useRef(false)
+    
+    // Keep ref in sync with state
+    useEffect(() => {
+        videoFullscreenRef.current = videoFullscreen
+    }, [videoFullscreen])
 
     // Load setting on mount
     useEffect(() => {
@@ -101,6 +108,27 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
             setCollectLinksInLog(setting)
         }
         loadSetting()
+    }, [])
+
+    // Listen for video fullscreen state changes
+    // When video is fullscreen, incoming articles go directly to bell (no dialog)
+    useEffect(() => {
+        // IPC listener from ContentViewManager
+        const ipcHandler = (_: any, isFullscreen: boolean) => {
+            setVideoFullscreen(isFullscreen)
+        }
+        ;(window as any).ipcRenderer?.on("content-view-video-fullscreen", ipcHandler)
+        
+        // Also listen to the window event (for consistency with overlay system)
+        const windowHandler = (event: CustomEvent<boolean>) => {
+            setVideoFullscreen(event.detail)
+        }
+        window.addEventListener(VIDEO_FULLSCREEN_EVENT, windowHandler as EventListener)
+        
+        return () => {
+            ;(window as any).ipcRenderer?.removeListener("content-view-video-fullscreen", ipcHandler)
+            window.removeEventListener(VIDEO_FULLSCREEN_EVENT, windowHandler as EventListener)
+        }
     }, [])
 
     // Register listener only ONCE on mount
@@ -112,10 +140,15 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
             // Check current setting (use getter to get fresh value)
             const shouldCollect = window.settings.getP2PCollectLinks()
             
-            if (shouldCollect) {
+            // If "Collect in Log" is enabled, or video is fullscreen, 
+            // add directly to bell without showing dialog
+            if (shouldCollect || videoFullscreenRef.current) {
                 // Add to log instead of showing dialog
                 addToLog(article.title, article.url, article.peerName, article.articleId, article.sourceId)
                 playNotificationSound()
+                if (videoFullscreenRef.current) {
+                    console.log("[P2P] Article received during video fullscreen - added to bell:", article.title)
+                }
                 return
             }
             

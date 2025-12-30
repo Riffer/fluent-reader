@@ -120,3 +120,37 @@ export class OverlayStateManager {
         this.states.clear()
     }
 }
+
+// ===== Video Fullscreen State =====
+// Special state that suppresses overlay dialogs (P2P incoming, etc.)
+// when a video is playing in fullscreen mode.
+
+/**
+ * Event name for video fullscreen changes
+ */
+export const VIDEO_FULLSCREEN_EVENT = 'video-fullscreen-change'
+
+/**
+ * Global flag for video fullscreen state
+ * When true, components should avoid showing disruptive overlays
+ */
+let videoFullscreenActive = false
+
+/**
+ * Check if video fullscreen mode is currently active
+ */
+export function isVideoFullscreen(): boolean {
+    return videoFullscreenActive
+}
+
+/**
+ * Set video fullscreen state and notify listeners
+ * Called by ContentViewManager when HTML fullscreen events occur
+ * 
+ * @param active - true when entering video fullscreen, false when leaving
+ */
+export function setVideoFullscreen(active: boolean): void {
+    videoFullscreenActive = active
+    const event = new CustomEvent<boolean>(VIDEO_FULLSCREEN_EVENT, { detail: active })
+    window.dispatchEvent(event)
+}

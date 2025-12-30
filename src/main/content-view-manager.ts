@@ -49,6 +49,10 @@ export class ContentViewManager {
     private pendingEmulationShow: boolean = false  // Track if we need to show ContentView after emulation is applied
     private mobileUserAgent: string = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     
+    // Video fullscreen state
+    private videoFullscreen: boolean = false
+    private boundsBeforeFullscreen: ContentViewBounds | null = null
+    
     // Preload script path
     // In dev mode, webpack puts electron.js in dist/, so app.getAppPath() = fluent-reader/dist
     // In packaged mode, app.getAppPath() = resources/app, and preload is in dist/
@@ -356,6 +360,47 @@ export class ContentViewManager {
         // Page title updates
         wc.on("page-title-updated", (event, title) => {
             this.sendToRenderer("content-view-title", title)
+        })
+        
+        // === Video Fullscreen Support ===
+        // When a video requests fullscreen (e.g., YouTube, HTML5 video),
+        // expand ContentView to fill the entire window
+        wc.on("enter-html-full-screen", () => {
+            console.log("[ContentViewManager] Video entering fullscreen")
+            this.videoFullscreen = true
+            
+            // Save current bounds for restoration
+            this.boundsBeforeFullscreen = { ...this.bounds }
+            
+            // Get window content area size
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                const windowBounds = this.mainWindow.getContentBounds()
+                
+                // Expand ContentView to full window size
+                this.setBounds({
+                    x: 0,
+                    y: 0,
+                    width: windowBounds.width,
+                    height: windowBounds.height
+                })
+            }
+            
+            // Notify renderer (for P2P incoming suppression, UI hiding, etc.)
+            this.sendToRenderer("content-view-video-fullscreen", true)
+        })
+        
+        wc.on("leave-html-full-screen", () => {
+            console.log("[ContentViewManager] Video leaving fullscreen")
+            this.videoFullscreen = false
+            
+            // Restore original bounds
+            if (this.boundsBeforeFullscreen) {
+                this.setBounds(this.boundsBeforeFullscreen)
+                this.boundsBeforeFullscreen = null
+            }
+            
+            // Notify renderer
+            this.sendToRenderer("content-view-video-fullscreen", false)
         })
     }
     
