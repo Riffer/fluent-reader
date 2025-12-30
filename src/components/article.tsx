@@ -1188,9 +1188,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     break
                 case "m":
                 case "M":
-                    // Toggle Mobile Mode
+                    // Shift+M: Toggle Read/Unread
+                    // m alone: Toggle Mobile Mode
                     this.markKeyProcessed(input.key)
-                    this.toggleMobileMode()
+                    if (input.shift) {
+                        this.props.toggleHasRead(this.props.item)
+                    } else {
+                        this.toggleMobileMode()
+                    }
                     break
                 case "p":
                 case "P":
