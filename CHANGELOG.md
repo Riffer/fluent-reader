@@ -6,6 +6,32 @@ Based on the original [Fluent Reader v1.1.4](https://github.com/yang991178/fluen
 
 ---
 
+## [1.3.5] - 2025-12-30
+
+### Added - Fullscreen Support
+- **F11 keyboard shortcut** for fullscreen toggle (global, works everywhere)
+- **View menu option** "Vollbild" / "Fullscreen" with F11 shortcut indicator
+- Fullscreen checkbox shows current state in View menu
+
+### Added - Video Fullscreen
+- **Embedded videos** (YouTube, etc.) now expand to true fullscreen when clicking fullscreen button
+- ContentView automatically expands to fill entire window during video fullscreen
+- Window enters fullscreen mode (over taskbar) for immersive viewing
+- Bounds are saved and restored when exiting video fullscreen
+- P2P incoming notifications suppressed during video playback (articles go directly to bell)
+
+### Fixed
+- **ContentView bounds** now properly follow window resize/maximize/fullscreen
+- Added listeners for maximize/unmaximize/enter-fullscreen/leave-fullscreen events
+- Multiple delayed bounds updates to handle animation timing
+- **F11/F12 double execution** fixed when ContentView has focus
+- **JavaScript dialogs** (alert/confirm/prompt) from article pages now intercepted to prevent empty "Error:" dialogs
+
+### Changed
+- Removed verbose CookiePersist logging (error logs retained)
+
+---
+
 ## [1.2.13] - 2025-12-27
 
 ### Added - Visual Zoom (Pinch-to-Zoom)

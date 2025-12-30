@@ -825,6 +825,19 @@ export class ContextMenu extends React.Component<ContextMenuProps, ContextMenuSt
                         onClick: () =>
                             this.props.toggleFilter(FilterType.ShowHidden),
                     },
+                    {
+                        key: "divider_fullscreen",
+                        itemType: ContextualMenuItemType.Divider,
+                    },
+                    {
+                        key: "fullscreen",
+                        text: intl.get("context.fullscreen"),
+                        iconProps: { iconName: "FullScreen" },
+                        secondaryText: "F11",
+                        canCheck: true,
+                        checked: window.utils.isFullscreen(),
+                        onClick: () => window.utils.toggleFullscreen(),
+                    },
                 ]
             case ContextMenuType.Group:
                 // Check if this is a single P2P feed

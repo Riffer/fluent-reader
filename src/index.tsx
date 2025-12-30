@@ -58,6 +58,11 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
             (window as any).ipcRenderer.invoke('toggle-app-devtools')
         }
     }
+    // Global F11 handler for Fullscreen toggle
+    if (e.key === 'F11') {
+        e.preventDefault()
+        window.utils.toggleFullscreen()
+    }
 })
 
 ReactDOM.render(

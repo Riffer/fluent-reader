@@ -52,6 +52,7 @@ export class ContentViewManager {
     // Video fullscreen state
     private videoFullscreen: boolean = false
     private boundsBeforeFullscreen: ContentViewBounds | null = null
+    private windowWasFullscreenBefore: boolean = false  // Track if window was already fullscreen before video
     
     // Preload script path
     // In dev mode, webpack puts electron.js in dist/, so app.getAppPath() = fluent-reader/dist
@@ -276,8 +277,8 @@ export class ContentViewManager {
                     
                     // === FOCUS FIX: Move focus away, then back to ContentView ===
                     // First focus the main window to "reset" focus
-                    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-                        this.mainWindow.webContents.focus()
+                    if (this.parentWindow && !this.parentWindow.isDestroyed()) {
+                        this.parentWindow.webContents.focus()
                     }
                     
                     // Then focus ContentView after a delay
@@ -293,8 +294,8 @@ export class ContentViewManager {
                 setTimeout(() => {
                     if (this.contentView?.webContents && !this.contentView.webContents.isDestroyed()) {
                         // WORKAROUND 1: Blur-Focus cycle to reset input routing
-                        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-                            this.mainWindow.webContents.focus()
+                        if (this.parentWindow && !this.parentWindow.isDestroyed()) {
+                            this.parentWindow.webContents.focus()
                         }
                         
                         setTimeout(() => {
@@ -364,25 +365,43 @@ export class ContentViewManager {
         
         // === Video Fullscreen Support ===
         // When a video requests fullscreen (e.g., YouTube, HTML5 video),
-        // expand ContentView to fill the entire window
+        // expand ContentView to fill the entire window AND put window in fullscreen
         wc.on("enter-html-full-screen", () => {
             console.log("[ContentViewManager] Video entering fullscreen")
             this.videoFullscreen = true
             
             // Save current bounds for restoration
             this.boundsBeforeFullscreen = { ...this.bounds }
+            console.log("[ContentViewManager] Saved bounds:", this.boundsBeforeFullscreen)
             
-            // Get window content area size
-            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-                const windowBounds = this.mainWindow.getContentBounds()
+            if (this.parentWindow && !this.parentWindow.isDestroyed()) {
+                // Check if window is already fullscreen
+                this.windowWasFullscreenBefore = this.parentWindow.isFullScreen()
                 
-                // Expand ContentView to full window size
-                this.setBounds({
-                    x: 0,
-                    y: 0,
-                    width: windowBounds.width,
-                    height: windowBounds.height
-                })
+                // Put window in fullscreen mode (over taskbar)
+                if (!this.windowWasFullscreenBefore) {
+                    console.log("[ContentViewManager] Setting window to fullscreen")
+                    this.parentWindow.setFullScreen(true)
+                }
+                
+                // Wait a bit for fullscreen transition, then expand ContentView
+                setTimeout(() => {
+                    if (this.parentWindow && !this.parentWindow.isDestroyed()) {
+                        const windowBounds = this.parentWindow.getContentBounds()
+                        console.log("[ContentViewManager] Window content bounds:", windowBounds)
+                        
+                        // Expand ContentView to full window size
+                        this.setBounds({
+                            x: 0,
+                            y: 0,
+                            width: windowBounds.width,
+                            height: windowBounds.height
+                        })
+                        console.log("[ContentViewManager] ContentView expanded to fullscreen")
+                    }
+                }, 100)  // Small delay for fullscreen animation
+            } else {
+                console.error("[ContentViewManager] Cannot expand - no parent window")
             }
             
             // Notify renderer (for P2P incoming suppression, UI hiding, etc.)
@@ -393,11 +412,22 @@ export class ContentViewManager {
             console.log("[ContentViewManager] Video leaving fullscreen")
             this.videoFullscreen = false
             
-            // Restore original bounds
-            if (this.boundsBeforeFullscreen) {
-                this.setBounds(this.boundsBeforeFullscreen)
-                this.boundsBeforeFullscreen = null
+            // Exit window fullscreen (only if we activated it)
+            if (this.parentWindow && !this.parentWindow.isDestroyed()) {
+                if (!this.windowWasFullscreenBefore && this.parentWindow.isFullScreen()) {
+                    console.log("[ContentViewManager] Exiting window fullscreen")
+                    this.parentWindow.setFullScreen(false)
+                }
             }
+            
+            // Restore original bounds (with delay to let fullscreen animation complete)
+            setTimeout(() => {
+                if (this.boundsBeforeFullscreen) {
+                    console.log("[ContentViewManager] Restoring bounds:", this.boundsBeforeFullscreen)
+                    this.setBounds(this.boundsBeforeFullscreen)
+                    this.boundsBeforeFullscreen = null
+                }
+            }, 100)
             
             // Notify renderer
             this.sendToRenderer("content-view-video-fullscreen", false)
@@ -639,6 +669,11 @@ export class ContentViewManager {
         
         // Forward keyboard events to renderer for shortcut handling
         wc.on("before-input-event", (event, input) => {
+            // Don't forward F11/F12 - these are global shortcuts handled by main window
+            // Forwarding them would cause double execution
+            if (input.key === 'F11' || input.key === 'F12') {
+                return
+            }
             // Forward to renderer for processing
             this.sendToRenderer("content-view-input", input)
         })

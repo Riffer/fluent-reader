@@ -536,6 +536,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.windowResizeListener = null;
         }
         
+        // Remove window state listeners (maximize/fullscreen)
+        this.windowStateCleanup.forEach(cleanup => cleanup());
+        this.windowStateCleanup = [];
+        
         // Remove centralized overlay visibility listener
         if (this.overlayVisibilityListener) {
             window.removeEventListener(OVERLAY_VISIBILITY_EVENT, this.overlayVisibilityListener as EventListener);
@@ -597,6 +601,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     
     private lastContentViewBounds: { x: number, y: number, width: number, height: number } | null = null;
     private windowResizeListener: (() => void) | null = null;
+    private windowStateCleanup: (() => void)[] = [];  // Cleanup for window state listeners (maximize/fullscreen)
     
     /**
      * Initialize ContentView for ALL content types
@@ -630,11 +635,41 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             }
             
             // Setup window resize listener (ResizeObserver doesn't catch window resizes that only change position)
+            // Use multiple delayed updates to handle maximize/fullscreen animations
             if (!this.windowResizeListener) {
                 this.windowResizeListener = () => {
+                    // Immediate update
+                    this.updateContentViewBounds();
+                    // Delayed updates to catch post-animation layout changes
+                    // This is needed because maximize/fullscreen animations can delay DOM layout
                     requestAnimationFrame(() => this.updateContentViewBounds());
+                    setTimeout(() => this.updateContentViewBounds(), 50);
+                    setTimeout(() => this.updateContentViewBounds(), 150);
+                    setTimeout(() => this.updateContentViewBounds(), 300);
                 };
                 window.addEventListener('resize', this.windowResizeListener);
+            }
+            
+            // Setup window state listeners (maximize/fullscreen) for bounds updates
+            // The resize event doesn't always fire reliably on these state changes
+            if (this.windowStateCleanup.length === 0) {
+                const ipc = (window as any).ipcRenderer;
+                if (ipc) {
+                    const boundsUpdateHandler = () => {
+                        // Multiple delayed updates to catch animation completion
+                        this.updateContentViewBounds();
+                        requestAnimationFrame(() => this.updateContentViewBounds());
+                        setTimeout(() => this.updateContentViewBounds(), 100);
+                        setTimeout(() => this.updateContentViewBounds(), 200);
+                        setTimeout(() => this.updateContentViewBounds(), 400);
+                    };
+                    
+                    const stateChannels = ['maximized', 'unmaximized', 'enter-fullscreen', 'leave-fullscreen'];
+                    for (const channel of stateChannels) {
+                        ipc.on(channel, boundsUpdateHandler);
+                        this.windowStateCleanup.push(() => ipc.removeListener(channel, boundsUpdateHandler));
+                    }
+                }
             }
             
             // Setup centralized overlay visibility listener

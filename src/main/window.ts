@@ -273,7 +273,7 @@ export class WindowManager {
                 minHeight: 600,
                 frame: process.platform === "darwin",
                 titleBarStyle: "hiddenInset",
-                fullscreenable: process.platform === "darwin",
+                fullscreenable: true,  // Enable fullscreen for video playback on all platforms
                 show: false,
                 webPreferences: {
                     webviewTag: true,

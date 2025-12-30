@@ -29,7 +29,6 @@ const ensureCookiesDir = (): void => {
     const dir = getCookiesDir()
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true })
-        console.log("[CookiePersist] Created cookies directory:", dir)
     }
 }
 
@@ -78,27 +77,13 @@ export async function loadCookiesForHost(
     const filename = hostToFilename(host)
     const filepath = path.join(getCookiesDir(), filename)
 
-    console.log("[CookiePersist] Loading cookies for host:", host)
-    console.log("[CookiePersist] Cookie file path:", filepath)
-
     if (!fs.existsSync(filepath)) {
-        console.log("[CookiePersist] No saved cookies found for host:", host)
         return []
     }
 
     try {
         const content = fs.readFileSync(filepath, "utf-8")
         const data: StoredCookieData = JSON.parse(content)
-        console.log(
-            "[CookiePersist] Loaded",
-            data.cookies.length,
-            "cookies for host:",
-            host
-        )
-        console.log(
-            "[CookiePersist] Last updated:",
-            data.lastUpdated
-        )
         return data.cookies
     } catch (e) {
         console.error("[CookiePersist] Error loading cookies for host:", host, e)
@@ -117,16 +102,6 @@ export async function saveCookiesForHost(
     const filename = hostToFilename(host)
     const filepath = path.join(getCookiesDir(), filename)
 
-    console.log("[CookiePersist] Saving", cookies.length, "cookies for host:", host)
-    console.log("[CookiePersist] Cookie file path:", filepath)
-
-    // Log cookie names (without values for security)
-    cookies.forEach((cookie, i) => {
-        console.log(
-            `[CookiePersist]   [${i + 1}] ${cookie.name} (domain: ${cookie.domain}, path: ${cookie.path})`
-        )
-    })
-
     const data: StoredCookieData = {
         host,
         lastUpdated: new Date().toISOString(),
@@ -135,7 +110,6 @@ export async function saveCookiesForHost(
 
     try {
         fs.writeFileSync(filepath, JSON.stringify(data, null, 2), "utf-8")
-        console.log("[CookiePersist] Cookies saved successfully:", filepath)
         return true
     } catch (e) {
         console.error("[CookiePersist] Error saving cookies for host:", host, e)
@@ -150,16 +124,12 @@ export async function deleteCookiesForHost(host: string): Promise<boolean> {
     const filename = hostToFilename(host)
     const filepath = path.join(getCookiesDir(), filename)
 
-    console.log("[CookiePersist] Deleting cookies for host:", host)
-
     if (!fs.existsSync(filepath)) {
-        console.log("[CookiePersist] No cookie file exists for host:", host)
         return true
     }
 
     try {
         fs.unlinkSync(filepath)
-        console.log("[CookiePersist] Deleted cookie file:", filepath)
         return true
     } catch (e) {
         console.error("[CookiePersist] Error deleting cookies for host:", host, e)
@@ -175,8 +145,6 @@ export async function getCookiesFromSession(
     ses: Electron.Session,
     host: string
 ): Promise<Electron.Cookie[]> {
-    console.log("[CookiePersist] Getting cookies from session for host:", host)
-    
     try {
         const baseDomain = host.replace(/^www\./, "")
         const allCookies: Electron.Cookie[] = []
@@ -194,38 +162,34 @@ export async function getCookiesFromSession(
         // 1. All cookies for the URL (http + https)
         try {
             const urlCookies = await ses.cookies.get({ url: `https://${host}` })
-            console.log("[CookiePersist] Found", urlCookies.length, "cookies for https URL")
             urlCookies.forEach(addCookie)
         } catch (e) {
-            console.log("[CookiePersist] Error getting URL cookies:", e)
+            // Ignore errors
         }
         
         // 2. Cookies mit exakter Domain
         try {
             const exactCookies = await ses.cookies.get({ domain: host })
-            console.log("[CookiePersist] Found", exactCookies.length, "cookies for exact domain:", host)
             exactCookies.forEach(addCookie)
         } catch (e) {
-            console.log("[CookiePersist] Error getting exact domain cookies:", e)
+            // Ignore errors
         }
         
         // 3. Cookies mit .domain (z.B. .reddit.com)
         try {
             const dotDomainCookies = await ses.cookies.get({ domain: "." + baseDomain })
-            console.log("[CookiePersist] Found", dotDomainCookies.length, "cookies for dot-domain:", "." + baseDomain)
             dotDomainCookies.forEach(addCookie)
         } catch (e) {
-            console.log("[CookiePersist] Error getting dot-domain cookies:", e)
+            // Ignore errors
         }
         
         // 4. Cookies for www. subdomain if not already host
         if (!host.startsWith("www.")) {
             try {
                 const wwwCookies = await ses.cookies.get({ domain: "www." + baseDomain })
-                console.log("[CookiePersist] Found", wwwCookies.length, "cookies for www subdomain")
                 wwwCookies.forEach(addCookie)
             } catch (e) {
-                console.log("[CookiePersist] Error getting www cookies:", e)
+                // Ignore errors
             }
         }
         
@@ -238,18 +202,10 @@ export async function getCookiesFromSession(
                 c.domain === "www." + baseDomain ||
                 c.domain.endsWith("." + baseDomain)
             )
-            console.log("[CookiePersist] Found", relevantCookies.length, "cookies via fallback filter (from", allSessionCookies.length, "total)")
             relevantCookies.forEach(addCookie)
         } catch (e) {
-            console.log("[CookiePersist] Error getting all cookies:", e)
+            // Ignore errors
         }
-        
-        console.log("[CookiePersist] Total unique cookies collected:", allCookies.length)
-        
-        // Cookie-Namen loggen
-        allCookies.forEach((cookie, i) => {
-            console.log(`[CookiePersist]   [${i + 1}] ${cookie.name} (domain: ${cookie.domain}, secure: ${cookie.secure}, httpOnly: ${cookie.httpOnly})`)
-        })
         
         return allCookies
     } catch (e) {
@@ -266,8 +222,6 @@ export async function setCookiesToSession(
     host: string,
     cookies: Electron.Cookie[]
 ): Promise<number> {
-    console.log("[CookiePersist] Setting", cookies.length, "cookies to session for host:", host)
-    
     let successCount = 0
     
     for (const cookie of cookies) {
@@ -291,15 +245,12 @@ export async function setCookiesToSession(
                 expirationDate: cookie.expirationDate,
                 sameSite: cookie.sameSite,
             })
-            
-            console.log(`[CookiePersist]   Set cookie: ${cookie.name} (domain: ${cookie.domain})`)
             successCount++
         } catch (e) {
-            console.error(`[CookiePersist]   Failed to set cookie: ${cookie.name}`, e)
+            console.error(`[CookiePersist] Failed to set cookie: ${cookie.name}`, e)
         }
     }
     
-    console.log("[CookiePersist] Successfully set", successCount, "of", cookies.length, "cookies")
     return successCount
 }
 
@@ -327,7 +278,6 @@ export function listSavedHosts(): string[] {
             }
         }
         
-        console.log("[CookiePersist] Found saved cookies for", hosts.length, "hosts")
         return hosts
     } catch (e) {
         console.error("[CookiePersist] Error listing saved hosts:", e)

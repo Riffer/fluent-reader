@@ -44,6 +44,68 @@ setOverlayVisible('p2p-incoming', false)  // Overlay schließt
 ---
 
 ## 💡 Offene Ideen
+
+### Arrow-Keys bei Artikelwechsel: Event-Blocking in ContentView (30.12.2025)
+
+**Problem:**
+Beim Umschalten zum nächsten Artikel via "Cursor Rechts" wird die Taste auch in dem Artikel ausgewertet und führt zum 'Rucken' bevor der nächste Artikel sichtbar wird.
+
+**Ursache:**
+1. User drückt "Pfeil rechts" 
+2. `before-input-event` in ContentView feuert
+3. Event wird an Renderer weitergeleitet (`content-view-input`)
+4. **GLEICHZEITIG**: Webseite erhält das Event und scrollt horizontal
+5. Renderer verarbeitet das Event und wechselt zum nächsten Artikel
+6. → Der alte Artikel hat bereits gescrollt (sichtbarer "Ruck")
+
+**Mögliche Lösungen:**
+
+**Option A: Event blockieren + weiterleiten**
+```typescript
+wc.on("before-input-event", (event, input) => {
+    const navigationKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown']
+    if (navigationKeys.includes(input.key)) {
+        event.preventDefault()  // Blockiert Event in der Webseite
+    }
+    this.sendToRenderer("content-view-input", input)  // Trotzdem weiterleiten
+})
+```
+**Problem:** YouTube, interaktive Seiten brauchen diese Tasten (Video vor/zurück, Slider etc.)
+
+**Option B: Blockieren nur ohne Modifier**
+```typescript
+if (navigationKeys.includes(input.key) && !input.control && !input.alt && !input.shift) {
+    event.preventDefault()
+}
+```
+**Problem:** Manche Seiten brauchen auch plain Arrow keys.
+
+**Option C: Input Mode berücksichtigen**
+Der Renderer sendet ein Signal, ob "Input Mode" aktiv ist. Wenn ja → nicht blockieren.
+**Problem:** Asynchron - der Main-Prozess müsste den Zustand kennen.
+
+**Option D: Nur bei keyDown blockieren, keyUp durchlassen**
+```typescript
+if (input.type === 'keyDown' && navigationKeys.includes(input.key)) {
+    event.preventDefault()
+}
+```
+
+**Option E: Selektive Navigation-Keys**
+Nur Links/Rechts für Artikelwechsel blockieren, Auf/Ab für Scrollen durchlassen:
+```typescript
+const articleNavKeys = ['ArrowLeft', 'ArrowRight']  // Nur Artikelwechsel
+```
+
+**Empfehlung: Option E + B kombiniert**
+Blockiere nur `ArrowLeft`/`ArrowRight` (Artikelwechsel), und nur wenn keine Modifier gedrückt sind. `ArrowUp`/`ArrowDown` lassen für normales Scrollen durch.
+
+**Risiko:** Seiten mit horizontalem Scroll (Bildergalerien) funktionieren nicht mehr mit Pfeiltasten.
+
+**Mitigation:** Der `Input Mode` (für Login-Formulare etc.) könnte auch das Blockieren deaktivieren - aber das erfordert, dass der Main-Prozess den Zustand kennt (IPC von Renderer zu Main).
+
+---
+
    - In `componentDidUpdate` in Article auf Redux-Änderungen reagieren und Event dispatchen
 ---
 

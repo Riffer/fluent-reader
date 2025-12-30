@@ -55,6 +55,11 @@ const limitedIpcRenderer = {
             "content-view-input",
             "content-view-js-dialog",  // JavaScript alert/confirm/prompt from articles
             "content-view-video-fullscreen",  // Video fullscreen state changes
+            // Window state events (for ContentView bounds updates)
+            "maximized",
+            "unmaximized",
+            "enter-fullscreen",
+            "leave-fullscreen",
         ]
         if (allowedOnChannels.includes(channel)) {
             ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
