@@ -110,8 +110,20 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     //            ContentView (before-input-event → IPC), causing double execution
     // Problem 2: recreateContentView sends phantom keyDown for still-pressed keys
     // Solution: Track processed keys with timestamp, block duplicates within 100ms
+    // Note: Modifier keys are included in the key string to distinguish Ctrl+I from plain I
     private lastProcessedKey: string = ''
     private lastProcessedKeyTime: number = 0
+    
+    // Build a key string that includes modifiers (e.g., "ctrl+i" vs "i")
+    private buildKeyWithModifiers(key: string, ctrl?: boolean, shift?: boolean, alt?: boolean, meta?: boolean): string {
+        const parts: string[] = []
+        if (ctrl) parts.push('ctrl')
+        if (shift) parts.push('shift')
+        if (alt) parts.push('alt')
+        if (meta) parts.push('meta')
+        parts.push(key.toLowerCase())
+        return parts.join('+')
+    }
     
     // Check if this key was already processed recently (returns true if should be blocked)
     private isDuplicateKey(key: string): boolean {
@@ -483,6 +495,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.windowResizeListener = null;
         }
         
+        // Remove P2P dialog visibility listener
+        if (this.p2pDialogVisibilityListener) {
+            window.removeEventListener('p2p-dialog-visibility', this.p2pDialogVisibilityListener as EventListener);
+            this.p2pDialogVisibilityListener = null;
+        }
+        
         // Reset bounds cache and current URL
         this.lastContentViewBounds = null;
         this.contentViewCurrentUrl = null;
@@ -535,6 +553,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     
     private lastContentViewBounds: { x: number, y: number, width: number, height: number } | null = null;
     private windowResizeListener: (() => void) | null = null;
+    private p2pDialogVisibilityListener: ((e: CustomEvent<{ open: boolean }>) => void) | null = null;
     
     /**
      * Initialize ContentView for ALL content types
@@ -573,6 +592,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     requestAnimationFrame(() => this.updateContentViewBounds());
                 };
                 window.addEventListener('resize', this.windowResizeListener);
+            }
+            
+            // Setup P2P dialog visibility listener
+            if (!this.p2pDialogVisibilityListener) {
+                this.p2pDialogVisibilityListener = (e: CustomEvent<{ open: boolean }>) => {
+                    this.handleLocalDialogVisibilityChange(e.detail.open);
+                };
+                window.addEventListener('p2p-dialog-visibility', this.p2pDialogVisibilityListener as EventListener);
             }
             
             // Load content with bundled settings (all settings applied BEFORE navigation)
@@ -1092,9 +1119,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     keyDownHandler = (input: Electron.Input) => {
+        // Build key string with modifiers for accurate debounce comparison
+        const keyWithMods = this.buildKeyWithModifiers(input.key, input.control, input.shift, input.alt, input.meta)
+        
         // Unified Key Debounce: Block if same key was processed recently
         // (either by this handler or by globalKeydownListener)
-        if (this.isDuplicateKey(input.key)) {
+        if (this.isDuplicateKey(keyWithMods)) {
             return
         }
 
@@ -1118,6 +1148,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (input.type === "keyDown") {
             // Eingabe-Modus Toggle: Ctrl+I
             if (input.control && (input.key === 'i' || input.key === 'I')) {
+                this.markKeyProcessed(keyWithMods)
                 const newValue = !this.state.inputModeEnabled;
                 // Cookies speichern beim Verlassen des Eingabe-Modus (z.B. nach Login)
                 if (!newValue && this.props.source.persistCookies && this.isWebpageMode) {
@@ -1149,13 +1180,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "ArrowRight":
                     // Ignore key repeat (held key) for article navigation
                     if (!input.isAutoRepeat) {
-                        this.markKeyProcessed(input.key)
+                        this.markKeyProcessed(keyWithMods)
                         this.props.offsetItem(input.key === "ArrowLeft" ? -1 : 1)
                     }
                     break
                 case "l":
                 case "L":
-                    this.markKeyProcessed(input.key)
+                    this.markKeyProcessed(keyWithMods)
                     this.toggleWebpage()
                     break
                 case "+":
@@ -1163,7 +1194,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     // Zoom handled by both IPC and globalKeydownListener - use debounce
                     // Ctrl+Plus: fine step (0.1 = 1%), Plus alone: normal step (1 = 10%)
                     if (!input.isAutoRepeat) {
-                        this.markKeyProcessed(input.key)
+                        this.markKeyProcessed(keyWithMods)
                         const stepPlus = input.control ? 0.1 : 1
                         this.applyZoom((this.state.zoom || 0) + stepPlus)
                     }
@@ -1172,25 +1203,25 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "_":
                     // Ctrl+Minus: fine step (0.1 = 1%), Minus alone: normal step (1 = 10%)
                     if (!input.isAutoRepeat) {
-                        this.markKeyProcessed(input.key)
+                        this.markKeyProcessed(keyWithMods)
                         const stepMinus = input.control ? 0.1 : 1
                         this.applyZoom((this.state.zoom || 0) - stepMinus)
                     }
                     break
                 case "#":
-                    this.markKeyProcessed(input.key)
+                    this.markKeyProcessed(keyWithMods)
                     this.applyZoom(0)
                     break
                 case "w":
                 case "W":
-                    this.markKeyProcessed(input.key)
+                    this.markKeyProcessed(keyWithMods)
                     this.toggleFull()
                     break
                 case "m":
                 case "M":
                     // Shift+M: Toggle Read/Unread
                     // m alone: Toggle Mobile Mode
-                    this.markKeyProcessed(input.key)
+                    this.markKeyProcessed(keyWithMods)
                     if (input.shift) {
                         this.props.toggleHasRead(this.props.item)
                     } else {
@@ -1200,13 +1231,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "p":
                 case "P":
                     // Toggle Visual Zoom
-                    this.markKeyProcessed(input.key)
+                    this.markKeyProcessed(keyWithMods)
                     this.toggleVisualZoom()
                     break
                 case "H":
                 case "h":
                     if (!input.meta) {
-                        this.markKeyProcessed(input.key)
+                        this.markKeyProcessed(keyWithMods)
                         this.props.toggleHidden(this.props.item)
                     }
                     break
@@ -1304,9 +1335,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Ignoriere repeat Events (Taste wird gehalten)
             if (e.repeat) return
             
+            // Build key string with modifiers for accurate debounce comparison
+            const keyWithMods = this.buildKeyWithModifiers(e.key, e.ctrlKey, e.shiftKey, e.altKey, e.metaKey)
+            
             // Unified Key Debounce: Block if same key was processed recently
             // (either by this handler or by keyDownHandler via IPC)
-            if (this.isDuplicateKey(e.key)) {
+            if (this.isDuplicateKey(keyWithMods)) {
                 return
             }
             
@@ -1317,19 +1351,19 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             const step = e.ctrlKey ? 0.1 : 1
             
             if (e.key === '+' || e.key === '=') {
-                this.markKeyProcessed(e.key)
+                this.markKeyProcessed(keyWithMods)
                 const newZoom = Math.min(MAX_ZOOM_LEVEL, this.currentZoom + step)
                 this.currentZoom = newZoom
                 this.setState({ zoom: newZoom })
                 this.applyZoom(newZoom)
             } else if (e.key === '-' || e.key === '_') {
-                this.markKeyProcessed(e.key)
+                this.markKeyProcessed(keyWithMods)
                 const newZoom = Math.max(MIN_ZOOM_LEVEL, this.currentZoom - step)
                 this.currentZoom = newZoom
                 this.setState({ zoom: newZoom })
                 this.applyZoom(newZoom)
             } else if (e.key === '#') {
-                this.markKeyProcessed(e.key)
+                this.markKeyProcessed(keyWithMods)
                 this.currentZoom = 0
                 this.setState({ zoom: 0 })
                 this.applyZoom(0)

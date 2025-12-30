@@ -147,6 +147,15 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
         }
     }, [addToLog]) // addToLog is stable from mapDispatchToProps
 
+    // Notify Article component when P2P dialog opens/closes (for screenshot placeholder)
+    useEffect(() => {
+        // Dispatch custom event to Article component - it handles the screenshot/placeholder logic
+        const event = new CustomEvent('p2p-dialog-visibility', {
+            detail: { open: incomingArticle !== null }
+        })
+        window.dispatchEvent(event)
+    }, [incomingArticle])
+
     const handleDismiss = useCallback(() => {
         // Show next in queue or close
         if (queueRef.current.length > 0) {
