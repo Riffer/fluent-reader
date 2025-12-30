@@ -221,6 +221,34 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     
     /**
+     * Get zoom display text for badge (percentage with decimal for fine zoom)
+     */
+    private getZoomDisplayText = (): string => {
+        const zoomLevel = this.state.zoom || 0;
+        const percent = Math.round((1.0 + (zoomLevel * 0.1)) * 100);
+        return `${percent}%`;
+    }
+    
+    /**
+     * Get viewport tooltip showing emulated viewport dimensions
+     */
+    private getViewportTooltip = (): string => {
+        try {
+            const info = window.settings.getEmulatedViewportInfo();
+            const lines = [
+                `Zoom: ${info.zoomPercent}%`,
+                `Viewport: ${info.viewportWidth} × ${info.viewportHeight} px`,
+                info.mobileMode ? '📱 Mobile Mode aktiv' : '',
+                '',
+                'Tasten: +/- (10%), Ctrl++/- (1%), # (Reset)'
+            ].filter(Boolean);
+            return lines.join('\n');
+        } catch (e) {
+            return `Zoom: ${this.getZoomDisplayText()}`;
+        }
+    }
+    
+    /**
      * Get current navigation settings for bundled navigation call
      * This bundles all settings that affect how the content is displayed
      */
@@ -1133,16 +1161,20 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "+":
                 case "=":
                     // Zoom handled by both IPC and globalKeydownListener - use debounce
+                    // Ctrl+Plus: fine step (0.1 = 1%), Plus alone: normal step (1 = 10%)
                     if (!input.isAutoRepeat) {
                         this.markKeyProcessed(input.key)
-                        this.applyZoom((this.state.zoom || 0) + 1)
+                        const stepPlus = input.control ? 0.1 : 1
+                        this.applyZoom((this.state.zoom || 0) + stepPlus)
                     }
                     break
                 case "-":
                 case "_":
+                    // Ctrl+Minus: fine step (0.1 = 1%), Minus alone: normal step (1 = 10%)
                     if (!input.isAutoRepeat) {
                         this.markKeyProcessed(input.key)
-                        this.applyZoom((this.state.zoom || 0) - 1)
+                        const stepMinus = input.control ? 0.1 : 1
+                        this.applyZoom((this.state.zoom || 0) - stepMinus)
                     }
                     break
                 case "#":
@@ -1261,7 +1293,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             const MAX_ZOOM_LEVEL = 40
             const isZoomKey = (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_' || e.key === '#')
             
-            if (!isZoomKey || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+            // Allow Ctrl for fine zoom steps, block other modifiers (Meta/Alt/Shift)
+            if (!isZoomKey || e.metaKey || e.altKey || e.shiftKey) return
             
             // Ignoriere repeat Events (Taste wird gehalten)
             if (e.repeat) return
@@ -1275,15 +1308,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             e.preventDefault()
             this.pressedZoomKeys.add(e.key)
             
+            // Ctrl+Plus/Minus: fine step (0.1 = 1%), otherwise: normal step (1 = 10%)
+            const step = e.ctrlKey ? 0.1 : 1
+            
             if (e.key === '+' || e.key === '=') {
                 this.markKeyProcessed(e.key)
-                const newZoom = Math.min(MAX_ZOOM_LEVEL, this.currentZoom + 1)
+                const newZoom = Math.min(MAX_ZOOM_LEVEL, this.currentZoom + step)
                 this.currentZoom = newZoom
                 this.setState({ zoom: newZoom })
                 this.applyZoom(newZoom)
             } else if (e.key === '-' || e.key === '_') {
                 this.markKeyProcessed(e.key)
-                const newZoom = Math.max(MIN_ZOOM_LEVEL, this.currentZoom - 1)
+                const newZoom = Math.max(MIN_ZOOM_LEVEL, this.currentZoom - step)
                 this.currentZoom = newZoom
                 this.setState({ zoom: newZoom })
                 this.applyZoom(newZoom)
@@ -2602,6 +2638,26 @@ window.__articleData = ${JSON.stringify({
                                     title="Eingabe-Modus aktiv - Shortcuts deaktiviert (Escape oder Ctrl+I zum Beenden)"
                                 >
                                     ⌨ EINGABE
+                                </span>
+                            )}
+                            {/* Zoom Badge with viewport tooltip */}
+                            {(this.state.zoom !== undefined && this.state.zoom !== 0) && (
+                                <span 
+                                    className="zoom-badge"
+                                    style={{
+                                        marginLeft: 8,
+                                        padding: '2px 6px',
+                                        backgroundColor: '#0078d4',
+                                        color: 'white',
+                                        borderRadius: 3,
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                        whiteSpace: 'nowrap',
+                                        cursor: 'default',
+                                    }}
+                                    title={this.getViewportTooltip()}
+                                >
+                                    🔍 {this.getZoomDisplayText()}
                                 </span>
                             )}
                         </div>

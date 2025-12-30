@@ -134,11 +134,18 @@ try {
     addStatusMessage(message, duration);
   }
 
+  /**
+   * Shows mode indicator overlay (Mobile Mode only, zoom is now shown in badge)
+   */
   function showZoomOverlay(level) {
-    const factor = zoomLevelToFactor(level);
-    const percentage = Math.round(factor * 100);
-    const modeIndicator = mobileMode ? ' (M)' : ' (D)';
-    updateOverlay(`Zoom: ${percentage}%${modeIndicator}`);
+    // Zoom is now displayed in the React badge, not in overlay
+    // Only show Mobile Mode indicator if enabled
+    if (mobileMode) {
+      updateOverlay('📱 Mobile Mode');
+    } else {
+      // Clear overlay if no mobile mode
+      updateOverlay(null);
+    }
   }
 
   // Konvertierung: zoomLevel -> Faktor (linear: 10% pro Stufe)
@@ -479,13 +486,11 @@ try {
     mobileMode = !!enabled;
     // Briefly show overlay to indicate mode change (even if overlay is otherwise disabled)
     if (wasEnabled !== mobileMode) {
-      const factor = zoomLevelToFactor(zoomLevel);
-      const percentage = Math.round(factor * 100);
-      const modeIndicator = mobileMode ? ' (M)' : ' (D)';
+      const modeText = mobileMode ? '📱 Mobile Mode' : '🖥️ Desktop Mode';
       // Temporarily show even if overlay is disabled
       const wasOverlayEnabled = showZoomOverlayEnabled;
       showZoomOverlayEnabled = true;
-      updateOverlay(`Zoom: ${percentage}%${modeIndicator}`);
+      updateOverlay(modeText);
       showZoomOverlayEnabled = wasOverlayEnabled;
     }
   });

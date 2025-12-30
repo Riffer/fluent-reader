@@ -671,6 +671,11 @@ export class ContentViewManager {
             return this.getZoomFactor()
         })
         
+        // Get emulated viewport info (sync - for UI badge/tooltip)
+        ipcMain.on("get-emulated-viewport-info", (event) => {
+            event.returnValue = this.getEmulatedViewportInfo()
+        })
+        
         // Enable/disable visual zoom
         ipcMain.on("content-view-set-visual-zoom", (event, enabled: boolean) => {
             this.visualZoomEnabled = enabled
@@ -1135,6 +1140,51 @@ export class ContentViewManager {
         } catch (e) {
             console.error("[ContentViewManager] getZoomFactor error:", e)
             return 1.0
+        }
+    }
+    
+    /**
+     * Get emulated viewport information for display in UI
+     * Returns the actual viewport dimensions the website sees
+     */
+    public getEmulatedViewportInfo(): { viewportWidth: number; viewportHeight: number; scale: number; mobileMode: boolean; zoomPercent: number } {
+        const { width, height } = this.bounds
+        
+        // Calculate the same viewport as applyDeviceEmulationForCurrentMode
+        let viewportWidth = width
+        let viewportHeight = height
+        let effectiveScale = this.keyboardZoomFactor
+        
+        if (this.mobileMode && width > 0) {
+            const mobileViewport = Math.min(768, width)
+            viewportWidth = mobileViewport
+            
+            const baseScale = width / mobileViewport
+            effectiveScale = baseScale * this.keyboardZoomFactor
+            
+            // Adaptive viewport when scale exceeds critical threshold
+            const criticalScale = width / mobileViewport
+            if (effectiveScale > criticalScale) {
+                viewportWidth = Math.round(width / effectiveScale)
+                viewportHeight = Math.round(height / effectiveScale)
+            }
+        } else if (width > 0) {
+            // Normal mode: adaptive viewport when scale > 1.0
+            if (effectiveScale > 1.0) {
+                viewportWidth = Math.round(width / effectiveScale)
+                viewportHeight = Math.round(height / effectiveScale)
+            }
+        }
+        
+        // Calculate zoom percentage (CSS zoom level based)
+        const zoomPercent = Math.round(this.keyboardZoomFactor * 100)
+        
+        return {
+            viewportWidth,
+            viewportHeight,
+            scale: effectiveScale,
+            mobileMode: this.mobileMode,
+            zoomPercent
         }
     }
     

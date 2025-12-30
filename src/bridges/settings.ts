@@ -180,6 +180,11 @@ const settingsBridge = {
     setAll: configs => {
         ipcRenderer.invoke("import-all-settings", configs)
     },
+    
+    // Get emulated viewport info for display in UI badge/tooltip
+    getEmulatedViewportInfo: (): { viewportWidth: number; viewportHeight: number; scale: number; mobileMode: boolean; zoomPercent: number } => {
+        return ipcRenderer.sendSync("get-emulated-viewport-info")
+    },
 }
 
 declare global {
