@@ -887,18 +887,21 @@ try {
   
   function scrollToImage(direction) {
     const images = getVisibleImages();
+    const ctx = getScrollContext();
+    const viewportTop = ctx.scrollTop;
+    const viewportHeight = ctx.viewportHeight;
+    const viewportBottom = viewportTop + viewportHeight;
+    
+    // Maximum scroll distance = one page (80% of viewport for overlap)
+    const maxScrollDistance = viewportHeight * 0.8;
+    // Threshold: element must be at least this far into viewport to be "current"
+    const visibilityThreshold = viewportHeight * 0.15;
     
     // If no substantial images, use page scrolling with overlap
     if (images.length === 0) {
       scrollByPage(direction);
       return true;
     }
-    
-    const ctx = getScrollContext();
-    const viewportTop = ctx.scrollTop;
-    const viewportHeight = ctx.viewportHeight;
-    // Threshold: image/heading must be at least this far into viewport to be "current"
-    const visibilityThreshold = viewportHeight * 0.15; // 15% of viewport height
     
     // For each image, get its scroll target (heading or image itself)
     const targets = images.map(img => {
@@ -919,31 +922,76 @@ try {
           // Scroll by page to show more of it (with overlap for context)
           const scrollAmount = Math.min(
             overflow.overflowAmount + viewportHeight * 0.1, // Show rest of image + small margin
-            viewportHeight * 0.8 // But not more than 80% of viewport
+            maxScrollDistance // But not more than one page
           );
           ctx.scrollBy(scrollAmount);
           return true;
         }
       }
       
-      // No overflowing image - find next image/heading to scroll to
+      // No overflowing image - find next anchor point within reach
+      // "Within reach" = within one page scroll distance
+      const maxTargetPosition = viewportTop + maxScrollDistance;
+      let nextTarget = null;
+      let nextTargetIndex = -1;
+      
       for (let i = 0; i < targets.length; i++) {
         const targetTop = targets[i].target.offsetTop;
+        
+        // Target must be below current view (not already visible at top)
         if (targetTop > viewportTop + visibilityThreshold) {
-          // This image's heading/target is not yet in view - scroll to it
-          targets[i].target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          currentImageIndex = i;
-          return true;
+          // Check if target is within one page distance
+          if (targetTop <= maxTargetPosition) {
+            // Found an anchor within reach - scroll to it
+            nextTarget = targets[i];
+            nextTargetIndex = i;
+            break;
+          } else {
+            // Target exists but is too far - do page scroll and check if we reveal an anchor
+            break;
+          }
         }
       }
-      // All images are above threshold - continue with page scroll
-      scrollByPage(direction);
+      
+      if (nextTarget) {
+        // Scroll to the anchor point
+        nextTarget.target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        currentImageIndex = nextTargetIndex;
+        return true;
+      }
+      
+      // No anchor within reach - scroll by one page
+      // Then check if an anchor appeared in the new viewport
+      const newScrollTop = viewportTop + maxScrollDistance;
+      
+      // Find if there's an anchor that will be visible after page scroll
+      let anchorInNewView = null;
+      let anchorIndex = -1;
+      for (let i = 0; i < targets.length; i++) {
+        const targetTop = targets[i].target.offsetTop;
+        // Will this anchor be near the top of the new viewport?
+        if (targetTop >= newScrollTop && targetTop <= newScrollTop + viewportHeight * 0.3) {
+          anchorInNewView = targets[i];
+          anchorIndex = i;
+          break;
+        }
+      }
+      
+      if (anchorInNewView) {
+        // An anchor will appear in the upper part of new view - snap to it
+        anchorInNewView.target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        currentImageIndex = anchorIndex;
+      } else {
+        // No anchor in new view - just do page scroll
+        ctx.scrollBy(maxScrollDistance);
+      }
       return true;
+      
     } else {
       // Backward navigation (Shift+Space)
       
-      // Check if any currently visible image overflows the top of viewport
-      // (meaning we scrolled past its top, but it's still partially visible)
+      // Check if any currently visible image has its top above the viewport
+      // (meaning we're in the middle of a tall image)
       for (let i = images.length - 1; i >= 0; i--) {
         const img = images[i];
         const imgTop = img.offsetTop;
@@ -955,52 +1003,89 @@ try {
         
         if (topIsAbove && isStillVisible) {
           // We're in the middle of a tall image - scroll up to show its top
-          const scrollAmount = viewportTop - imgTop;
-          // But scroll by at least 80% of viewport for good navigation
-          const actualScroll = Math.max(scrollAmount, viewportHeight * 0.8);
-          ctx.scrollBy(-Math.min(actualScroll, viewportTop)); // Don't scroll past top
+          // But limit to one page
+          const distanceToTop = viewportTop - imgTop;
+          const scrollAmount = Math.min(distanceToTop, maxScrollDistance);
+          ctx.scrollBy(-scrollAmount);
           return true;
         }
       }
       
-      // Find the previous image/target to scroll to
+      // Find the previous anchor point within reach
+      const minTargetPosition = viewportTop - maxScrollDistance;
+      let prevTarget = null;
+      let prevTargetIndex = -1;
+      
+      // Find current position in target list
       let currentIndex = -1;
       for (let i = 0; i < targets.length; i++) {
         const targetTop = targets[i].target.offsetTop;
-        // If this target is at or near the current scroll position, it's the "current" one
         if (targetTop >= viewportTop - 50 && targetTop <= viewportTop + visibilityThreshold) {
           currentIndex = i;
           break;
         }
-        // If this target is below our current position, the previous one was "current"
         if (targetTop > viewportTop + visibilityThreshold) {
           currentIndex = i - 1;
           break;
         }
       }
       
-      // If we found a current index, go to the previous one
-      if (currentIndex > 0) {
-        targets[currentIndex - 1].target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        currentImageIndex = currentIndex - 1;
-        return true;
-      } else if (currentIndex === 0) {
-        // Already at first image, scroll to top
-        ctx.scrollTo(0);
-        return true;
-      } else {
-        // No current index found - find the last target that is above viewport
-        for (let i = targets.length - 1; i >= 0; i--) {
-          const targetTop = targets[i].target.offsetTop;
-          if (targetTop < viewportTop - 10) {
-            targets[i].target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            currentImageIndex = i;
-            return true;
+      // Look for previous anchor within reach
+      const searchStartIndex = currentIndex >= 0 ? currentIndex - 1 : targets.length - 1;
+      for (let i = searchStartIndex; i >= 0; i--) {
+        const targetTop = targets[i].target.offsetTop;
+        
+        // Target must be above current view
+        if (targetTop < viewportTop - 10) {
+          // Check if target is within one page distance
+          if (targetTop >= minTargetPosition) {
+            prevTarget = targets[i];
+            prevTargetIndex = i;
+            break;
+          } else {
+            // Target exists but is too far - do page scroll
+            break;
           }
         }
       }
-      // No image above - use page scroll to go up
-      scrollByPage(direction);
+      
+      if (prevTarget) {
+        // Scroll to the anchor point
+        prevTarget.target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        currentImageIndex = prevTargetIndex;
+        return true;
+      }
+      
+      // Check if we're at/near the first target - scroll to top
+      if (currentIndex === 0 || viewportTop < maxScrollDistance) {
+        ctx.scrollTo(0);
+        return true;
+      }
+      
+      // No anchor within reach - scroll by one page
+      const newScrollTop = Math.max(0, viewportTop - maxScrollDistance);
+      
+      // Find if there's an anchor that will be visible after page scroll
+      let anchorInNewView = null;
+      let anchorIndex = -1;
+      for (let i = targets.length - 1; i >= 0; i--) {
+        const targetTop = targets[i].target.offsetTop;
+        // Will this anchor be near the top of the new viewport?
+        if (targetTop >= newScrollTop && targetTop <= newScrollTop + viewportHeight * 0.3) {
+          anchorInNewView = targets[i];
+          anchorIndex = i;
+          break;
+        }
+      }
+      
+      if (anchorInNewView) {
+        // An anchor will appear in the upper part of new view - snap to it
+        anchorInNewView.target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        currentImageIndex = anchorIndex;
+      } else {
+        // No anchor in new view - just do page scroll
+        ctx.scrollBy(-maxScrollDistance);
+      }
       return true;
     }
   }
