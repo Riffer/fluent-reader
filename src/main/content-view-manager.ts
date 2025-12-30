@@ -248,6 +248,17 @@ export class ContentViewManager {
                 this.pageLoaded = true
             }
             
+            // Suppress JavaScript dialogs (alert/confirm/prompt) from article pages
+            // This must run in the MAIN WORLD (not preload) to override the page's functions
+            // Prevents mysterious empty "Error:" dialogs from websites
+            wc.executeJavaScript(`
+                (function() {
+                    window.alert = function(msg) { console.warn('[Suppressed alert]', msg); };
+                    window.confirm = function(msg) { console.warn('[Suppressed confirm]', msg); return false; };
+                    window.prompt = function(msg) { console.warn('[Suppressed prompt]', msg); return null; };
+                })();
+            `).catch(() => {})  // Ignore errors (e.g., if page navigates away)
+            
             // Send zoom settings to preload based on mode
             // Don't round - preserve fractional values from pinch-zoom (e.g., 3.5 = 135%)
             const level = (this.keyboardZoomFactor - 1.0) / 0.1
