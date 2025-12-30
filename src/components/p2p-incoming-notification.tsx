@@ -18,6 +18,7 @@ import {
     Link,
     useTheme,
 } from "@fluentui/react"
+import { setOverlayVisible } from "../scripts/overlay-visibility"
 
 /**
  * Play a subtle notification sound when articles are added to the bell
@@ -149,11 +150,7 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
 
     // Notify Article component when P2P dialog opens/closes (for screenshot placeholder)
     useEffect(() => {
-        // Dispatch custom event to Article component - it handles the screenshot/placeholder logic
-        const event = new CustomEvent('p2p-dialog-visibility', {
-            detail: { open: incomingArticle !== null }
-        })
-        window.dispatchEvent(event)
+        setOverlayVisible('p2p-incoming', incomingArticle !== null)
     }, [incomingArticle])
 
     const handleDismiss = useCallback(() => {

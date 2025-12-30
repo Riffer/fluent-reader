@@ -1,148 +1,50 @@
 # Feature Ideas
 
-## 💡 Offene Ideen
+## ✅ Implementierte Features
 
 ### ContentView Visibility Management - Zentralisierung (30.12.2025)
 
-**Problem:**
-Das Verstecken/Anzeigen des WebContentsView bei Overlay-Dialogen ist derzeit über mehrere Mechanismen verteilt. Der gleiche Code (`hideContentViewWithScreenshot`, `restoreContentView`) wird von verschiedenen Quellen aufgerufen, jede mit eigenem Tracking-State.
+**Problem (gelöst):**
+Das Verstecken/Anzeigen des WebContentsView bei Overlay-Dialogen war über mehrere fragmentierte Mechanismen verteilt. Jeder Handler musste alle anderen States prüfen.
 
-**Aktuelle Architektur (fragmentiert):**
+**Implementierte Lösung:**
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        ContentView Hide/Show Auslöser                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  1. REDUX-BASIERTE OVERLAYS (overlayActive prop)                        │
-│     ├─ Settings Panel                                                    │
-│     ├─ Log Menu (Notification Bell)                                      │
-│     └─ Context Menu                                                      │
-│     → Mapping in article-container.tsx (Zeile 54):                       │
-│       overlayActive = settingsOpen || logMenuOpen || contextMenuType     │
-│     → Reaktion via componentDidUpdate → handleOverlayVisibilityChange()  │
-│                                                                          │
-│  2. FLUENT UI DROPDOWNS (Callback-basiert)                              │
-│     ├─ Tools Menu                                                        │
-│     └─ Any Fluent CommandBar/Dropdown                                    │
-│     → Callbacks: onMenuOpened, onMenuDismissed in getArticleMenuProps()  │
-│     → Handler: handleFluentMenuOpened(), handleFluentMenuDismissed()     │
-│     → Tracking: this.fluentMenuOpen (boolean)                            │
-│                                                                          │
-│  3. LOKALE DIALOGE (Component State)                                     │
-│     ├─ P2P Share Dialog (alt, in article.tsx selbst)                    │
-│     └─ Weitere lokale Dialoge                                            │
-│     → Handler: handleLocalDialogVisibilityChange(dialogOpen)             │
-│     → Tracking: this.localDialogOpen (boolean)                           │
-│                                                                          │
-│  4. P2P INCOMING NOTIFICATION (CustomEvent, NEU)                         │
-│     └─ P2P Incoming Article Dialog                                       │
-│     → Event: 'p2p-dialog-visibility' CustomEvent                         │
-│     → Listener in initializeContentView()                                │
-│     → Ruft handleLocalDialogVisibilityChange() auf                       │
-│                                                                          │
-├─────────────────────────────────────────────────────────────────────────┤
-│                        Zentrale Funktionen                               │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  hideContentViewWithScreenshot(reason, shouldHideCheck)                  │
-│     1. Prüft ob schon versteckt (contentViewHiddenForMenu)              │
-│     2. Erfasst Screenshot via window.contentView.captureScreen()         │
-│     3. Setzt menuBlurScreenshot state (React rendert Blur-Placeholder)   │
-│     4. Versteckt ContentView via setVisible(false, true)                 │
-│     5. Setzt contentViewHiddenForMenu = true                             │
-│                                                                          │
-│  restoreContentView()                                                    │
-│     1. Prüft ob versteckt                                                │
-│     2. Zeigt ContentView via setVisible(true)                            │
-│     3. Setzt contentViewHiddenForMenu = false                            │
-│     4. Löscht menuBlurScreenshot state (mit 16ms Delay)                  │
-│                                                                          │
-├─────────────────────────────────────────────────────────────────────────┤
-│                        Tracking State (fragmentiert!)                    │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ❌ this.contentViewHiddenForMenu  - Ist ContentView gerade versteckt?  │
-│  ❌ this.fluentMenuOpen            - Ist ein Fluent-Dropdown offen?     │
-│  ❌ this.localDialogOpen           - Ist ein lokaler Dialog offen?      │
-│  ❌ this.props.overlayActive       - Ist ein Redux-Overlay aktiv?       │
-│                                                                          │
-│  Problem: Jeder Handler muss ALLE anderen States prüfen bevor            │
-│           restoreContentView() aufgerufen wird!                          │
-│                                                                          │
-│  Beispiel (handleFluentMenuDismissed):                                   │
-│     if (this.props.overlayActive || this.localDialogOpen) return         │
-│                                                                          │
-│  Beispiel (handleOverlayVisibilityChange):                               │
-│     if (!this.fluentMenuOpen && !this.localDialogOpen) restore()         │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-**Vorschlag: Zentralisiertes Event-System**
+Neues zentralisiertes Event-System in `src/scripts/overlay-visibility.ts`:
 
 ```typescript
-// Neue Datei: src/events/content-view-overlay.ts (oder in bridges/)
-
+// Overlay-Typen für Type-Safety
 type OverlaySource = 
-    | 'redux-settings' 
-    | 'redux-logmenu' 
-    | 'redux-contextmenu'
-    | 'fluent-dropdown'
-    | 'p2p-incoming'
-    | 'p2p-share'
-    | 'local-dialog'
-
-// Zentrales Event für ALLE Overlay-Zustandsänderungen
-const OVERLAY_VISIBILITY_EVENT = 'overlay-visibility-change'
-
-interface OverlayVisibilityEvent {
-    source: OverlaySource
-    visible: boolean  // true = overlay öffnet, false = overlay schließt
-}
+    | 'redux-settings'      // Settings, Log Menu, Context Menu (via Redux)
+    | 'fluent-dropdown'     // Fluent UI dropdown menus
+    | 'p2p-incoming'        // P2P incoming notification dialog
+    | 'p2p-share'           // P2P share dialog
 
 // Dispatcher-Funktion (von überall aufrufbar)
-export function setOverlayVisible(source: OverlaySource, visible: boolean): void {
-    window.dispatchEvent(new CustomEvent(OVERLAY_VISIBILITY_EVENT, {
-        detail: { source, visible }
-    }))
-}
+setOverlayVisible('p2p-incoming', true)   // Overlay öffnet
+setOverlayVisible('p2p-incoming', false)  // Overlay schließt
 
-// In article.tsx: EIN Listener für ALLE Quellen
-private overlayStates = new Map<OverlaySource, boolean>()
-
-private handleOverlayEvent = (e: CustomEvent<OverlayVisibilityEvent>) => {
-    const { source, visible } = e.detail
-    this.overlayStates.set(source, visible)
-    
-    const anyOverlayOpen = [...this.overlayStates.values()].some(v => v)
-    
-    if (anyOverlayOpen && !this.contentViewHiddenForMenu) {
-        this.hideContentViewWithScreenshot(`Overlay: ${source}`)
-    } else if (!anyOverlayOpen && this.contentViewHiddenForMenu) {
-        this.restoreContentView()
-    }
-}
+// OverlayStateManager in Article-Komponente
+// Trackt alle offenen Overlays in einer Map
+// Entscheidet automatisch: hide wenn irgendein Overlay offen, restore wenn alle zu
 ```
 
-**Vorteile der Zentralisierung:**
-1. ✅ **Single Source of Truth**: Eine Map trackt alle Overlay-Zustände
-2. ✅ **Keine Cross-Checks**: Kein `if (this.props.overlayActive || this.localDialogOpen...)` mehr
-3. ✅ **Einfache Erweiterung**: Neuer Dialog = nur `setOverlayVisible('new-dialog', true/false)`
-4. ✅ **Debugging**: Eine Stelle zum Loggen aller Overlay-State-Changes
-5. ✅ **Konsistenz**: Alle Overlays nutzen denselben Mechanismus
+**Aufgeräumte Dateien:**
+- ❌ `p2p-echo-dialog.tsx` - Gelöscht (unbenutzt)
+- ❌ `p2p-echo-dialog-lan.tsx` - Gelöscht (unbenutzt)
+- ❌ `p2p-share-dialog.tsx` - Gelöscht (non-LAN Version, unbenutzt)
 
-**Migration:**
-1. Event-System implementieren
-2. P2P Incoming (bereits CustomEvent) → auf neues Event umstellen
-3. Fluent Dropdowns → `setOverlayVisible('fluent-dropdown', true/false)` in Callbacks
-4. Redux Overlays → Entweder:
-   - Via Redux Middleware als Event dispatchen, ODER
+**Vorteile:**
+1. ✅ Single Source of Truth: `OverlayStateManager` trackt alle Overlay-Zustände
+2. ✅ Keine Cross-Checks mehr: Kein `if (overlayActive || fluentMenuOpen || localDialogOpen...)` 
+3. ✅ Einfache Erweiterung: Neuer Dialog = nur `setOverlayVisible('new-dialog', true/false)`
+4. ✅ Besseres Debugging: `overlayStateManager.getOpenOverlays()` zeigt alle offenen Overlays
+
+**Branch:** `feature/centralized-overlay-visibility`
+
+---
+
+## 💡 Offene Ideen
    - In `componentDidUpdate` in Article auf Redux-Änderungen reagieren und Event dispatchen
-5. Alle direkten Handler (`handleFluentMenuOpened` etc.) durch Event-Dispatch ersetzen
-
-**Status:** 📋 Dokumentiert, Umsetzung offen
-
 ---
 
 ### Overlay-Menü Performance: Alternativen zum Screenshot-Workaround (27.12.2025)

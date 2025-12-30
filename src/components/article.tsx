@@ -21,6 +21,12 @@ import {
 import { shareSubmenu } from "./context-menu"
 import { platformCtrl, decodeFetchResponse } from "../scripts/utils"
 import { P2PShareDialog } from "./p2p-share-dialog-lan"
+import { 
+    setOverlayVisible, 
+    OverlayStateManager, 
+    OVERLAY_VISIBILITY_EVENT,
+    OverlayVisibilityEvent 
+} from "../scripts/overlay-visibility"
 
 const FONT_SIZE_OPTIONS = [8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
@@ -104,6 +110,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private contentViewCurrentUrl: string | null = null  // Track current URL to avoid double navigation
     private pendingContentViewFocus: boolean = false  // Track if we need to focus ContentView after load
     private contentViewInitialized: boolean = false  // Track if Device Emulation is already set (for JS navigation experiment)
+    
+    // Centralized overlay state management - replaces fragmented tracking
+    private overlayStateManager = new OverlayStateManager()
+    private overlayVisibilityListener: ((e: OverlayVisibilityEvent) => void) | null = null
     
     // Unified Key Debounce: Prevents duplicate key processing from multiple sources
     // Problem 1: OS sends keydown to BOTH BrowserWindow (document.keydown) AND
@@ -495,11 +505,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.windowResizeListener = null;
         }
         
-        // Remove P2P dialog visibility listener
-        if (this.p2pDialogVisibilityListener) {
-            window.removeEventListener('p2p-dialog-visibility', this.p2pDialogVisibilityListener as EventListener);
-            this.p2pDialogVisibilityListener = null;
+        // Remove centralized overlay visibility listener
+        if (this.overlayVisibilityListener) {
+            window.removeEventListener(OVERLAY_VISIBILITY_EVENT, this.overlayVisibilityListener as EventListener);
+            this.overlayVisibilityListener = null;
         }
+        
+        // Clear overlay state manager
+        this.overlayStateManager.clear()
         
         // Reset bounds cache and current URL
         this.lastContentViewBounds = null;
@@ -553,7 +566,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     
     private lastContentViewBounds: { x: number, y: number, width: number, height: number } | null = null;
     private windowResizeListener: (() => void) | null = null;
-    private p2pDialogVisibilityListener: ((e: CustomEvent<{ open: boolean }>) => void) | null = null;
     
     /**
      * Initialize ContentView for ALL content types
@@ -594,12 +606,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 window.addEventListener('resize', this.windowResizeListener);
             }
             
-            // Setup P2P dialog visibility listener
-            if (!this.p2pDialogVisibilityListener) {
-                this.p2pDialogVisibilityListener = (e: CustomEvent<{ open: boolean }>) => {
-                    this.handleLocalDialogVisibilityChange(e.detail.open);
+            // Setup centralized overlay visibility listener
+            if (!this.overlayVisibilityListener) {
+                this.overlayVisibilityListener = (e: OverlayVisibilityEvent) => {
+                    this.handleOverlayVisibilityEvent(e.detail.source, e.detail.visible);
                 };
-                window.addEventListener('p2p-dialog-visibility', this.p2pDialogVisibilityListener as EventListener);
+                window.addEventListener(OVERLAY_VISIBILITY_EVENT, this.overlayVisibilityListener as EventListener);
             }
             
             // Load content with bundled settings (all settings applied BEFORE navigation)
@@ -1509,17 +1521,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             }
         }
         
-        // Handle overlay visibility changes for ContentView (Redux-based overlays only)
-        // This covers: settings, log menu, context menus (not hamburger menu)
-        // Note: Fluent UI dropdowns (Tools, View) are handled by onMenuOpened/onMenuDismissed callbacks
+        // Handle overlay visibility changes for ContentView (Redux-based overlays)
+        // Bridge Redux state changes to the centralized overlay system
         if (prevProps.overlayActive !== this.props.overlayActive) {
-            this.handleOverlayVisibilityChange(this.props.overlayActive)
+            this.handleReduxOverlayChange(this.props.overlayActive)
         }
         
-        // Handle local dialog state changes (P2P Share Dialog, etc.)
-        // These are not managed by Redux, so we need to handle them separately
+        // Handle local P2P Share Dialog state changes
+        // Bridge local component state to the centralized overlay system
         if (prevState.showP2PShareDialog !== this.state.showP2PShareDialog) {
-            this.handleLocalDialogVisibilityChange(this.state.showP2PShareDialog)
+            setOverlayVisible('p2p-share', this.state.showP2PShareDialog)
         }
         
         // Handle hamburger menu layout changes - update ContentView bounds
@@ -1569,58 +1580,39 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     
     /**
-     * Handle Redux overlay visibility change for ContentView
-     * Only handles Redux-based overlays (menu, settings, log menu, context menu)
-     * Fluent UI dropdowns are handled by onMenuOpened/onMenuDismissed callbacks
+     * Centralized handler for ALL overlay visibility changes
+     * Called by the overlay-visibility event listener
+     * Replaces fragmented handlers: handleOverlayVisibilityChange, handleLocalDialogVisibilityChange, etc.
      */
-    private handleOverlayVisibilityChange = async (overlayActive: boolean) => {
+    private handleOverlayVisibilityEvent = async (source: string, visible: boolean) => {
         if (!window.contentView) return
         
-        if (overlayActive) {
-            await this.hideContentViewWithScreenshot('Redux overlay opening', () => this.props.overlayActive)
-        } else {
-            // Redux overlay closed - check if we can restore
-            if (this.contentViewHiddenForMenu && !this.fluentMenuOpen && !this.localDialogOpen) {
-                this.restoreContentView()
-            }
+        const anyOpen = this.overlayStateManager.update(source as any, visible)
+        
+        if (visible && !this.contentViewHiddenForMenu) {
+            // Overlay opening - hide ContentView with screenshot
+            await this.hideContentViewWithScreenshot(`Overlay: ${source}`, () => this.overlayStateManager.isAnyOpen())
+        } else if (!anyOpen && this.contentViewHiddenForMenu) {
+            // All overlays closed - restore ContentView
+            this.restoreContentView()
         }
     }
-    
-    // Track if a local dialog (not Redux-managed) is open
-    private localDialogOpen = false
     
     /**
-     * Handle local dialog visibility change for ContentView
-     * Covers dialogs managed by local component state (P2P Share Dialog, etc.)
+     * Handle Redux overlay visibility change for ContentView
+     * Bridges Redux state changes to the centralized overlay system
      */
-    private handleLocalDialogVisibilityChange = async (dialogOpen: boolean) => {
-        if (!window.contentView) return
-        
-        if (dialogOpen) {
-            this.localDialogOpen = true
-            await this.hideContentViewWithScreenshot('local dialog opening', () => this.localDialogOpen)
-        } else {
-            // Local dialog closed - check if we can restore
-            this.localDialogOpen = false
-            if (this.contentViewHiddenForMenu && !this.fluentMenuOpen && !this.props.overlayActive) {
-                this.restoreContentView()
-            }
-        }
+    private handleReduxOverlayChange = (overlayActive: boolean) => {
+        // Determine which Redux overlay changed (we emit a combined event)
+        setOverlayVisible('redux-settings', overlayActive)
     }
-    
-    // Track if a Fluent UI dropdown menu is open
-    private fluentMenuOpen = false
     
     /**
      * Handle Fluent UI dropdown menu opening
      * Called by onMenuOpened callback in menu props
      */
-    private handleFluentMenuOpened = async () => {
-        this.fluentMenuOpen = true
-        
-        // ContentView is now used for ALL modes (RSS, Full Content, Webpage)
-        // Hide it whenever a menu opens to allow interaction with the menu
-        await this.hideContentViewWithScreenshot('Fluent UI menu opening', () => this.fluentMenuOpen)
+    private handleFluentMenuOpened = () => {
+        setOverlayVisible('fluent-dropdown', true)
     }
     
     /**
@@ -1628,19 +1620,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Called by onMenuDismissed callback in menu props
      */
     private handleFluentMenuDismissed = () => {
-        this.fluentMenuOpen = false
-        
-        // ContentView is now used for ALL modes - restore if it was hidden
-        if (!window.contentView) return
-        if (!this.contentViewHiddenForMenu) return  // Not hidden, nothing to do
-        
-        // Check if Redux overlay or local dialog is still active
-        if (this.props.overlayActive || this.localDialogOpen) {
-            return
-        }
-        
-        // Menu closed and no other overlay open - restore immediately
-        this.restoreContentView()
+        setOverlayVisible('fluent-dropdown', false)
     }
     
     // Timer for auto-restore when mouse hovers over blur placeholder
@@ -1664,8 +1644,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         
         this.blurHoverTimer = setTimeout(() => {
-            // Don't auto-restore if a menu is still open
-            if (this.props.overlayActive || this.fluentMenuOpen) {
+            // Don't auto-restore if any overlay is still open
+            if (this.overlayStateManager.isAnyOpen()) {
                 return
             }
             this.restoreContentView()
