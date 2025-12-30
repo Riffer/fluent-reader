@@ -102,21 +102,62 @@ export class ContentViewManager {
      * Suppress JavaScript dialogs (alert/confirm/prompt) from article pages
      * This must run in the MAIN WORLD (not preload) to override the page's functions
      * Prevents mysterious empty "Error:" dialogs from websites
+     * Also suppresses dialogs in all iframes (ads, tracking, etc.)
      */
     private injectDialogSuppression(): void {
         if (!this.contentView?.webContents || this.contentView.webContents.isDestroyed()) {
             return
         }
         
-        this.contentView.webContents.executeJavaScript(`
+        const suppressionScript = `
             (function() {
                 if (window.__dialogsSuppressed) return;
                 window.__dialogsSuppressed = true;
                 window.alert = function(msg) { console.warn('[Suppressed alert]', msg); };
                 window.confirm = function(msg) { console.warn('[Suppressed confirm]', msg); return false; };
                 window.prompt = function(msg) { console.warn('[Suppressed prompt]', msg); return null; };
+                
+                // Also suppress in all existing iframes
+                try {
+                    var iframes = document.querySelectorAll('iframe');
+                    for (var i = 0; i < iframes.length; i++) {
+                        try {
+                            var iframeWin = iframes[i].contentWindow;
+                            if (iframeWin && !iframeWin.__dialogsSuppressed) {
+                                iframeWin.__dialogsSuppressed = true;
+                                iframeWin.alert = function(msg) { console.warn('[Suppressed iframe alert]', msg); };
+                                iframeWin.confirm = function(msg) { console.warn('[Suppressed iframe confirm]', msg); return false; };
+                                iframeWin.prompt = function(msg) { console.warn('[Suppressed iframe prompt]', msg); return null; };
+                            }
+                        } catch (e) { /* cross-origin iframe - cannot access */ }
+                    }
+                } catch (e) {}
+                
+                // Watch for new iframes being added (lazy loaded ads, etc.)
+                try {
+                    var observer = new MutationObserver(function(mutations) {
+                        mutations.forEach(function(mutation) {
+                            mutation.addedNodes.forEach(function(node) {
+                                if (node.tagName === 'IFRAME') {
+                                    try {
+                                        var iframeWin = node.contentWindow;
+                                        if (iframeWin && !iframeWin.__dialogsSuppressed) {
+                                            iframeWin.__dialogsSuppressed = true;
+                                            iframeWin.alert = function(msg) { console.warn('[Suppressed new iframe alert]', msg); };
+                                            iframeWin.confirm = function(msg) { console.warn('[Suppressed new iframe confirm]', msg); return false; };
+                                            iframeWin.prompt = function(msg) { console.warn('[Suppressed new iframe prompt]', msg); return null; };
+                                        }
+                                    } catch (e) { /* cross-origin */ }
+                                }
+                            });
+                        });
+                    });
+                    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+                } catch (e) {}
             })();
-        `).catch(() => {})  // Ignore errors (e.g., if page navigates away)
+        `
+        
+        this.contentView.webContents.executeJavaScript(suppressionScript).catch(() => {})
     }
     
     /**
