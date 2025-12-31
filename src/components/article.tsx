@@ -2680,6 +2680,21 @@ window.__articleData = ${JSON.stringify({
         e.href = e.href;
     }
     
+    // Comic/Single-Image Mode: Unwrap images from <p> tags
+    // Block-level <p> tags with width:100% break flex centering
+    if (document.body.classList.contains('comic-mode') || document.body.classList.contains('single-image')) {
+        main.querySelectorAll('p > img').forEach(img => {
+            const p = img.parentElement;
+            // Only unwrap if <p> contains only the image (and whitespace)
+            const textContent = p.textContent.trim();
+            const hasOnlyImage = p.children.length === 1 && textContent === '';
+            if (hasOnlyImage) {
+                // Replace <p> with just the <img>
+                p.replaceWith(img);
+            }
+        });
+    }
+    
     // Comic-Modus: Scrolle zum ersten Bild
     if (document.body.classList.contains('comic-mode')) {
         const firstImg = main.querySelector('img');
