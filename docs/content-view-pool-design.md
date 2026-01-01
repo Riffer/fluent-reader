@@ -13,7 +13,82 @@ um die Artikelwechsel-Performance zu verbessern.
 - Device Emulation Setup
 - Layout-Berechnung
 
-**Lösung:** Pool von 3 vorbereiteten Views mit Prefetching der nächsten Artikel.
+**Lösung:** Pool von vorbereiteten Views mit Prefetching der nächsten Artikel.
+
+## Pool-Größe
+
+### Grenzen
+
+| Grenze | Wert | Begründung |
+|--------|------|------------|
+| **Minimum** | 2 | 1 aktiv + 1 prefetch (sonst kein Vorteil) |
+| **Default** | 3 | 1 prev + 1 aktiv + 1 next (optimaler Kompromiss) |
+| **Maximum** | ressourcenabhängig | ~20-50MB RAM pro View |
+
+### Warum Minimum 2?
+
+```
+Pool-Größe 1:  Kein Prefetch möglich → identisch mit aktueller Implementierung
+Pool-Größe 2:  [AKTIV] [PREFETCH] → Vorwärts ODER Rückwärts gecached
+Pool-Größe 3:  [PREV] [AKTIV] [NEXT] → Beide Richtungen gecached
+Pool-Größe 4+: Ältere Artikel bleiben länger im Cache
+```
+
+### Memory-Kalkulation
+
+```
+WebContentsView Basis:     ~20MB
++ Geladene HTML/DOM:       ~5-20MB (abhängig von Artikel)
++ Bilder (dekodiert):      ~10-50MB (abhängig von Feed)
+─────────────────────────────────────
+Pro View:                  ~35-90MB
+
+Pool-Größe 2:              ~70-180MB
+Pool-Größe 3:              ~105-270MB  ← Empfohlen
+Pool-Größe 5:              ~175-450MB
+Pool-Größe 10:             ~350-900MB  ← Nicht empfohlen
+```
+
+### Konfigurierbare Pool-Größe
+
+```typescript
+interface PoolConfig {
+    // Pool-Größe (2 = minimal, 3 = empfohlen)
+    size: number              // Default: 3, Min: 2
+    
+    // Automatische Größenanpassung bei Memory-Druck
+    autoShrink: boolean       // Default: false
+    
+    // Grenze für autoShrink (wenn verfügbarer RAM darunter fällt)
+    memoryThresholdMB: number // Default: 512
+}
+```
+
+### Dynamische Anpassung (Optional, Phase 2)
+
+```typescript
+class ContentViewPool {
+    private config: PoolConfig
+    
+    // Bei Memory-Druck Pool verkleinern
+    private onMemoryPressure(): void {
+        if (!this.config.autoShrink) return
+        
+        const availableMemory = getAvailableMemoryMB()
+        if (availableMemory < this.config.memoryThresholdMB) {
+            // Auf Minimum reduzieren, aber nie unter 2
+            this.shrinkPool(2)
+        }
+    }
+    
+    // Wenn Memory wieder verfügbar, Pool vergrößern
+    private onMemoryRelieved(): void {
+        if (this.views.length < this.config.size) {
+            this.growPool(this.config.size)
+        }
+    }
+}
+```
 
 ## Architektur
 
