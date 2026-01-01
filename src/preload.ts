@@ -6,6 +6,7 @@ import { createArticleExtractorBridge } from "./bridges/article-extractor"
 import { p2pBridge } from "./bridges/p2p"
 import { p2pLanBridge } from "./bridges/p2p-lan"
 import { contentViewBridge } from "./bridges/content-view"
+import { contentViewPoolBridge } from "./bridges/content-view-pool"
 
 contextBridge.exposeInMainWorld("settings", settingsBridge)
 contextBridge.exposeInMainWorld("db", dbBridge)
@@ -13,6 +14,7 @@ contextBridge.exposeInMainWorld("utils", utilsBridge)
 contextBridge.exposeInMainWorld("p2p", p2pBridge)
 contextBridge.exposeInMainWorld("p2pLan", p2pLanBridge)
 contextBridge.exposeInMainWorld("contentView", contentViewBridge)
+contextBridge.exposeInMainWorld("contentViewPool", contentViewPoolBridge)
 
 // ipcRenderer for ContentView zoom communication (restricted to required channels)
 const limitedIpcRenderer = {
@@ -33,6 +35,12 @@ const limitedIpcRenderer = {
             "content-view-set-mobile-mode",
             "content-view-focus",
             "content-view-set-zoom-factor",
+            // Content View Pool channels
+            "cvp-prefetch",
+            "cvp-prefetch-info",
+            "cvp-set-bounds",
+            "cvp-set-visibility",
+            "cvp-set-reading-direction",
         ]
         if (allowedSendChannels.includes(channel)) {
             ipcRenderer.send(channel, ...args)
@@ -60,6 +68,10 @@ const limitedIpcRenderer = {
             "unmaximized",
             "enter-fullscreen",
             "leave-fullscreen",
+            // Content View Pool channels
+            "cvp-navigation-complete",
+            "cvp-request-prefetch-info",
+            "cvp-error",
         ]
         if (allowedOnChannels.includes(channel)) {
             ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
@@ -93,6 +105,9 @@ const limitedIpcRenderer = {
             "content-view-can-go-forward",
             "content-view-get-url",
             "content-view-stop",
+            // Content View Pool channels
+            "cvp-navigate",
+            "cvp-get-status",
         ]
         if (allowedInvokeChannels.includes(channel)) {
             return ipcRenderer.invoke(channel, ...args)

@@ -38,21 +38,42 @@ const getSettingsOpen = (state: RootState) => state.app.settings.display
 const getLogMenuOpen = (state: RootState) => state.app.logMenu.display
 const getContextMenuType = (state: RootState) => state.app.contextMenu.type
 
+// Selectors for ContentViewPool - article position in feed
+const getFeedId = (state: RootState) => state.page.feedId
+const getFeeds = (state: RootState) => state.feeds
+const getItemId = (_state: RootState, props: ArticleContainerProps) => props.itemId
+
 // Import ContextMenuType for comparison
 import { ContextMenuType } from "../scripts/models/app"
 
 const makeMapStateToProps = () => {
     return createSelector(
-        [getItem, getSource, getLocale, getMenuOpen, getSettingsOpen, getLogMenuOpen, getContextMenuType],
-        (item, source, locale, menuOpen, settingsOpen, logMenuOpen, contextMenuType) => ({
-            item: item,
-            source: source,
-            locale: locale,
-            menuOpen: menuOpen,
-            // Combined flag: any major overlay is active
-            // Note: menuOpen (hamburger) excluded - it only changes layout, doesn't overlap ContentView
-            overlayActive: /* menuOpen || */ settingsOpen || logMenuOpen || contextMenuType !== ContextMenuType.Hidden,
-        })
+        [getItem, getSource, getLocale, getMenuOpen, getSettingsOpen, getLogMenuOpen, getContextMenuType, getFeedId, getFeeds, getItemId],
+        (item, source, locale, menuOpen, settingsOpen, logMenuOpen, contextMenuType, feedId, feeds, itemId) => {
+            // Calculate article position in feed for ContentViewPool
+            let articleIndex = -1
+            let listLength = 0
+            
+            if (feedId && feeds[feedId]) {
+                const iids = feeds[feedId].iids
+                listLength = iids.length
+                articleIndex = iids.indexOf(itemId)
+            }
+            
+            return {
+                item: item,
+                source: source,
+                locale: locale,
+                menuOpen: menuOpen,
+                // Combined flag: any major overlay is active
+                // Note: menuOpen (hamburger) excluded - it only changes layout, doesn't overlap ContentView
+                overlayActive: /* menuOpen || */ settingsOpen || logMenuOpen || contextMenuType !== ContextMenuType.Hidden,
+                // ContentViewPool support: article position in feed
+                articleIndex: articleIndex,
+                listLength: listLength,
+                feedId: feedId,
+            }
+        }
     )
 }
 

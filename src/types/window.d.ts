@@ -8,9 +8,11 @@ import type { DbBridge } from "../bridges/db"
 import type { P2PBridge } from "../bridges/p2p"
 import type { P2PLanBridge } from "../bridges/p2p-lan"
 import type { contentViewBridge } from "../bridges/content-view"
+import type { contentViewPoolBridge } from "../bridges/content-view-pool"
 
 type ArticleExtractorBridge = ReturnType<typeof createArticleExtractorBridge>
 type ContentViewBridge = typeof contentViewBridge
+type ContentViewPoolBridge = typeof contentViewPoolBridge
 
 declare global {
     /**
@@ -67,6 +69,12 @@ declare global {
          * Content View bridge - WebContentsView for article display with visual zoom
          */
         contentView: ContentViewBridge
+
+        /**
+         * Content View Pool bridge - Pool of WebContentsViews with prefetching
+         * Used when USE_CONTENT_VIEW_POOL feature flag is enabled
+         */
+        contentViewPool: ContentViewPoolBridge
 
         /**
          * Limited IPC renderer for specific channels

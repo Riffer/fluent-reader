@@ -66,6 +66,10 @@ type ArticleProps = {
         source: RSSSource,
         persistCookies: boolean
     ) => void
+    // ContentViewPool support: article position in feed
+    articleIndex?: number
+    listLength?: number
+    feedId?: string
 }
 
 type ArticleState = {
