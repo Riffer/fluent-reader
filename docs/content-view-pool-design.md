@@ -424,6 +424,93 @@ interface PrefetchConfig {
 }
 ```
 
+#### Optionale Erweiterung: Adaptive Timing (Future)
+
+Für Feeds mit unterschiedlicher Seitenkomplexität könnte das Timing pro Host
+adaptiv angepasst werden. Dies ist eine **optionale Optimierung** für Edge Cases.
+
+**Konzept:**
+
+```typescript
+interface HostLoadMetrics {
+    hostname: string             // z.B. "example.com"
+    avgLoadTime: number          // Durchschnittliche Ladezeit (ms)
+    avgResourceCount: number     // Durchschnittliche Anzahl Ressourcen
+    avgMemoryImpact: number      // Geschätzter Speicherbedarf (MB)
+    sampleCount: number          // Anzahl Messungen
+    lastUpdated: Date
+}
+
+// Speicherung in SQLite (feeds.db oder separate Tabelle)
+// CREATE TABLE host_metrics (
+//     hostname TEXT PRIMARY KEY,
+//     avg_load_time INTEGER,
+//     avg_resource_count INTEGER,
+//     avg_memory_impact INTEGER,
+//     sample_count INTEGER,
+//     last_updated TEXT
+// )
+```
+
+**Adaptive Delay-Berechnung:**
+
+```typescript
+function calculateAdaptiveDelay(hostname: string): number {
+    const metrics = getHostMetrics(hostname)
+    
+    if (!metrics || metrics.sampleCount < 3) {
+        // Nicht genug Daten → Default verwenden
+        return DEFAULT_PREFETCH_DELAY  // 400ms
+    }
+    
+    // Schnelle Seiten: Kürzerer Delay (min 200ms)
+    // Langsame Seiten: Längerer Delay (max 1000ms)
+    const baseDelay = Math.min(1000, Math.max(200, metrics.avgLoadTime * 0.5))
+    
+    // Bei hohem Memory-Impact: Zusätzliche Verzögerung
+    if (metrics.avgMemoryImpact > 50) {  // > 50MB
+        return baseDelay + 200
+    }
+    
+    return baseDelay
+}
+```
+
+**Messung der Ladezeit:**
+
+```typescript
+class CachedContentView {
+    private loadStartTime: number = 0
+    
+    async load(url: string, settings: NavigationSettings): Promise<void> {
+        this.loadStartTime = performance.now()
+        // ... Navigation starten ...
+    }
+    
+    private onDomReady(): void {
+        const loadTime = performance.now() - this.loadStartTime
+        const hostname = new URL(this.url).hostname
+        
+        // Metrik aktualisieren (gleitender Durchschnitt)
+        updateHostMetrics(hostname, {
+            loadTime,
+            resourceCount: performance.getEntriesByType('resource').length,
+            // Memory-Impact müsste über process.memoryUsage() gemessen werden
+        })
+    }
+}
+```
+
+**Wann implementieren:**
+
+| Priorität | Grund |
+|-----------|-------|
+| **Niedrig** | 400ms Default funktioniert für 95% der Fälle |
+| **Mittel** | Wenn User-Feedback zeigt, dass bestimmte Feeds Probleme machen |
+| **Hoch** | Wenn Memory-Management kritisch wird (viele große Feeds) |
+
+**Empfehlung:** Erst in Phase 2 implementieren, wenn das Basis-Pooling stabil läuft.
+
 ## IPC-Kommunikation
 
 ### Kanäle: Renderer → Pool (via Main)
