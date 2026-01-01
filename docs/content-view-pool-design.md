@@ -311,6 +311,119 @@ View 2 (Art. D) bleibt als Fallback
    - Keine freie View? → Skip (aktive View nicht anfassen)
 ```
 
+### Prefetch Timing
+
+Um die aktive View nicht zu beeinträchtigen und bei schnellem Navigieren keine
+unnötigen Requests zu erzeugen, wird Prefetch verzögert ausgeführt:
+
+#### Timing-Strategie
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Prefetch Timing                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  navigateToArticle()                                             │
+│         │                                                        │
+│         ▼                                                        │
+│  ┌──────────────┐                                                │
+│  │ Aktive View  │ ← User sieht neuen Artikel                     │
+│  │   lädt...    │                                                │
+│  └──────┬───────┘                                                │
+│         │                                                        │
+│         ▼ 'dom-ready' Event                                      │
+│  ┌──────────────┐                                                │
+│  │ Aktive View  │ ← DOM bereit, Bilder laden evtl. noch          │
+│  │    ready     │                                                │
+│  └──────┬───────┘                                                │
+│         │                                                        │
+│         ▼ + PREFETCH_DELAY (300-500ms)                           │
+│  ┌──────────────┐                                                │
+│  │   Prefetch   │ ← Erst jetzt nächsten Artikel laden            │
+│  │   startet    │                                                │
+│  └──────────────┘                                                │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Abbruch bei erneutem Navigieren
+
+```typescript
+class ContentViewPool {
+    private prefetchTimer: NodeJS.Timeout | null = null
+    private readonly PREFETCH_DELAY = 400  // ms nach dom-ready
+    
+    private schedulePrefetch(targets: PrefetchTargets): void {
+        // Vorherigen Timer abbrechen (User hat schnell weitergeklickt)
+        if (this.prefetchTimer) {
+            clearTimeout(this.prefetchTimer)
+            this.prefetchTimer = null
+        }
+        
+        // Neuen Timer starten
+        this.prefetchTimer = setTimeout(() => {
+            this.prefetchTimer = null
+            this.executePrefetch(targets)
+        }, this.PREFETCH_DELAY)
+    }
+    
+    navigateToArticle(articleId: string, ...): Promise<void> {
+        // Timer abbrechen bei neuer Navigation
+        if (this.prefetchTimer) {
+            clearTimeout(this.prefetchTimer)
+            this.prefetchTimer = null
+        }
+        
+        // ... Navigation durchführen ...
+        
+        // Nach 'dom-ready': Prefetch planen
+        activeView.onReady(() => {
+            const targets = this.determinePrefetchTargets()
+            this.schedulePrefetch(targets)
+        })
+    }
+}
+```
+
+#### Schnelles Navigieren (J J J J)
+
+```
+Zeit →
+────────────────────────────────────────────────────────────────────►
+
+  J          J          J          J
+  │          │          │          │
+  ▼          ▼          ▼          ▼
+┌────┐     ┌────┐     ┌────┐     ┌────┐
+│Art1│     │Art2│     │Art3│     │Art4│
+│load│     │load│     │load│     │load│
+└─┬──┘     └─┬──┘     └─┬──┘     └─┬──┘
+  │          │          │          │
+  │ 400ms    │ 400ms    │ 400ms    │ 400ms
+  │ Timer    │ Timer    │ Timer    │ Timer
+  ▼          ▼          ▼          ▼
+  ✗          ✗          ✗          ✓ Prefetch Art5
+  (abgebr.)  (abgebr.)  (abgebr.)  (ausgeführt)
+  
+Ergebnis: Nur EIN Prefetch (für Art5) wird tatsächlich gestartet.
+Die abgebrochenen Timer verhindern unnötige Netzwerk-/CPU-Last.
+```
+
+#### Konfigurierbare Parameter
+
+```typescript
+interface PrefetchConfig {
+    // Verzögerung nach dom-ready bevor Prefetch startet
+    delayAfterReady: number      // Default: 400ms
+    
+    // Minimale Zeit zwischen zwei Prefetch-Starts
+    minInterval: number          // Default: 200ms
+    
+    // Prefetch komplett deaktivieren (für langsame Systeme)
+    enabled: boolean             // Default: true
+}
+```
+
 ## IPC-Kommunikation
 
 ### Kanäle: Renderer → Pool (via Main)
