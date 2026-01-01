@@ -99,6 +99,11 @@ class ContentViewPool {
     private parentWindow: BrowserWindow | null = null
     private bounds: ContentViewBounds = { x: 0, y: 0, width: 800, height: 600 }
     
+    // === Leserichtung ===
+    private readingDirection: 'forward' | 'backward' | 'unknown' = 'unknown'
+    private currentArticleIndex: number = -1
+    private articleListLength: number = 0
+    
     // === Initialisierung ===
     initialize(parentWindow: BrowserWindow): void
     
@@ -111,6 +116,11 @@ class ContentViewPool {
     // === Navigation ===
     navigateToArticle(articleId: string, url: string, settings: NavigationSettings): Promise<void>
     prefetch(articleId: string, url: string, settings: NavigationSettings): void
+    
+    // === Leserichtung ===
+    setArticleContext(currentIndex: number, listLength: number): void
+    updateReadingDirection(newDirection: 'forward' | 'backward'): void
+    getReadingDirection(): 'forward' | 'backward' | 'unknown'
     
     // === Pool-Management ===
     private findRecyclableView(excludeArticleIds: string[]): CachedContentView | null
@@ -131,6 +141,139 @@ class ContentViewPool {
 ```
 
 ## Navigation Flow
+
+### Leserichtung (Reading Direction)
+
+Die Leserichtung bestimmt, welcher Artikel primär geprefetcht wird.
+
+#### Ermittlung der Leserichtung
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Artikel-Liste im Feed                         │
+├─────────────────────────────────────────────────────────────────┤
+│  [0]      [1]      [2]      [3]      [4]      [5]      [6]      │
+│  ältester                                              neuester │
+│                                                                  │
+│  Fall A: User öffnet [0] → Richtung: FORWARD (kann nur vorwärts)│
+│  Fall B: User öffnet [6] → Richtung: BACKWARD (kann nur zurück) │
+│  Fall C: User öffnet [3] → Richtung: UNKNOWN (noch unbestimmt)  │
+│                                                                  │
+│  Bei UNKNOWN: Nächste Aktion (J/K) bestimmt Richtung            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### State Machine für Leserichtung
+
+```
+                    ┌──────────────┐
+                    │   UNKNOWN    │ ← Initial (Artikel in der Mitte)
+                    └──────┬───────┘
+                           │
+            ┌──────────────┼──────────────┐
+            │ J/→ gedrückt │ K/← gedrückt │
+            ▼              │              ▼
+    ┌──────────────┐       │      ┌──────────────┐
+    │   FORWARD    │◄──────┴─────►│   BACKWARD   │
+    └──────────────┘   Richtungs- └──────────────┘
+            ▲            wechsel          ▲
+            │              │              │
+            └──────────────┴──────────────┘
+                    jederzeit möglich
+```
+
+#### Sonderfälle
+
+| Position | Öffnungs-Aktion | Initiale Richtung |
+|----------|-----------------|-------------------|
+| Erster Artikel (Index 0) | Klick/Enter | FORWARD (zwingend) |
+| Letzter Artikel (Index n-1) | Klick/Enter | BACKWARD (zwingend) |
+| Mittlerer Artikel | Klick/Enter | UNKNOWN → durch nächste J/K Aktion |
+| Nach J/→ | Navigation | FORWARD |
+| Nach K/← | Navigation | BACKWARD |
+
+#### Prefetch-Strategie basierend auf Richtung
+
+```typescript
+interface ReadingState {
+    direction: 'forward' | 'backward' | 'unknown'
+    currentIndex: number
+    listLength: number
+}
+
+function determinePrefetchTargets(state: ReadingState): {
+    primary: number | null,    // Wird sofort geprefetcht
+    secondary: number | null   // Wird geprefetcht wenn View frei
+} {
+    const { direction, currentIndex, listLength } = state
+    
+    switch (direction) {
+        case 'forward':
+            return {
+                primary: currentIndex + 1 < listLength ? currentIndex + 1 : null,
+                secondary: currentIndex - 1 >= 0 ? currentIndex - 1 : null
+            }
+        
+        case 'backward':
+            return {
+                primary: currentIndex - 1 >= 0 ? currentIndex - 1 : null,
+                secondary: currentIndex + 1 < listLength ? currentIndex + 1 : null
+            }
+        
+        case 'unknown':
+            // Beide Richtungen gleichwertig prefetchen
+            return {
+                primary: currentIndex + 1 < listLength ? currentIndex + 1 : null,
+                secondary: currentIndex - 1 >= 0 ? currentIndex - 1 : null
+            }
+    }
+}
+```
+
+#### Pool-Belegung nach Leserichtung
+
+**Szenario: User liest vorwärts (FORWARD)**
+
+```
+Artikel-Liste: [A] [B] [C] [D] [E]
+                        ↑
+                    aktuell
+
+Pool-Belegung:
+┌─────────┬─────────┬─────────┐
+│ View 0  │ View 1  │ View 2  │
+│ Art. B  │ Art. C  │ Art. D  │
+│ (prev)  │ (AKTIV) │ (next)  │
+│ ready   │ ready   │ loading │
+└─────────┴─────────┴─────────┘
+
+User drückt J → Wechsel zu D:
+┌─────────┬─────────┬─────────┐
+│ View 0  │ View 1  │ View 2  │
+│ Art. E  │ Art. C  │ Art. D  │
+│ (next)  │ (prev)  │ (AKTIV) │
+│ loading │ ready   │ ready   │ ← Instant swap!
+└─────────┴─────────┴─────────┘
+View 0 wird recycled für E (primary prefetch)
+```
+
+**Szenario: User wechselt Richtung (FORWARD → BACKWARD)**
+
+```
+Artikel-Liste: [A] [B] [C] [D] [E]
+                        ↑
+                    aktuell, war vorwärts
+
+User drückt K → Wechsel zu B, Richtung wird BACKWARD:
+┌─────────┬─────────┬─────────┐
+│ View 0  │ View 1  │ View 2  │
+│ Art. A  │ Art. B  │ Art. D  │
+│ (next)  │ (AKTIV) │ (old)   │
+│ loading │ ready   │ ready   │ ← B war noch im Cache!
+└─────────┴─────────┴─────────┘
+View 0 wird für A (neuer primary in BACKWARD) geladen
+View 2 (Art. D) bleibt als Fallback
+```
 
 ### Artikelwechsel (User drückt J/K oder klickt)
 
@@ -174,11 +317,13 @@ class ContentViewPool {
 
 | Kanal | Parameter | Beschreibung |
 |-------|-----------|--------------|
-| `cvp-navigate` | articleId, url, settings | Navigiere zu Artikel |
+| `cvp-navigate` | articleId, url, settings, index, listLength | Navigiere zu Artikel |
 | `cvp-prefetch` | articleId, url, settings | Prefetch im Hintergrund |
 | `cvp-set-bounds` | bounds | Sichtbare Bounds setzen |
 | `cvp-set-visibility` | visible | Pool ein/ausblenden |
 | `cvp-zoom-changed` | feedId, zoom | Zoom für Feed geändert |
+| `cvp-set-reading-direction` | direction | Leserichtung explizit setzen |
+| `cvp-article-list-changed` | listLength | Wenn sich die Liste ändert |
 
 ### Kanäle: Pool → Renderer
 
