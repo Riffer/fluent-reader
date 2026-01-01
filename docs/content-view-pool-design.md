@@ -813,12 +813,13 @@ User scrollt durch 1000+ Artikel:
 | Datei | Status | Änderung |
 |-------|--------|----------|
 | [window.ts](../src/main/window.ts) | ✅ | Feature Flag + Pool-Initialisierung |
+| [content-preload.js](../src/renderer/content-preload.js) | ✅ | isActiveView Flag + sendIfActive() |
 
 ### Nächste Schritte
 
 | Priorität | Aufgabe | Beschreibung |
 |-----------|---------|--------------|
-| 1 | Preload anpassen | `isActive` Flag für IPC-Event-Filterung |
+| ~~1~~ | ~~Preload anpassen~~ | ✅ `isActive` Flag implementiert |
 | 2 | Renderer anpassen | Navigation über Pool-Bridge, Artikel-Index mitsenden |
 | 3 | IPC-Handler migrieren | Scroll, Keyboard, Context-Menu an aktive View routen |
 | 4 | Settings-Sync | Zoom/MobileMode aus ContentViewManager übernehmen |
@@ -857,9 +858,8 @@ User scrollt durch 1000+ Artikel:
    - Könnte in Settings aufgenommen werden (2-5?)
 
 2. **Prefetch-Timing**
-   - Sofort nach Navigation?
-   - Mit Delay (User liest evtl. nur kurz)?
-   - Idle-basiert?
+   - ✅ Entschieden: 400ms nach dom-ready
+   - Timer-Abbruch bei schneller Navigation
 
 3. **Memory-Monitoring**
    - Sollen wir Memory-Verbrauch loggen?
@@ -879,5 +879,5 @@ src/bridges/
 └── content-view-pool.ts         # NEU - Pool-spezifische Bridge ✅
 
 src/renderer/
-└── content-preload.js           # isActive-Flag hinzufügen (ausstehend)
+└── content-preload.js           # isActive-Flag ✅
 ```
