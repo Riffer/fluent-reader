@@ -780,11 +780,11 @@ User scrollt durch 1000+ Artikel:
 
 ## Migration von ContentViewManager
 
-### Phase 1: Parallelbetrieb
+### Phase 1: Parallelbetrieb ✅
 
-1. `ContentViewPool` als neue Klasse neben `ContentViewManager`
-2. Feature Flag: `useViewPool: boolean`
-3. Beide Implementierungen testen
+1. ✅ `ContentViewPool` als neue Klasse neben `ContentViewManager`
+2. ✅ Feature Flag: `USE_CONTENT_VIEW_POOL` in window.ts
+3. ⏳ Beide Implementierungen testen
 
 ### Phase 2: Migration
 
@@ -797,6 +797,32 @@ User scrollt durch 1000+ Artikel:
 1. `ContentViewManager` löschen
 2. Feature Flag entfernen
 3. Dokumentation aktualisieren
+
+## Implementierungsfortschritt
+
+### Erstellte Dateien
+
+| Datei | Zeilen | Status | Beschreibung |
+|-------|--------|--------|--------------|
+| [cached-content-view.ts](../src/main/cached-content-view.ts) | ~380 | ✅ | WebContentsView-Wrapper mit Artikel-State |
+| [content-view-pool.ts](../src/main/content-view-pool.ts) | ~550 | ✅ | Pool-Manager für gecachte Views |
+| [content-view-pool.ts](../src/bridges/content-view-pool.ts) | ~200 | ✅ | IPC-Bridge für Renderer |
+
+### Geänderte Dateien
+
+| Datei | Status | Änderung |
+|-------|--------|----------|
+| [window.ts](../src/main/window.ts) | ✅ | Feature Flag + Pool-Initialisierung |
+
+### Nächste Schritte
+
+| Priorität | Aufgabe | Beschreibung |
+|-----------|---------|--------------|
+| 1 | Preload anpassen | `isActive` Flag für IPC-Event-Filterung |
+| 2 | Renderer anpassen | Navigation über Pool-Bridge, Artikel-Index mitsenden |
+| 3 | IPC-Handler migrieren | Scroll, Keyboard, Context-Menu an aktive View routen |
+| 4 | Settings-Sync | Zoom/MobileMode aus ContentViewManager übernehmen |
+| 5 | Testing | Feature Flag aktivieren und testen |
 
 ## Testplan
 
@@ -844,13 +870,14 @@ User scrollt durch 1000+ Artikel:
 ```
 src/main/
 ├── content-view-manager.ts      # ALT - wird ersetzt
-├── content-view-pool.ts         # NEU - Pool-Verwaltung
-├── cached-content-view.ts       # NEU - Einzelne View-Kapselung
-└── ...
+├── content-view-pool.ts         # NEU - Pool-Verwaltung ✅
+├── cached-content-view.ts       # NEU - Einzelne View-Kapselung ✅
+└── window.ts                    # Feature Flag + Initialisierung ✅
 
 src/bridges/
-└── content-view.ts              # Anpassungen für Pool-API
+├── content-view.ts              # ALT - bestehende Bridge
+└── content-view-pool.ts         # NEU - Pool-spezifische Bridge ✅
 
 src/renderer/
-└── content-preload.js           # isActive-Flag hinzufügen
+└── content-preload.js           # isActive-Flag hinzufügen (ausstehend)
 ```
