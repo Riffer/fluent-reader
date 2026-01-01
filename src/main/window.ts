@@ -19,7 +19,7 @@ import { initializeContentViewPool, destroyContentViewPool, getContentViewPool }
 
 // Feature flag for Content View Pool (prefetching)
 // Set to true to enable the new pool-based article view with prefetching
-export const USE_CONTENT_VIEW_POOL = false
+export const USE_CONTENT_VIEW_POOL = true
 
 // Export getter for bridge access
 export function isContentViewPoolEnabled(): boolean {

@@ -827,7 +827,7 @@ User scrollt durch 1000+ Artikel:
 | ~~2~~ | ~~Renderer Bridge~~ | ✅ Pool-Bridge + Props für Artikel-Position |
 | ~~3~~ | ~~IPC-Handler migrieren~~ | ✅ Zoom, Keyboard, Context-Menu für Pool |
 | ~~4~~ | ~~Settings-Sync~~ | ✅ Zoom/MobileMode sync zu allen Views |
-| 5 | Article Integration | Pool-Bridge in Article.tsx nutzen |
+| ~~5~~ | ~~Article Integration~~ | ✅ navigateToContent() + useContentViewPool State |
 | 6 | Testing | Feature Flag aktivieren und testen |
 
 ## Testplan
