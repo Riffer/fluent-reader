@@ -814,13 +814,17 @@ User scrollt durch 1000+ Artikel:
 |-------|--------|----------|
 | [window.ts](../src/main/window.ts) | ✅ | Feature Flag + Pool-Initialisierung |
 | [content-preload.js](../src/renderer/content-preload.js) | ✅ | isActiveView Flag + sendIfActive() |
+| [preload.ts](../src/preload.ts) | ✅ | Pool-Bridge + IPC-Channels |
+| [window.d.ts](../src/types/window.d.ts) | ✅ | ContentViewPoolBridge Type |
+| [article-container.tsx](../src/containers/article-container.tsx) | ✅ | articleIndex, listLength Props |
+| [article.tsx](../src/components/article.tsx) | ✅ | Pool-Props in ArticleProps |
 
 ### Nächste Schritte
 
 | Priorität | Aufgabe | Beschreibung |
 |-----------|---------|--------------|
 | ~~1~~ | ~~Preload anpassen~~ | ✅ `isActive` Flag implementiert |
-| 2 | Renderer anpassen | Navigation über Pool-Bridge, Artikel-Index mitsenden |
+| ~~2~~ | ~~Renderer Bridge~~ | ✅ Pool-Bridge + Props für Artikel-Position |
 | 3 | IPC-Handler migrieren | Scroll, Keyboard, Context-Menu an aktive View routen |
 | 4 | Settings-Sync | Zoom/MobileMode aus ContentViewManager übernehmen |
 | 5 | Testing | Feature Flag aktivieren und testen |
