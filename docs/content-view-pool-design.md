@@ -234,7 +234,7 @@ Die Leserichtung bestimmt, welcher Artikel primär geprefetcht wird.
 │  Fall B: User öffnet [6] → Richtung: BACKWARD (kann nur zurück) │
 │  Fall C: User öffnet [3] → Richtung: UNKNOWN (noch unbestimmt)  │
 │                                                                  │
-│  Bei UNKNOWN: Nächste Aktion (J/K) bestimmt Richtung            │
+│  Bei UNKNOWN: Nächste Aktion (←/→) bestimmt Richtung            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -246,7 +246,7 @@ Die Leserichtung bestimmt, welcher Artikel primär geprefetcht wird.
                     └──────┬───────┘
                            │
             ┌──────────────┼──────────────┐
-            │ J/→ gedrückt │ K/← gedrückt │
+            │ → gedrückt   │ ← gedrückt   │
             ▼              │              ▼
     ┌──────────────┐       │      ┌──────────────┐
     │   FORWARD    │◄──────┴─────►│   BACKWARD   │
@@ -263,9 +263,9 @@ Die Leserichtung bestimmt, welcher Artikel primär geprefetcht wird.
 |----------|-----------------|-------------------|
 | Erster Artikel (Index 0) | Klick/Enter | FORWARD (zwingend) |
 | Letzter Artikel (Index n-1) | Klick/Enter | BACKWARD (zwingend) |
-| Mittlerer Artikel | Klick/Enter | UNKNOWN → durch nächste J/K Aktion |
-| Nach J/→ | Navigation | FORWARD |
-| Nach K/← | Navigation | BACKWARD |
+| Mittlerer Artikel | Klick/Enter | UNKNOWN → durch nächste ←/→ Aktion |
+| Nach → | Navigation | FORWARD |
+| Nach ← | Navigation | BACKWARD |
 
 #### Prefetch-Strategie basierend auf Richtung
 
@@ -350,7 +350,7 @@ View 0 wird für A (neuer primary in BACKWARD) geladen
 View 2 (Art. D) bleibt als Fallback
 ```
 
-### Artikelwechsel (User drückt J/K oder klickt)
+### Artikelwechsel (User drückt ←/→ oder klickt)
 
 ```
 1. Renderer sendet: navigateToArticle(articleId, url, settings)
@@ -805,8 +805,8 @@ User scrollt durch 1000+ Artikel:
 | Datei | Zeilen | Status | Beschreibung |
 |-------|--------|--------|--------------|
 | [cached-content-view.ts](../src/main/cached-content-view.ts) | ~380 | ✅ | WebContentsView-Wrapper mit Artikel-State |
-| [content-view-pool.ts](../src/main/content-view-pool.ts) | ~550 | ✅ | Pool-Manager für gecachte Views |
-| [content-view-pool.ts](../src/bridges/content-view-pool.ts) | ~200 | ✅ | IPC-Bridge für Renderer |
+| [content-view-pool.ts](../src/main/content-view-pool.ts) | ~1000 | ✅ | Pool-Manager für gecachte Views |
+| [content-view-pool.ts](../src/bridges/content-view-pool.ts) | ~300 | ✅ | IPC-Bridge für Renderer |
 
 ### Geänderte Dateien
 
@@ -814,7 +814,7 @@ User scrollt durch 1000+ Artikel:
 |-------|--------|----------|
 | [window.ts](../src/main/window.ts) | ✅ | Feature Flag + Pool-Initialisierung |
 | [content-preload.js](../src/renderer/content-preload.js) | ✅ | isActiveView Flag + sendIfActive() |
-| [preload.ts](../src/preload.ts) | ✅ | Pool-Bridge + IPC-Channels |
+| [preload.ts](../src/preload.ts) | ✅ | Pool-Bridge + IPC-Channels (erweitert) |
 | [window.d.ts](../src/types/window.d.ts) | ✅ | ContentViewPoolBridge Type |
 | [article-container.tsx](../src/containers/article-container.tsx) | ✅ | articleIndex, listLength Props |
 | [article.tsx](../src/components/article.tsx) | ✅ | Pool-Props in ArticleProps |
@@ -825,9 +825,10 @@ User scrollt durch 1000+ Artikel:
 |-----------|---------|--------------|
 | ~~1~~ | ~~Preload anpassen~~ | ✅ `isActive` Flag implementiert |
 | ~~2~~ | ~~Renderer Bridge~~ | ✅ Pool-Bridge + Props für Artikel-Position |
-| 3 | IPC-Handler migrieren | Scroll, Keyboard, Context-Menu an aktive View routen |
-| 4 | Settings-Sync | Zoom/MobileMode aus ContentViewManager übernehmen |
-| 5 | Testing | Feature Flag aktivieren und testen |
+| ~~3~~ | ~~IPC-Handler migrieren~~ | ✅ Zoom, Keyboard, Context-Menu für Pool |
+| ~~4~~ | ~~Settings-Sync~~ | ✅ Zoom/MobileMode sync zu allen Views |
+| 5 | Article Integration | Pool-Bridge in Article.tsx nutzen |
+| 6 | Testing | Feature Flag aktivieren und testen |
 
 ## Testplan
 
@@ -847,15 +848,8 @@ User scrollt durch 1000+ Artikel:
 
 ### Manuelle Tests
 
-- [ ] Schnelles Navigieren (J J J J)
-- [ ] Zurück-Navigation (K)
-- [ ] Feed-Wechsel
-- [ ] Netzwerk-Fehler (Offline-Modus)
-- [ ] Memory-Verbrauch über Zeit
-- [ ] Visual Zoom + Pool
-- [ ] Mobile Mode + Pool
-
-## Offene Fragen
+- [ ] Schnelles Navigieren (←/→)
+- [ ] Zurück-Navigation (←)
 
 1. **Pool-Größe konfigurierbar?**
    - Aktuell: Fest auf 3

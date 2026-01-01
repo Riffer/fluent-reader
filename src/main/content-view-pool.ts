@@ -13,9 +13,14 @@
  * - Other views prefetch next/previous articles
  * - When user navigates, views are swapped instantly if target is cached
  */
-import { ipcMain, BrowserWindow } from "electron"
+import { ipcMain, BrowserWindow, Menu, clipboard, shell, nativeImage } from "electron"
+import type { MenuItemConstructorOptions, Input } from "electron"
 import { CachedContentView, NavigationSettings, CachedViewStatus } from "./cached-content-view"
 import { isMobileUserAgentEnabled } from "./settings"
+import https from "https"
+import http from "http"
+import fs from "fs"
+import path from "path"
 
 /**
  * Pool configuration
@@ -85,6 +90,10 @@ export class ContentViewPool {
     private prefetchTimer: NodeJS.Timeout | null = null
     private pendingPrefetch: PrefetchRequest[] = []
     
+    // === Zoom State ===
+    private cssZoomLevel: number = 0
+    private visualZoomEnabled: boolean = false
+    
     // === Singleton ===
     private static instance: ContentViewPool | null = null
     
@@ -131,6 +140,232 @@ export class ContentViewPool {
         console.log(`[ContentViewPool] Config updated:`, this.config)
     }
     
+    // ========== View Creation Helper ==========
+    
+    /**
+     * Create a view and setup all event handlers
+     */
+    private createViewWithEvents(view: CachedContentView): void {
+        if (!this.parentWindow) {
+            console.error("[ContentViewPool] Cannot create view - no parent window")
+            return
+        }
+        
+        view.create(this.parentWindow)
+        this.setupViewKeyboardEvents(view)
+        this.setupViewContextMenu(view)
+        this.updateWebContentsMapping()
+    }
+    
+    /**
+     * Setup keyboard event forwarding for a view
+     */
+    private setupViewKeyboardEvents(view: CachedContentView): void {
+        const wc = view.getWebContents()
+        if (!wc) return
+        
+        wc.on("before-input-event", (event, input: Input) => {
+            // Only forward events from the active view
+            if (!view.isActive) return
+            
+            // Don't forward F11/F12 - global shortcuts handled by main window
+            if (input.key === 'F11' || input.key === 'F12') {
+                return
+            }
+            
+            // Forward to renderer for processing
+            this.sendToRenderer("content-view-input", input)
+        })
+    }
+    
+    /**
+     * Setup context menu for a view
+     */
+    private setupViewContextMenu(view: CachedContentView): void {
+        const wc = view.getWebContents()
+        if (!wc) return
+        
+        wc.on("context-menu", (event, params) => {
+            // Only show context menu for active view
+            if (!view.isActive) return
+            
+            const menuItems: MenuItemConstructorOptions[] = []
+            
+            // === Text Selection Menu ===
+            if (params.selectionText && params.selectionText.trim().length > 0) {
+                menuItems.push({
+                    label: "Kopieren",
+                    accelerator: "CmdOrCtrl+C",
+                    click: () => clipboard.writeText(params.selectionText)
+                })
+                menuItems.push({
+                    label: "Im Web suchen",
+                    click: () => {
+                        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(params.selectionText)}`
+                        shell.openExternal(searchUrl)
+                    }
+                })
+                menuItems.push({ type: "separator" })
+            }
+            
+            // === Link Menu ===
+            if (params.linkURL && params.linkURL.length > 0) {
+                menuItems.push({
+                    label: "Link im Browser öffnen",
+                    click: () => shell.openExternal(params.linkURL)
+                })
+                menuItems.push({
+                    label: "Link-Adresse kopieren",
+                    click: () => clipboard.writeText(params.linkURL)
+                })
+                menuItems.push({ type: "separator" })
+            }
+            
+            // === Image Menu ===
+            if (params.hasImageContents && params.srcURL) {
+                menuItems.push({
+                    label: "Bild im Browser öffnen",
+                    click: () => shell.openExternal(params.srcURL)
+                })
+                menuItems.push({
+                    label: "Bild speichern unter...",
+                    click: () => this.saveImageAs(params.srcURL)
+                })
+                menuItems.push({
+                    label: "Bild kopieren",
+                    click: () => this.copyImageToClipboard(params.srcURL)
+                })
+                menuItems.push({
+                    label: "Bild-URL kopieren",
+                    click: () => clipboard.writeText(params.srcURL)
+                })
+                menuItems.push({ type: "separator" })
+            }
+            
+            // === Navigation Actions ===
+            menuItems.push({
+                label: "Zurück",
+                accelerator: "Alt+Left",
+                enabled: wc.navigationHistory.canGoBack() ?? false,
+                click: () => wc.goBack()
+            })
+            menuItems.push({
+                label: "Vorwärts",
+                accelerator: "Alt+Right",
+                enabled: wc.navigationHistory.canGoForward() ?? false,
+                click: () => wc.goForward()
+            })
+            menuItems.push({
+                label: "Neu laden",
+                accelerator: "CmdOrCtrl+R",
+                click: () => wc.reload()
+            })
+            
+            if (menuItems.length > 0) {
+                // Remove trailing separator
+                if (menuItems[menuItems.length - 1].type === "separator") {
+                    menuItems.pop()
+                }
+                
+                const menu = Menu.buildFromTemplate(menuItems)
+                menu.popup({
+                    window: this.parentWindow ?? undefined,
+                    x: this.visibleBounds.x + params.x,
+                    y: this.visibleBounds.y + params.y
+                })
+            }
+        })
+    }
+    
+    /**
+     * Save image to file
+     */
+    private async saveImageAs(imageUrl: string): Promise<void> {
+        if (!this.parentWindow) return
+        
+        const { dialog } = await import("electron")
+        
+        const urlObj = new URL(imageUrl)
+        let filename = path.basename(urlObj.pathname) || "image"
+        if (!filename.includes(".")) {
+            filename += ".jpg"
+        }
+        
+        const result = await dialog.showSaveDialog(this.parentWindow, {
+            defaultPath: filename,
+            filters: [
+                { name: "Bilder", extensions: ["jpg", "jpeg", "png", "gif", "webp", "bmp"] },
+                { name: "Alle Dateien", extensions: ["*"] }
+            ]
+        })
+        
+        if (result.canceled || !result.filePath) return
+        
+        try {
+            const protocol = imageUrl.startsWith("https") ? https : http
+            const response = await new Promise<Buffer>((resolve, reject) => {
+                protocol.get(imageUrl, (res) => {
+                    if (res.statusCode === 301 || res.statusCode === 302) {
+                        const redirectUrl = res.headers.location
+                        if (redirectUrl) {
+                            const redirectProtocol = redirectUrl.startsWith("https") ? https : http
+                            redirectProtocol.get(redirectUrl, (redirectRes) => {
+                                const chunks: Buffer[] = []
+                                redirectRes.on("data", chunk => chunks.push(chunk))
+                                redirectRes.on("end", () => resolve(Buffer.concat(chunks)))
+                                redirectRes.on("error", reject)
+                            }).on("error", reject)
+                            return
+                        }
+                    }
+                    const chunks: Buffer[] = []
+                    res.on("data", chunk => chunks.push(chunk))
+                    res.on("end", () => resolve(Buffer.concat(chunks)))
+                    res.on("error", reject)
+                }).on("error", reject)
+            })
+            
+            fs.writeFileSync(result.filePath, response)
+        } catch (err) {
+            console.error("[ContentViewPool] Failed to save image:", err)
+        }
+    }
+    
+    /**
+     * Copy image to clipboard
+     */
+    private async copyImageToClipboard(imageUrl: string): Promise<void> {
+        try {
+            const protocol = imageUrl.startsWith("https") ? https : http
+            const response = await new Promise<Buffer>((resolve, reject) => {
+                protocol.get(imageUrl, (res) => {
+                    if (res.statusCode === 301 || res.statusCode === 302) {
+                        const redirectUrl = res.headers.location
+                        if (redirectUrl) {
+                            const redirectProtocol = redirectUrl.startsWith("https") ? https : http
+                            redirectProtocol.get(redirectUrl, (redirectRes) => {
+                                const chunks: Buffer[] = []
+                                redirectRes.on("data", chunk => chunks.push(chunk))
+                                redirectRes.on("end", () => resolve(Buffer.concat(chunks)))
+                                redirectRes.on("error", reject)
+                            }).on("error", reject)
+                            return
+                        }
+                    }
+                    const chunks: Buffer[] = []
+                    res.on("data", chunk => chunks.push(chunk))
+                    res.on("end", () => resolve(Buffer.concat(chunks)))
+                    res.on("error", reject)
+                }).on("error", reject)
+            })
+            
+            const image = nativeImage.createFromBuffer(response)
+            clipboard.writeImage(image)
+        } catch (err) {
+            console.error("[ContentViewPool] Failed to copy image:", err)
+        }
+    }
+
     // ========== View Access ==========
     
     /**
@@ -264,9 +499,9 @@ export class ContentViewPool {
             freeView.recycle()
         }
         
-        // Ensure view is created
+        // Ensure view is created with events
         if (!freeView.view && this.parentWindow) {
-            freeView.create(this.parentWindow)
+            this.createViewWithEvents(freeView)
         }
         
         // Load in background
@@ -417,7 +652,7 @@ export class ContentViewPool {
         const empty = this.views.find(v => v.isEmpty)
         if (empty) {
             if (!empty.view && this.parentWindow) {
-                empty.create(this.parentWindow)
+                this.createViewWithEvents(empty)
             }
             return empty
         }
@@ -426,10 +661,9 @@ export class ContentViewPool {
         if (this.views.length < this.config.size) {
             const newView = new CachedContentView(`view-${this.views.length}`)
             if (this.parentWindow) {
-                newView.create(this.parentWindow)
+                this.createViewWithEvents(newView)
             }
             this.views.push(newView)
-            this.updateWebContentsMapping()
             return newView
         }
         
@@ -438,9 +672,8 @@ export class ContentViewPool {
         if (toRecycle) {
             toRecycle.recycle()
             if (this.parentWindow) {
-                toRecycle.create(this.parentWindow)
+                this.createViewWithEvents(toRecycle)
             }
-            this.updateWebContentsMapping()
             return toRecycle
         }
         
@@ -448,9 +681,8 @@ export class ContentViewPool {
         const fallback = this.views.find(v => !v.isActive)!
         fallback.recycle()
         if (this.parentWindow) {
-            fallback.create(this.parentWindow)
+            this.createViewWithEvents(fallback)
         }
-        this.updateWebContentsMapping()
         return fallback
     }
     
@@ -604,8 +836,157 @@ export class ContentViewPool {
             return this.getPoolStatus()
         })
         
-        // Forward events from views to renderer
-        // (Views send events, we route them based on sender)
+        // === Zoom Handlers (apply to active view) ===
+        
+        // Set zoom factor (synchronous for +/- shortcuts)
+        ipcMain.on("cvp-set-zoom-factor", (event, factor: number) => {
+            this.setZoomFactor(factor)
+            event.returnValue = true
+        })
+        
+        // Set CSS zoom level
+        ipcMain.on("cvp-set-css-zoom", (event, level: number) => {
+            this.setCssZoom(level)
+        })
+        
+        // Get CSS zoom level (sync)
+        ipcMain.on("cvp-get-css-zoom-level", (event) => {
+            event.returnValue = this.cssZoomLevel
+        })
+        
+        // Get CSS zoom level (async)
+        ipcMain.handle("cvp-get-css-zoom-level-async", () => {
+            return this.cssZoomLevel
+        })
+        
+        // Set visual zoom mode
+        ipcMain.on("cvp-set-visual-zoom", (event, enabled: boolean) => {
+            this.setVisualZoomMode(enabled)
+        })
+        
+        // === Navigation Handlers (apply to active view) ===
+        
+        // Execute JavaScript
+        ipcMain.handle("cvp-execute-js", async (event, code: string) => {
+            const active = this.getActiveView()
+            if (active) {
+                return active.executeJavaScript(code)
+            }
+            return null
+        })
+        
+        // Send message to active view
+        ipcMain.on("cvp-send", (event, channel: string, ...args: any[]) => {
+            const active = this.getActiveView()
+            if (active) {
+                active.send(channel, ...args)
+            }
+        })
+        
+        // Get active webContents ID
+        ipcMain.handle("cvp-get-id", () => {
+            const active = this.getActiveView()
+            return active?.webContentsId ?? null
+        })
+        
+        // DevTools
+        ipcMain.handle("cvp-open-devtools", () => {
+            const active = this.getActiveView()
+            active?.getWebContents()?.openDevTools()
+        })
+        
+        ipcMain.handle("cvp-is-devtools-opened", () => {
+            const active = this.getActiveView()
+            return active?.getWebContents()?.isDevToolsOpened() ?? false
+        })
+        
+        ipcMain.handle("cvp-close-devtools", () => {
+            const active = this.getActiveView()
+            active?.getWebContents()?.closeDevTools()
+        })
+        
+        // Reload
+        ipcMain.handle("cvp-reload", () => {
+            const active = this.getActiveView()
+            active?.getWebContents()?.reload()
+        })
+        
+        // Get URL
+        ipcMain.handle("cvp-get-url", () => {
+            const active = this.getActiveView()
+            return active?.getWebContents()?.getURL() ?? ""
+        })
+        
+        // Clear (load about:blank)
+        ipcMain.on("cvp-clear", () => {
+            const active = this.getActiveView()
+            if (active) {
+                active.getWebContents()?.loadURL("about:blank")
+            }
+        })
+    }
+    
+    // ========== Zoom Methods ==========
+    
+    /**
+     * Set zoom factor for +/- shortcuts
+     */
+    private setZoomFactor(factor: number): void {
+        const clampedFactor = Math.max(0.25, Math.min(5.0, factor))
+        this.cssZoomLevel = (clampedFactor - 1.0) / 0.1
+        
+        const active = this.getActiveView()
+        if (active) {
+            if (this.visualZoomEnabled) {
+                active.setVisualZoomLevel(this.cssZoomLevel)
+            } else {
+                active.setCssZoom(this.cssZoomLevel)
+            }
+        }
+        
+        // Sync to all views in pool (so prefetched articles have same zoom)
+        this.syncZoomToAllViews()
+    }
+    
+    /**
+     * Set CSS zoom level directly
+     */
+    private setCssZoom(level: number): void {
+        const clampedLevel = Math.max(-6, Math.min(40, level))
+        this.cssZoomLevel = clampedLevel
+        
+        const active = this.getActiveView()
+        if (active) {
+            active.setCssZoom(clampedLevel)
+        }
+        
+        // Sync to all views
+        this.syncZoomToAllViews()
+    }
+    
+    /**
+     * Set visual zoom mode
+     */
+    private setVisualZoomMode(enabled: boolean): void {
+        this.visualZoomEnabled = enabled
+        
+        // Update all views
+        for (const view of this.views) {
+            view.setVisualZoomMode(enabled)
+        }
+    }
+    
+    /**
+     * Sync zoom level to all views in pool
+     */
+    private syncZoomToAllViews(): void {
+        for (const view of this.views) {
+            if (this.visualZoomEnabled) {
+                view.setVisualZoomLevel(this.cssZoomLevel)
+            } else {
+                view.setCssZoom(this.cssZoomLevel)
+            }
+        }
     }
     
     /**

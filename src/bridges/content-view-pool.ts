@@ -142,6 +142,101 @@ export const contentViewPoolBridge = {
         return ipcRenderer.invoke("cvp-get-status")
     },
     
+    // ========== Zoom & Settings ==========
+    
+    /**
+     * Set zoom factor (for +/- shortcuts)
+     */
+    setZoomFactor: (factor: number): void => {
+        ipcRenderer.sendSync("cvp-set-zoom-factor", factor)
+    },
+    
+    /**
+     * Set CSS zoom level
+     */
+    setCssZoom: (level: number): void => {
+        ipcRenderer.send("cvp-set-css-zoom", level)
+    },
+    
+    /**
+     * Get CSS zoom level (async)
+     */
+    getCssZoomLevel: (): Promise<number> => {
+        return ipcRenderer.invoke("cvp-get-css-zoom-level-async")
+    },
+    
+    /**
+     * Set visual zoom mode
+     */
+    setVisualZoom: (enabled: boolean): void => {
+        ipcRenderer.send("cvp-set-visual-zoom", enabled)
+    },
+    
+    // ========== View Operations ==========
+    
+    /**
+     * Execute JavaScript in active view
+     */
+    executeJavaScript: (code: string): Promise<any> => {
+        return ipcRenderer.invoke("cvp-execute-js", code)
+    },
+    
+    /**
+     * Send message to active view
+     */
+    send: (channel: string, ...args: any[]): void => {
+        ipcRenderer.send("cvp-send", channel, ...args)
+    },
+    
+    /**
+     * Get active webContents ID
+     */
+    getId: (): Promise<number | null> => {
+        return ipcRenderer.invoke("cvp-get-id")
+    },
+    
+    /**
+     * Open DevTools for active view
+     */
+    openDevTools: (): Promise<void> => {
+        return ipcRenderer.invoke("cvp-open-devtools")
+    },
+    
+    /**
+     * Check if DevTools is opened
+     */
+    isDevToolsOpened: (): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-is-devtools-opened")
+    },
+    
+    /**
+     * Close DevTools
+     */
+    closeDevTools: (): Promise<void> => {
+        return ipcRenderer.invoke("cvp-close-devtools")
+    },
+    
+    /**
+     * Reload active view
+     */
+    reload: (): Promise<void> => {
+        return ipcRenderer.invoke("cvp-reload")
+    },
+    
+    /**
+     * Get current URL of active view
+     */
+    getUrl: (): Promise<string> => {
+        return ipcRenderer.invoke("cvp-get-url")
+    },
+    
+    /**
+     * Clear active view (load about:blank)
+     */
+    clear: (): void => {
+        ipcRenderer.send("cvp-clear")
+    },
+    
     // ========== Event Listeners ==========
     
     /**

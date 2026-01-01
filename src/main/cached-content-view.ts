@@ -391,6 +391,62 @@ export class CachedContentView {
         return this._view?.webContents ?? null
     }
     
+    // ========== Zoom Methods ==========
+    
+    /**
+     * CSS zoom level (0 = 100%, 1 = 110%, -1 = 90%)
+     */
+    private _cssZoomLevel: number = 0
+    
+    /**
+     * Set CSS zoom level (for preload-based zoom)
+     * Level: 0 = 100%, 1 = 110%, -1 = 90%, etc.
+     */
+    setCssZoom(level: number): void {
+        if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
+            return
+        }
+        
+        const clampedLevel = Math.max(-6, Math.min(40, level))
+        this._cssZoomLevel = clampedLevel
+        
+        this._view.webContents.send('content-view-set-css-zoom', clampedLevel)
+    }
+    
+    /**
+     * Get current CSS zoom level
+     */
+    getCssZoomLevel(): number {
+        return this._cssZoomLevel
+    }
+    
+    /**
+     * Set visual zoom level (for overlay display)
+     */
+    setVisualZoomLevel(level: number): void {
+        if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
+            return
+        }
+        this._view.webContents.send('set-visual-zoom-level', level)
+    }
+    
+    /**
+     * Set visual zoom mode flag
+     */
+    setVisualZoomMode(enabled: boolean): void {
+        if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
+            return
+        }
+        this._view.webContents.send('set-visual-zoom-mode', enabled)
+    }
+    
+    /**
+     * Get the view for direct operations
+     */
+    getView(): WebContentsView | null {
+        return this._view
+    }
+    
     // ========== Private Methods ==========
     
     private setStatus(status: CachedViewStatus): void {

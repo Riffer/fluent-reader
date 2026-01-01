@@ -41,6 +41,11 @@ const limitedIpcRenderer = {
             "cvp-set-bounds",
             "cvp-set-visibility",
             "cvp-set-reading-direction",
+            "cvp-set-zoom-factor",
+            "cvp-set-css-zoom",
+            "cvp-set-visual-zoom",
+            "cvp-send",
+            "cvp-clear",
         ]
         if (allowedSendChannels.includes(channel)) {
             ipcRenderer.send(channel, ...args)
@@ -108,6 +113,14 @@ const limitedIpcRenderer = {
             // Content View Pool channels
             "cvp-navigate",
             "cvp-get-status",
+            "cvp-execute-js",
+            "cvp-get-id",
+            "cvp-open-devtools",
+            "cvp-is-devtools-opened",
+            "cvp-close-devtools",
+            "cvp-reload",
+            "cvp-get-url",
+            "cvp-get-css-zoom-level-async",
         ]
         if (allowedInvokeChannels.includes(channel)) {
             return ipcRenderer.invoke(channel, ...args)
