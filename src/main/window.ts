@@ -15,6 +15,11 @@ import {
     listSavedHosts
 } from "./cookie-persist"
 import { getContentViewManager, destroyContentViewManager } from "./content-view-manager"
+import { initializeContentViewPool, destroyContentViewPool, getContentViewPool } from "./content-view-pool"
+
+// Feature flag for Content View Pool (prefetching)
+// Set to true to enable the new pool-based article view with prefetching
+const USE_CONTENT_VIEW_POOL = false
 
 /**
  * Set up cookies to bypass consent dialogs and age gates
@@ -95,7 +100,10 @@ export class WindowManager {
 
         // Close database cleanly on app quit
         app.on("before-quit", () => {
-            // Destroy content view manager first
+            // Destroy content view pool and manager first
+            if (USE_CONTENT_VIEW_POOL) {
+                destroyContentViewPool()
+            }
             destroyContentViewManager()
             closeDatabase()
         })
@@ -303,6 +311,12 @@ export class WindowManager {
                 // Initialize ContentViewManager after window is ready
                 const contentViewManager = getContentViewManager()
                 contentViewManager.initialize(this.mainWindow)
+                
+                // Initialize ContentViewPool (parallel for testing)
+                if (USE_CONTENT_VIEW_POOL) {
+                    console.log('[WindowManager] Initializing ContentViewPool...')
+                    initializeContentViewPool(this.mainWindow)
+                }
             })
             this.mainWindow.loadFile(
                 (app.isPackaged ? "dist/" : "") + "index.html"
@@ -338,6 +352,9 @@ export class WindowManager {
             
             // Cleanup content view manager when window closes
             this.mainWindow.on("closed", () => {
+                if (USE_CONTENT_VIEW_POOL) {
+                    destroyContentViewPool()
+                }
                 destroyContentViewManager()
             })
         }
