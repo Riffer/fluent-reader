@@ -140,6 +140,11 @@ export class WindowManager {
                 }
             }
         })
+        
+        // Check if Content View Pool is enabled
+        ipcMain.handle("is-content-view-pool-enabled", () => {
+            return USE_CONTENT_VIEW_POOL
+        })
 
         // Stores which webContentsIds have emulation already enabled
         const emulatedWebContentsIds = new Set<number>()

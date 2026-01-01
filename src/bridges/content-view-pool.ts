@@ -6,6 +6,14 @@
  */
 import { ipcRenderer } from "electron"
 
+/**
+ * Check if Content View Pool is enabled
+ * Call this once at startup and cache the result
+ */
+export function isPoolEnabled(): Promise<boolean> {
+    return ipcRenderer.invoke("is-content-view-pool-enabled")
+}
+
 export interface ContentViewBounds {
     x: number
     y: number
@@ -51,11 +59,20 @@ export interface PoolStatus {
  * ContentViewPool Bridge
  * 
  * Usage:
+ * - isEnabled: Check if pool is enabled (call once at startup)
  * - navigateToArticle: Navigate to an article (instant if cached)
  * - requestPrefetch: Manually request prefetch for an article
  * - setReadingDirection: Inform pool about reading direction
  */
 export const contentViewPoolBridge = {
+    /**
+     * Check if Content View Pool is enabled
+     * Call this once at startup and cache the result
+     */
+    isEnabled: (): Promise<boolean> => {
+        return ipcRenderer.invoke("is-content-view-pool-enabled")
+    },
+    
     /**
      * Navigate to an article
      * Returns immediately if article is cached (instant swap)

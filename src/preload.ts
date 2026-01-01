@@ -121,6 +121,7 @@ const limitedIpcRenderer = {
             "cvp-reload",
             "cvp-get-url",
             "cvp-get-css-zoom-level-async",
+            "is-content-view-pool-enabled",
         ]
         if (allowedInvokeChannels.includes(channel)) {
             return ipcRenderer.invoke(channel, ...args)

@@ -96,6 +96,7 @@ type ArticleState = {
     menuBlurScreenshot: string | null  // Screenshot for blur placeholder when menu is open
     isNavigatingWithVisualZoom: boolean  // Show loading spinner during Visual Zoom navigation
     videoFullscreen: boolean  // Video playing in fullscreen mode (ContentView fills window)
+    useContentViewPool: boolean  // Feature flag: Use Pool for prefetching
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -203,6 +204,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             menuBlurScreenshot: null,
             isNavigatingWithVisualZoom: false,
             videoFullscreen: false,
+            useContentViewPool: false,  // Will be set in componentDidMount
         }
 
         // IPC listener for zoom changes from preload script
@@ -290,6 +292,38 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             mobileMode: this.localMobileMode,
             showZoomOverlay: this.state.showZoomOverlay
         };
+    }
+    
+    /**
+     * Navigate to content using either Pool (if enabled) or legacy ContentView
+     * This is the central navigation method that handles Pool prefetching
+     */
+    private navigateToContent = (url: string, articleId?: string): void => {
+        const settings = this.getNavigationSettings();
+        
+        if (this.state.useContentViewPool && window.contentViewPool) {
+            // Use Pool for navigation (with prefetching)
+            const { articleIndex = -1, listLength = 0, feedId = null } = this.props;
+            const artId = articleId || String(this.props.item?._id) || 'unknown';
+            
+            console.log(`[Article] Pool navigate: ${artId} (${articleIndex}/${listLength})`);
+            
+            window.contentViewPool.navigateToArticle(
+                artId,
+                url,
+                feedId,
+                settings,
+                articleIndex,
+                listLength
+            ).catch((err: any) => {
+                console.error("[Article] Pool navigation failed:", err);
+            });
+        } else {
+            // Legacy: use ContentView directly
+            window.contentView?.navigateWithSettings(url, settings);
+        }
+        
+        this.contentViewCurrentUrl = url;
     }
 
     /**
@@ -388,20 +422,21 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Used after WebContentsView recreation (e.g., Visual Zoom toggle)
      */
     private reloadCurrentArticle = () => {
-        if (!window.contentView || !this.props.item) return;
+        if (!this.props.item) return;
+        
+        // Check if we have a view to navigate
+        if (!this.state.useContentViewPool && !window.contentView) return;
         
         const contentMode = this.state.contentMode;
         
         if (contentMode === SourceOpenTarget.Webpage) {
-            // Webpage mode: Navigate to URL with bundled settings
+            // Webpage mode: Navigate to URL
             const targetUrl = this.props.item.link;
-            this.contentViewCurrentUrl = targetUrl;
-            window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
+            this.navigateToContent(targetUrl);
         } else {
-            // Local (RSS) or FullContent mode: Load HTML directly with bundled settings
+            // Local (RSS) or FullContent mode: Load HTML directly
             const htmlDataUrl = this.articleView();
-            this.contentViewCurrentUrl = htmlDataUrl;
-            window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
+            this.navigateToContent(htmlDataUrl);
         }
         
         // Focus ContentView after short delay
@@ -1371,6 +1406,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             })
         }
         
+        // Check if Content View Pool is enabled
+        if (window.contentViewPool) {
+            window.contentViewPool.isEnabled().then((enabled: boolean) => {
+                if (this._isMounted && enabled) {
+                    this.setState({ useContentViewPool: enabled })
+                    console.log("[Article] Content View Pool enabled")
+                }
+            }).catch(() => {
+                // Pool not available, use legacy ContentView
+            })
+        }
+        
         // Set global Mobile Mode status initially (in case already enabled)
         this.setGlobalMobileMode(this.localMobileMode);
         
@@ -1535,36 +1582,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.setState({ isLoadingFull: true })
                     this.loadFull()
                 } else if (newContentMode === SourceOpenTarget.Webpage) {
-                    // For webpage mode - ContentView navigates to URL with bundled settings
-                    if (window.contentView) {
-                        const targetUrl = this.props.item.link;
-                        if (this.contentViewCurrentUrl !== targetUrl) {
-                            // JS-Navigation test showed: Emulation is reset even with window.location.href
-                            // So we use navigateWithSettings with HIDE-SHOW strategy:
-                            // Main process hides view, navigates, applies emulation at dom-ready, then shows
-                            this.contentViewCurrentUrl = targetUrl;
-                            window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
+                    // For webpage mode - Navigate to URL (Pool or ContentView)
+                    const targetUrl = this.props.item.link;
+                    if (this.contentViewCurrentUrl !== targetUrl) {
+                        this.navigateToContent(targetUrl);
+                    }
+                    // Focus ContentView for keyboard input (with delay to ensure it's ready)
+                    setTimeout(() => {
+                        if (window.contentView) {
+                            window.contentView.focus();
                         }
-                        // Focus ContentView for keyboard input (with delay to ensure it's ready)
-                        setTimeout(() => {
-                            if (window.contentView) {
-                                window.contentView.focus();
-                            }
-                        }, 100);
-                    }
+                    }, 100);
                 } else {
-                    // For Local (RSS) mode - ContentView loads HTML data URL with bundled settings
-                    if (window.contentView) {
-                        const htmlDataUrl = this.articleView();
-                        this.contentViewCurrentUrl = htmlDataUrl;
-                        window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
-                        // Focus ContentView
-                        setTimeout(() => {
-                            if (window.contentView) {
-                                window.contentView.focus();
-                            }
-                        }, 100);
-                    }
+                    // For Local (RSS) mode - Load HTML (Pool or ContentView)
+                    const htmlDataUrl = this.articleView();
+                    this.navigateToContent(htmlDataUrl);
+                    // Focus ContentView
+                    setTimeout(() => {
+                        if (window.contentView) {
+                            window.contentView.focus();
+                        }
+                    }, 100);
                     // CSS zoom for non-Visual-Zoom mode is handled by preload via sync IPC
                     // No need for separate applyZoom call anymore!
                 }
