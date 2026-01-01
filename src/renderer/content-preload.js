@@ -4,6 +4,25 @@
 try {
   const { ipcRenderer, contextBridge } = require('electron');
 
+  // ===== ContentViewPool Support =====
+  // isActiveView: Only the active view should send events to the main process
+  // When using ContentViewPool, multiple views exist but only one is "active"
+  // Non-active views should not send keyboard, scroll, or zoom events
+  let isActiveView = true;  // Default: true for backward compatibility with single-view mode
+  
+  // Listen for active state changes from ContentViewPool
+  ipcRenderer.on('cvp-set-active-state', (event, active) => {
+    isActiveView = active;
+    console.log('[ContentPreload] Active state changed:', active);
+  });
+  
+  // Helper: Only send IPC if this view is active
+  function sendIfActive(channel, ...args) {
+    if (isActiveView) {
+      ipcRenderer.send(channel, ...args);
+    }
+  }
+
   // ===== JavaScript Dialog Interceptor =====
   // Intercept alert/confirm/prompt from article pages to prevent mysterious empty dialogs
   // and to log what the website is trying to show the user.
@@ -18,9 +37,9 @@ try {
   window.alert = function(message) {
     const msg = message !== undefined ? String(message) : '';
     console.warn('[ContentPreload] Website called alert():', msg || '(empty message)');
-    // Log via IPC for main process visibility
+    // Log via IPC for main process visibility (only if active view)
     try {
-      ipcRenderer.send('content-view-js-dialog', { type: 'alert', message: msg });
+      sendIfActive('content-view-js-dialog', { type: 'alert', message: msg });
     } catch (e) {}
     // Suppress the dialog - don't call originalAlert
     // If you want to allow alerts, uncomment: return originalAlert.call(window, message);
@@ -31,7 +50,7 @@ try {
     const msg = message !== undefined ? String(message) : '';
     console.warn('[ContentPreload] Website called confirm():', msg || '(empty message)');
     try {
-      ipcRenderer.send('content-view-js-dialog', { type: 'confirm', message: msg });
+      sendIfActive('content-view-js-dialog', { type: 'confirm', message: msg });
     } catch (e) {}
     // Return false to deny the action
     return false;
@@ -42,7 +61,7 @@ try {
     const msg = message !== undefined ? String(message) : '';
     console.warn('[ContentPreload] Website called prompt():', msg || '(empty message)', 'default:', defaultValue);
     try {
-      ipcRenderer.send('content-view-js-dialog', { type: 'prompt', message: msg, defaultValue: defaultValue });
+      sendIfActive('content-view-js-dialog', { type: 'prompt', message: msg, defaultValue: defaultValue });
     } catch (e) {}
     // Return null to indicate cancelled
     return null;
@@ -452,9 +471,9 @@ try {
     // Show zoom overlay (always when zoom changes)
     showZoomOverlay(zoomLevel);
     
-    // Sende Notification an Main-Prozess
+    // Sende Notification an Main-Prozess (only if this view is active)
     if (options.notify) {
-      try { ipcRenderer.send('content-view-zoom-changed', zoomLevel); } catch {}
+      try { sendIfActive('content-view-zoom-changed', zoomLevel); } catch {}
     }
   }
 

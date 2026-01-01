@@ -337,8 +337,9 @@ export class CachedContentView {
         this._isActive = active
         
         // Inform the preload script about activity state
+        // Channel: 'cvp-set-active-state' (ContentViewPool prefix)
         if (this._view?.webContents && !this._view.webContents.isDestroyed()) {
-            this._view.webContents.send('set-active-state', active)
+            this._view.webContents.send('cvp-set-active-state', active)
         }
         
         console.log(`[CachedContentView:${this.id}] Active: ${active}`)
