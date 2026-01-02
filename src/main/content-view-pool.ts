@@ -480,12 +480,13 @@ export class ContentViewPool {
         // Cancel any pending prefetch
         this.cancelPrefetch()
         
+        // Update reading direction BEFORE updating currentArticleIndex
+        // (needs old index to compare)
+        this.updateReadingDirection(articleIndex, listLength)
+        
         // Update article context
         this.currentArticleIndex = articleIndex
         this.articleListLength = listLength
-        
-        // Update reading direction based on position
-        this.updateReadingDirectionFromPosition(articleIndex, listLength)
         
         console.log(`[ContentViewPool] Navigate to: ${articleId} (index ${articleIndex}/${listLength}, direction: ${this.readingDirection})`)
         
@@ -494,6 +495,10 @@ export class ContentViewPool {
         if (cachedView && cachedView.isReady) {
             // Instant swap!
             console.log(`[ContentViewPool] Cache HIT - instant swap to ${cachedView.id}`)
+            
+            // Play sound on cache hit (for debugging)
+            shell.beep()
+            
             this.activateView(cachedView)
             
             // Schedule prefetch for next articles
@@ -562,14 +567,47 @@ export class ContentViewPool {
     prefetch(articleId: string, url: string, feedId: string | null, settings: NavigationSettings): void {
         if (!this.config.enabled) return
         
-        // Don't prefetch if already cached
-        if (this.getViewByArticleId(articleId)) {
-            console.log(`[ContentViewPool] Prefetch skip - already cached: ${articleId}`)
-            return
+        // Check if article is already in a view
+        const existingView = this.getViewByArticleId(articleId)
+        let viewToUse: CachedContentView | null = null
+        
+        if (existingView) {
+            // Check the status of the existing view
+            switch (existingView.status) {
+                case 'ready':
+                    // Already loaded - skip
+                    console.log(`[ContentViewPool] Prefetch skip - already ready: ${articleId}`)
+                    return
+                case 'loading':
+                    // Currently loading - skip, will be ready soon
+                    console.log(`[ContentViewPool] Prefetch skip - already loading: ${articleId}`)
+                    return
+                case 'error':
+                    // Previous load failed - recycle and try again
+                    console.log(`[ContentViewPool] Prefetch retry - previous load failed: ${articleId}`)
+                    existingView.recycle()
+                    viewToUse = existingView  // Use this view for retry
+                    break
+                case 'empty':
+                    // View was recycled but still has articleId? Shouldn't happen, but use it
+                    console.log(`[ContentViewPool] Prefetch: view ${existingView.id} is empty with articleId ${articleId}`)
+                    viewToUse = existingView
+                    break
+            }
         }
         
-        // Find a free view (not active)
-        const freeView = this.findFreeView()
+        // Find a free view if we don't have one from error retry
+        let freeView = viewToUse || this.findFreeView()
+        
+        // If no free view, try to recycle a non-active view
+        if (!freeView) {
+            freeView = this.findRecyclableView()
+            if (freeView) {
+                console.log(`[ContentViewPool] Prefetch: recycling ${freeView.id} (was ${freeView.articleId}) for ${articleId}`)
+                freeView.recycle()
+            }
+        }
+        
         if (!freeView) {
             console.log(`[ContentViewPool] Prefetch skip - no free view for: ${articleId}`)
             return
@@ -614,17 +652,37 @@ export class ContentViewPool {
     }
     
     /**
-     * Update reading direction based on article position
+     * Update reading direction based on navigation
+     * Compares new index with previous to determine direction
      */
-    private updateReadingDirectionFromPosition(index: number, listLength: number): void {
-        if (index === 0 && listLength > 1) {
-            // First article - can only go forward
-            this.readingDirection = 'forward'
-        } else if (index === listLength - 1 && listLength > 1) {
-            // Last article - can only go backward
-            this.readingDirection = 'backward'
+    private updateReadingDirection(newIndex: number, listLength: number): void {
+        const oldIndex = this.currentArticleIndex
+        
+        // First navigation or index not set yet
+        if (oldIndex < 0) {
+            // At boundaries, we know the direction
+            if (newIndex === 0 && listLength > 1) {
+                this.readingDirection = 'forward'
+            } else if (newIndex === listLength - 1 && listLength > 1) {
+                this.readingDirection = 'backward'
+            }
+            // Otherwise keep unknown
+            return
         }
-        // Otherwise keep current direction (or unknown)
+        
+        // Determine direction from index change
+        if (newIndex > oldIndex) {
+            if (this.readingDirection !== 'forward') {
+                console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → forward (index ${oldIndex} → ${newIndex})`)
+                this.readingDirection = 'forward'
+            }
+        } else if (newIndex < oldIndex) {
+            if (this.readingDirection !== 'backward') {
+                console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → backward (index ${oldIndex} → ${newIndex})`)
+                this.readingDirection = 'backward'
+            }
+        }
+        // Same index = keep current direction (reload)
     }
     
     // ========== Prefetch Scheduling ==========
@@ -812,7 +870,8 @@ export class ContentViewPool {
     }
     
     /**
-     * Find the best view to recycle (LRU-like)
+     * Find the best view to recycle based on reading direction
+     * Prefers views that hold articles in the opposite direction of reading
      */
     private findRecyclableView(): CachedContentView | null {
         // Don't recycle active view
@@ -820,10 +879,39 @@ export class ContentViewPool {
         
         if (candidates.length === 0) return null
         
-        // Prefer views in opposite direction of reading
-        // For now, just return the first non-active
-        // TODO: Implement proper LRU with lastAccessTime
-        return candidates[0]
+        // If we don't know the current position, just return any non-active
+        if (this.currentArticleIndex < 0) {
+            return candidates[0]
+        }
+        
+        // Calculate "distance" for each candidate based on reading direction
+        // Negative distance = opposite to reading direction (prefer recycling)
+        // Positive distance = same as reading direction (keep for cache)
+        const scored = candidates.map(view => {
+            // Empty views are best to recycle
+            if (view.isEmpty || !view.articleId) {
+                return { view, score: -1000 }
+            }
+            
+            // Views with errors should be recycled
+            if (view.status === 'error') {
+                return { view, score: -900 }
+            }
+            
+            // Loading views - prefer to recycle these over ready views
+            // (a loading view's article might not be visited anyway)
+            if (view.isLoading) {
+                return { view, score: -500 }
+            }
+            
+            // Ready views - keep these if possible
+            return { view, score: 0 }
+        })
+        
+        // Sort by score (lowest/most negative first = best to recycle)
+        scored.sort((a, b) => a.score - b.score)
+        
+        return scored[0].view
     }
     
     /**
