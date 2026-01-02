@@ -109,6 +109,10 @@ const limitedIpcRenderer = {
             "cvp-stop",
             "cvp-capture-screen",
             "cvp-recreate",
+            "cvp-nuke",
+            // Cookie persistence for Pool
+            "cvp-get-cookies-for-host",
+            "cvp-get-all-cookies",
         ]
         if (allowedInvokeChannels.includes(channel)) {
             return ipcRenderer.invoke(channel, ...args)

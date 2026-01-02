@@ -353,6 +353,15 @@ export const contentViewPoolBridge = {
         return ipcRenderer.invoke("cvp-recreate")
     },
     
+    /**
+     * Nuke active view (for mode switch: RSS <-> Browser)
+     * Destroys and recreates the WebContentsView without loading content.
+     * Caller should navigate to new content after nuke completes.
+     */
+    nuke: (): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-nuke")
+    },
+    
     // ========== Event Listeners ==========
     
     /**
@@ -392,6 +401,24 @@ export const contentViewPoolBridge = {
         const handler = () => callback()
         ipcRenderer.on("cvp-request-bounds", handler)
         return () => ipcRenderer.removeListener("cvp-request-bounds", handler)
+    },
+    
+    /**
+     * Get cookies for a specific host from the active view's session
+     * This uses the actual WebContentsView session, not session.fromPartition
+     * @param host - The host to get cookies for (e.g., "www.threads.net")
+     * @returns Array of Electron.Cookie objects
+     */
+    getCookiesForHost: (host: string): Promise<Electron.Cookie[]> => {
+        return ipcRenderer.invoke("cvp-get-cookies-for-host", host)
+    },
+    
+    /**
+     * Get ALL cookies from the active view's session (for debugging)
+     * @returns Array of all cookies in the session
+     */
+    getAllCookies: (): Promise<Electron.Cookie[]> => {
+        return ipcRenderer.invoke("cvp-get-all-cookies")
     },
     
     /**

@@ -952,14 +952,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Saves current cookies for the article (if persistCookies is enabled)
      */
     private savePersistedCookies = async () => {
+        console.log(`[CookiePersist] savePersistedCookies called, persistCookies=${this.props.source.persistCookies}, url=${this.props.item?.link}`)
         if (!this.props.source.persistCookies) {
+            console.log(`[CookiePersist] Skipping - persistCookies not enabled for this source`)
             return
         }
         
         const url = this.props.item.link
         
         try {
-            await window.utils.savePersistedCookies(url)
+            const result = await window.utils.savePersistedCookies(url)
+            console.log(`[CookiePersist] Saved cookies for ${url}:`, result)
             this.lastCookieSaveTime = Date.now()
         } catch (e) {
             console.error("[CookiePersist] Error saving cookies:", e)
@@ -1506,6 +1509,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Content View Pool is now always used - no feature flag check needed
         if (window.contentViewPool) {
             console.log("[Article] Using Content View Pool")
+            // Set initial mobile mode to pool
+            window.contentViewPool.setMobileMode(this.localMobileMode);
         } else {
             console.warn("[Article] Content View Pool not available!")
         }
@@ -2064,12 +2069,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, async () => {
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
                     SourceOpenTarget.Local
                 )
+                // Nuke the view before re-initializing (clean slate for mode switch)
+                if (window.contentViewPool) {
+                    await window.contentViewPool.nuke();
+                }
                 // Re-initialize ContentView with RSS content
                 this.initializeContentView();
                 
@@ -2087,12 +2096,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.Webpage, contentVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.Webpage, contentVisible: false }, async () => {
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
                     SourceOpenTarget.Webpage
                 )
+                // Nuke the view before re-initializing (clean slate for mode switch)
+                if (window.contentViewPool) {
+                    await window.contentViewPool.nuke();
+                }
                 // Re-initialize ContentView with webpage URL
                 this.initializeContentView();
                 
@@ -2117,12 +2130,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, async () => {
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
                     SourceOpenTarget.Local
                 )
+                // Nuke the view before re-initializing (clean slate for mode switch)
+                if (window.contentViewPool) {
+                    await window.contentViewPool.nuke();
+                }
                 // Re-initialize ContentView with RSS content
                 this.initializeContentView();
                 
@@ -2140,12 +2157,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.FullContent, contentVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.FullContent, contentVisible: false }, async () => {
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
                     SourceOpenTarget.FullContent
                 )
+                // Nuke the view before loading full content (clean slate for mode switch)
+                if (window.contentViewPool) {
+                    await window.contentViewPool.nuke();
+                }
                 // Load and extract full content
                 this.loadFull()
                 

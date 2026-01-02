@@ -16,7 +16,7 @@
 import { ipcMain, BrowserWindow, Menu, clipboard, shell, nativeImage } from "electron"
 import type { MenuItemConstructorOptions, Input } from "electron"
 import { CachedContentView, NavigationSettings, CachedViewStatus } from "./cached-content-view"
-import { isMobileUserAgentEnabled } from "./settings"
+import { isMobileUserAgentEnabled, isVisualZoomEnabled } from "./settings"
 import https from "https"
 import http from "http"
 import fs from "fs"
@@ -87,20 +87,6 @@ export class ContentViewPool {
     private currentArticleIndex: number = -1
     private articleListLength: number = 0
     
-    // === Navigation Lock ===
-    // Prevents concurrent navigations - only one navigation can be in flight at a time
-    // Problem: Multiple sources trigger navigation (IPC from ContentView, componentDidUpdate, etc.)
-    // When user presses ArrowRight quickly, multiple navigations can queue up and cause skipping
-    private isNavigationInProgress: boolean = false
-    private navigationLockTimeout: NodeJS.Timeout | null = null
-    private readonly NAVIGATION_LOCK_TIMEOUT_MS = 2000  // Auto-release lock after 2 seconds (safety net)
-    
-    // === Navigation Deduplication (secondary protection) ===
-    // Even with lock, deduplicate same-article requests within short window
-    private lastNavigationArticleId: string | null = null
-    private lastNavigationTime: number = 0
-    private readonly NAVIGATION_DEBOUNCE_MS = 100  // Ignore duplicate navigations within 100ms
-    
     // === Prefetch Timer ===
     private prefetchTimer: NodeJS.Timeout | null = null
     private pendingPrefetch: PrefetchRequest[] = []
@@ -136,7 +122,10 @@ export class ContentViewPool {
         }
         
         this.parentWindow = parentWindow
-        console.log(`[ContentViewPool] Initialized with pool size: ${this.config.size}`)
+        
+        // Load initial settings from store
+        this.visualZoomEnabled = isVisualZoomEnabled()
+        console.log(`[ContentViewPool] Initialized with pool size: ${this.config.size}, visualZoom: ${this.visualZoomEnabled}`)
         
         // Views are created lazily when needed
     }
@@ -176,6 +165,19 @@ export class ContentViewPool {
         
         // Apply current bounds to the newly created view
         view.setBounds(this.visibleBounds)
+        
+        // Apply current visual zoom mode to the view
+        view.setVisualZoomMode(this.visualZoomEnabled)
+        
+        // Apply current mobile mode to the view
+        view.setMobileMode(this.mobileMode)
+        
+        // Apply current zoom level
+        if (this.visualZoomEnabled) {
+            view.setVisualZoomLevel(this.cssZoomLevel)
+        } else {
+            view.setCssZoom(this.cssZoomLevel)
+        }
     }
     
     /**
@@ -464,17 +466,6 @@ export class ContentViewPool {
     // ========== Navigation ==========
     
     /**
-     * Release the navigation lock and clear timeout
-     */
-    private releaseNavigationLock(): void {
-        this.isNavigationInProgress = false
-        if (this.navigationLockTimeout) {
-            clearTimeout(this.navigationLockTimeout)
-            this.navigationLockTimeout = null
-        }
-    }
-    
-    /**
      * Navigate to an article
      * Returns immediately if article is already cached (instant swap)
      */
@@ -486,35 +477,6 @@ export class ContentViewPool {
         articleIndex: number,
         listLength: number
     ): Promise<boolean> {
-        // === Navigation Lock Check ===
-        // Only one navigation can be in flight at a time
-        // This prevents article skipping when multiple sources trigger navigation
-        if (this.isNavigationInProgress) {
-            console.log(`[ContentViewPool] Navigation BLOCKED (lock active) - request for ${articleId} ignored`)
-            return false  // Return false to signal navigation was not performed
-        }
-        
-        // === Navigation Deduplication (secondary) ===
-        // Even with lock, deduplicate same-article requests within short window
-        const now = Date.now()
-        if (articleId === this.lastNavigationArticleId && 
-            now - this.lastNavigationTime < this.NAVIGATION_DEBOUNCE_MS) {
-            console.log(`[ContentViewPool] Navigation DEDUPLICATED - same article ${articleId} within ${this.NAVIGATION_DEBOUNCE_MS}ms`)
-            return true  // Return success but don't actually navigate again
-        }
-        
-        // === Acquire Navigation Lock ===
-        this.isNavigationInProgress = true
-        // Safety timeout - release lock if navigation takes too long
-        this.navigationLockTimeout = setTimeout(() => {
-            console.log(`[ContentViewPool] Navigation lock auto-released (timeout)`)
-            this.releaseNavigationLock()
-        }, this.NAVIGATION_LOCK_TIMEOUT_MS)
-        
-        // Track this navigation for deduplication
-        this.lastNavigationArticleId = articleId
-        this.lastNavigationTime = now
-        
         // Cancel any pending prefetch
         this.cancelPrefetch()
         
@@ -536,9 +498,6 @@ export class ContentViewPool {
             
             // Schedule prefetch for next articles
             this.schedulePrefetch()
-            
-            // Release navigation lock - instant swap is complete
-            this.releaseNavigationLock()
             
             return true
         }
@@ -569,8 +528,6 @@ export class ContentViewPool {
             // User may have navigated to another article while we were loading
             if (this.activeViewId !== view.id) {
                 console.log(`[ContentViewPool] Load complete for ${view.id}, but ${this.activeViewId} is now active - not showing`)
-                // Still release lock - navigation completed (just not shown)
-                this.releaseNavigationLock()
                 return true  // Load was successful, just not shown
             }
             
@@ -590,16 +547,10 @@ export class ContentViewPool {
             // Schedule prefetch
             this.schedulePrefetch()
             
-            // Release navigation lock - load complete
-            this.releaseNavigationLock()
-            
             return true
         } catch (err) {
             console.error(`[ContentViewPool] Navigation failed:`, err)
             this.sendToRenderer('cvp-error', articleId, String(err))
-            
-            // Release navigation lock even on error
-            this.releaseNavigationLock()
             
             return false
         }
@@ -1062,6 +1013,11 @@ export class ContentViewPool {
         // Pool-specific handlers (cvp-* prefix)
         // =====================================================
         
+        // Debug: Log messages from preload scripts
+        ipcMain.on('cvp-preload-log', (event, message) => {
+            console.log(message)
+        })
+        
         // Navigate to article
         ipcMain.handle('cvp-navigate', async (event, articleId, url, feedId, settings, index, listLength) => {
             console.log(`[ContentViewPool] IPC cvp-navigate received: articleId=${articleId}, index=${index}`)
@@ -1265,7 +1221,7 @@ export class ContentViewPool {
         
         // Set mobile mode
         ipcMain.on("cvp-set-mobile-mode", (event, enabled: boolean) => {
-            this.mobileMode = enabled
+            this.setMobileMode(enabled)
         })
         
         // Get mobile mode
@@ -1390,6 +1346,125 @@ export class ContentViewPool {
             }
             return false
         })
+        
+        // Nuke active view (for mode switch: RSS <-> Browser)
+        // Recycles the view without reloading - caller should navigate after nuke
+        ipcMain.handle("cvp-nuke", async () => {
+            console.log("[ContentViewPool] cvp-nuke: Nuking active view for mode switch")
+            const active = this.getActiveView()
+            if (active) {
+                // Recycle (destroys and recreates the WebContentsView)
+                active.recycle()
+                this.createViewWithEvents(active)
+                
+                // Mark as active again and restore visibility with current bounds
+                active.setActive(true)
+                if (this.isPoolVisible && this.boundsReceived) {
+                    active.setBounds(this.visibleBounds)
+                    active.setVisible(true)
+                }
+                
+                console.log("[ContentViewPool] cvp-nuke: View recycled, ready for new navigation")
+                return true
+            }
+            console.log("[ContentViewPool] cvp-nuke: No active view to nuke")
+            return false
+        })
+        
+        // Get cookies from active view's session (for cookie persistence)
+        ipcMain.handle("cvp-get-cookies-for-host", async (event, host: string) => {
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (!wc || wc.isDestroyed()) {
+                console.log("[ContentViewPool] cvp-get-cookies-for-host: No active view")
+                return []
+            }
+            
+            const ses = wc.session
+            console.log(`[ContentViewPool] Getting cookies for host: ${host} from session: ${ses.storagePath}`)
+            
+            try {
+                const baseDomain = host.replace(/^www\./, "")
+                const allCookies: Electron.Cookie[] = []
+                const seenKeys = new Set<string>()
+                
+                const addCookie = (cookie: Electron.Cookie) => {
+                    const key = `${cookie.name}|${cookie.domain}|${cookie.path}`
+                    if (!seenKeys.has(key)) {
+                        seenKeys.add(key)
+                        allCookies.push(cookie)
+                    }
+                }
+                
+                // 1. All cookies for the URL
+                try {
+                    const urlCookies = await ses.cookies.get({ url: `https://${host}` })
+                    urlCookies.forEach(addCookie)
+                    console.log(`[ContentViewPool] URL cookies: ${urlCookies.length}`)
+                } catch (e) { /* ignore */ }
+                
+                // 2. Exact domain
+                try {
+                    const exactCookies = await ses.cookies.get({ domain: host })
+                    exactCookies.forEach(addCookie)
+                    console.log(`[ContentViewPool] Exact domain cookies: ${exactCookies.length}`)
+                } catch (e) { /* ignore */ }
+                
+                // 3. .domain
+                try {
+                    const dotCookies = await ses.cookies.get({ domain: "." + baseDomain })
+                    dotCookies.forEach(addCookie)
+                    console.log(`[ContentViewPool] Dot domain cookies: ${dotCookies.length}`)
+                } catch (e) { /* ignore */ }
+                
+                // 4. www. subdomain
+                if (!host.startsWith("www.")) {
+                    try {
+                        const wwwCookies = await ses.cookies.get({ domain: "www." + baseDomain })
+                        wwwCookies.forEach(addCookie)
+                    } catch (e) { /* ignore */ }
+                }
+                
+                // 5. Fallback: All cookies filtered by domain
+                try {
+                    const allSessionCookies = await ses.cookies.get({})
+                    console.log(`[ContentViewPool] Total cookies in session: ${allSessionCookies.length}`)
+                    allSessionCookies.filter(c =>
+                        c.domain === host ||
+                        c.domain === "." + baseDomain ||
+                        c.domain === "." + host ||
+                        c.domain === baseDomain
+                    ).forEach(addCookie)
+                } catch (e) { /* ignore */ }
+                
+                console.log(`[ContentViewPool] Found ${allCookies.length} cookies for ${host}`)
+                return allCookies
+            } catch (e) {
+                console.error("[ContentViewPool] Error getting cookies:", e)
+                return []
+            }
+        })
+        
+        // Get ALL cookies from active view's session (for debugging)
+        ipcMain.handle("cvp-get-all-cookies", async () => {
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (!wc || wc.isDestroyed()) {
+                return []
+            }
+            
+            try {
+                const cookies = await wc.session.cookies.get({})
+                console.log(`[ContentViewPool] All cookies: ${cookies.length}`)
+                cookies.forEach(c => {
+                    console.log(`  - ${c.name} @ ${c.domain}`)
+                })
+                return cookies
+            } catch (e) {
+                console.error("[ContentViewPool] Error getting all cookies:", e)
+                return []
+            }
+        })
     }
     
     // ========== Zoom Methods ==========
@@ -1421,9 +1496,20 @@ export class ContentViewPool {
         const clampedLevel = Math.max(-6, Math.min(40, level))
         this.cssZoomLevel = clampedLevel
         
+        console.log(`[ContentViewPool] setCssZoom(${level}) -> clamped to ${clampedLevel}, visualZoomEnabled=${this.visualZoomEnabled}`)
+
         const active = this.getActiveView()
         if (active) {
-            active.setCssZoom(clampedLevel)
+            // Use the correct zoom method based on visual zoom mode
+            if (this.visualZoomEnabled) {
+                console.log(`[ContentViewPool] setCssZoom: Visual Zoom enabled, calling setVisualZoomLevel`)
+                active.setVisualZoomLevel(clampedLevel)
+            } else {
+                console.log(`[ContentViewPool] setCssZoom: CSS Zoom, calling setCssZoom on active view ${active.id}`)
+                active.setCssZoom(clampedLevel)
+            }
+        } else {
+            console.log(`[ContentViewPool] setCssZoom: no active view!`)
         }
         
         // Sync to all views
@@ -1439,6 +1525,20 @@ export class ContentViewPool {
         // Update all views
         for (const view of this.views) {
             view.setVisualZoomMode(enabled)
+        }
+    }
+    
+    /**
+     * Set mobile mode (viewport constraint)
+     */
+    private setMobileMode(enabled: boolean): void {
+        this.mobileMode = enabled
+        
+        console.log(`[ContentViewPool] setMobileMode(${enabled})`)
+        
+        // Update all views
+        for (const view of this.views) {
+            view.setMobileMode(enabled)
         }
     }
     

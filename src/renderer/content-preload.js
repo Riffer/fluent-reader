@@ -1,8 +1,19 @@
 // Preload for ContentView: CSS-Transform-based zoom (Chrome-like)
 // This script runs in the WebContentsView that displays article content.
 // The entire page is scaled, not just visually zoomed.
+console.log('[ContentPreload] Script loading...');
 try {
   const { ipcRenderer, contextBridge } = require('electron');
+  console.log('[ContentPreload] ipcRenderer loaded successfully');
+  
+  // Debug: Send logs to main process so they appear in terminal
+  function logToMain(message) {
+    console.log(message);
+    try {
+      ipcRenderer.send('cvp-preload-log', message);
+    } catch (e) {}
+  }
+  logToMain('[ContentPreload] Preload script initialized');
 
   // ===== ContentViewPool Support =====
   // isActiveView: Only the active view should send events to the main process
@@ -382,9 +393,11 @@ try {
   // IMPORTANT: With Visual Zoom (Device Emulation) this function is NOT executed,
   // so that native browser pinch-zoom works!
   function applyZoom(newZoomLevel, options = { notify: true, zoomPointX: null, zoomPointY: null, preserveScroll: true }) {
+    logToMain(`[ContentPreload] applyZoom called: newZoomLevel=${newZoomLevel}, visualZoomEnabled=${visualZoomEnabled}`);
     // With Visual Zoom: NO CSS-based zoom manipulation!
     // The native browser zoom (via enableDeviceEmulation) takes over.
     if (visualZoomEnabled) {
+      logToMain(`[ContentPreload] applyZoom: skipping due to visualZoomEnabled`);
       return;
     }
     
@@ -504,18 +517,24 @@ try {
   // Listener for external zoom commands (from keyboard - preserve scroll position)
   // BUT: With Visual Zoom only track the level, DO NOT apply CSS zoom!
   ipcRenderer.on('content-view-set-css-zoom', (event, zoomLevel_) => {
+    logToMain(`[ContentPreload] Received 'content-view-set-css-zoom': level=${zoomLevel_}, visualZoomEnabled=${visualZoomEnabled}, readyState=${document.readyState}`);
     zoomLevel = zoomLevel_;
     
     // With Visual Zoom: Do not apply CSS zoom (Device Emulation handles zoom)
     if (!visualZoomEnabled) {
       // Ensure DOM is ready before applying zoom (important after navigation)
       if (document.readyState === 'loading') {
+        logToMain(`[ContentPreload] DOM loading - deferring applyZoom`);
         document.addEventListener('DOMContentLoaded', () => {
+          logToMain(`[ContentPreload] DOMContentLoaded - calling applyZoom`);
           applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
         }, { once: true });
       } else {
+        logToMain(`[ContentPreload] DOM ready - calling applyZoom now`);
         applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
       }
+    } else {
+      logToMain(`[ContentPreload] Visual Zoom enabled - skipping CSS zoom`);
     }
     
     // Show zoom overlay on article change if enabled

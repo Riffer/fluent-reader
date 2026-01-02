@@ -506,12 +506,14 @@ export class CachedContentView {
      */
     setCssZoom(level: number): void {
         if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
+            console.log(`[CachedContentView:${this.id}] setCssZoom(${level}) - view not available`)
             return
         }
         
         const clampedLevel = Math.max(-6, Math.min(40, level))
         this._cssZoomLevel = clampedLevel
         
+        console.log(`[CachedContentView:${this.id}] setCssZoom: sending 'content-view-set-css-zoom' with level=${clampedLevel}`)
         this._view.webContents.send('content-view-set-css-zoom', clampedLevel)
     }
     
@@ -523,23 +525,181 @@ export class CachedContentView {
     }
     
     /**
-     * Set visual zoom level (for overlay display)
+     * Visual zoom level for Device Emulation
+     */
+    private _visualZoomLevel: number = 0
+    
+    /**
+     * Whether visual zoom (Device Emulation) is enabled
+     */
+    private _visualZoomEnabled: boolean = false
+    
+    /**
+     * Set visual zoom level and apply Device Emulation
+     * Level: 0 = 100%, 1 = 110%, -1 = 90%, etc.
      */
     setVisualZoomLevel(level: number): void {
+        this._visualZoomLevel = level
+        
         if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
             return
         }
-        this._view.webContents.send('set-visual-zoom-level', level)
+        
+        // Calculate scale factor from level (0 = 1.0, 1 = 1.1, -1 = 0.9, etc.)
+        const scale = 1.0 + (level * 0.1)
+        const clampedScale = Math.max(0.25, Math.min(5.0, scale))
+        
+        console.log(`[CachedContentView:${this.id}] setVisualZoomLevel: level=${level}, scale=${clampedScale}, status=${this._status}`)
+        
+        // Apply Device Emulation with new scale - only if ready
+        // For empty/loading views, it will be applied at dom-ready
+        if (this._visualZoomEnabled && this._status === 'ready') {
+            this.applyDeviceEmulation(clampedScale)
+        }
+        
+        // Notify preload for overlay display (safe even if not ready)
+        try {
+            this._view.webContents.send('set-visual-zoom-level', level)
+        } catch (e) {
+            // Ignore errors if webContents is not ready
+        }
     }
     
     /**
-     * Set visual zoom mode flag
+     * Mobile Mode flag - constrains viewport to mobile width
      */
-    setVisualZoomMode(enabled: boolean): void {
+    private _mobileMode: boolean = false
+    
+    /**
+     * Mobile viewport width (pixels)
+     */
+    private static readonly MOBILE_VIEWPORT_WIDTH = 767
+    
+    /**
+     * Apply Device Emulation with specified scale
+     * This enables zoom while preserving touch/pinch-to-zoom capability
+     * Also handles Mobile Mode viewport constraints
+     * 
+     * @param zoomScale - User's zoom level (1.0 = 100%, 1.1 = 110%, etc.)
+     */
+    private applyDeviceEmulation(zoomScale: number): void {
         if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
             return
         }
-        this._view.webContents.send('set-visual-zoom-mode', enabled)
+        
+        const wc = this._view.webContents
+        const bounds = this._view.getBounds()
+        
+        // Get actual view dimensions
+        const actualWidth = bounds.width || 800
+        const actualHeight = bounds.height || 600
+        
+        // Determine viewport size and scale based on mobile mode
+        let viewWidth: number
+        let viewHeight: number
+        let totalScale: number
+        
+        if (this._mobileMode) {
+            // Mobile Mode: Use fixed mobile width
+            // Scale = (actualWidth / mobileWidth) * zoomScale
+            // This makes the 767px viewport fill the actual view width, then applies zoom
+            viewWidth = CachedContentView.MOBILE_VIEWPORT_WIDTH
+            viewHeight = Math.round(actualHeight * (CachedContentView.MOBILE_VIEWPORT_WIDTH / actualWidth))
+            
+            // Calculate scale: first scale mobile viewport to fit actual width, then apply zoom
+            const mobileToActualScale = actualWidth / CachedContentView.MOBILE_VIEWPORT_WIDTH
+            totalScale = mobileToActualScale * zoomScale
+        } else {
+            // Normal mode: Use actual view dimensions, only apply zoom scale
+            viewWidth = actualWidth
+            viewHeight = actualHeight
+            totalScale = zoomScale
+        }
+        
+        // For Visual Zoom with Pinch-to-Zoom support:
+        // - Use "mobile" screenPosition to enable touch events
+        // - Set scale for initial zoom level
+        // - deviceScaleFactor affects how the page renders (1 = normal)
+        const emulationParams = {
+            screenPosition: "mobile" as const,  // Enable touch events for pinch-to-zoom
+            screenSize: { width: viewWidth, height: viewHeight },
+            viewPosition: { x: 0, y: 0 },
+            deviceScaleFactor: 1,
+            viewSize: { width: viewWidth, height: viewHeight },
+            scale: totalScale
+        }
+        
+        console.log(`[CachedContentView:${this.id}] Device Emulation: zoomScale=${zoomScale.toFixed(2)}, totalScale=${totalScale.toFixed(2)}, viewport=${viewWidth}x${viewHeight}, mobileMode=${this._mobileMode}`)
+        wc.enableDeviceEmulation(emulationParams)
+    }
+    
+    /**
+     * Set Mobile Mode (viewport constraint)
+     */
+    setMobileMode(enabled: boolean): void {
+        const wasEnabled = this._mobileMode
+        this._mobileMode = enabled
+        
+        console.log(`[CachedContentView:${this.id}] setMobileMode: ${wasEnabled} -> ${enabled}, status=${this._status}`)
+        
+        if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
+            return
+        }
+        
+        // If visual zoom is enabled and view is ready, re-apply emulation with new viewport
+        if (this._visualZoomEnabled && this._status === 'ready') {
+            const scale = 1.0 + (this._visualZoomLevel * 0.1)
+            this.applyDeviceEmulation(Math.max(0.25, Math.min(5.0, scale)))
+        }
+        
+        // Notify preload about mobile mode change
+        try {
+            this._view.webContents.send('set-mobile-mode', enabled)
+        } catch (e) {
+            // Ignore errors if webContents is not ready
+        }
+    }
+    
+    /**
+     * Get Mobile Mode status
+     */
+    getMobileMode(): boolean {
+        return this._mobileMode
+    }
+    /**
+     * Set visual zoom mode flag and enable/disable Device Emulation
+     * Note: Device Emulation is only applied when content has been loaded (status !== 'empty')
+     */
+    setVisualZoomMode(enabled: boolean): void {
+        const wasEnabled = this._visualZoomEnabled
+        this._visualZoomEnabled = enabled
+        
+        console.log(`[CachedContentView:${this.id}] setVisualZoomMode: ${wasEnabled} -> ${enabled}, status=${this._status}`)
+        
+        // Only apply Device Emulation if view exists and has been used
+        if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
+            return
+        }
+        
+        // Only apply Device Emulation if we have already loaded content
+        // For empty views, it will be applied when content loads via dom-ready
+        if (this._status === 'ready') {
+            if (enabled && !wasEnabled) {
+                // Just enabled - apply current zoom level via Device Emulation
+                const scale = 1.0 + (this._visualZoomLevel * 0.1)
+                this.applyDeviceEmulation(Math.max(0.25, Math.min(5.0, scale)))
+            } else if (!enabled && wasEnabled) {
+                // Just disabled - disable Device Emulation
+                this._view.webContents.disableDeviceEmulation()
+            }
+        }
+        
+        // Notify preload (safe even if no content loaded yet)
+        try {
+            this._view.webContents.send('set-visual-zoom-mode', enabled)
+        } catch (e) {
+            // Ignore errors if webContents is not ready
+        }
     }
     
     /**
@@ -574,6 +734,14 @@ export class CachedContentView {
                 
                 this.setStatus('ready')
                 this.onDomReady?.()
+                
+                // Apply Device Emulation if Visual Zoom is enabled
+                // This must happen after content loads to avoid crashes
+                if (this._visualZoomEnabled) {
+                    const scale = 1.0 + (this._visualZoomLevel * 0.1)
+                    console.log(`[CachedContentView:${this.id}] Applying Visual Zoom on dom-ready: scale=${scale}`)
+                    this.applyDeviceEmulation(Math.max(0.25, Math.min(5.0, scale)))
+                }
                 
                 // Inject necessary scripts
                 this.injectScripts()
