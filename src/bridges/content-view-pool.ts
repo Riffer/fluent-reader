@@ -6,14 +6,6 @@
  */
 import { ipcRenderer } from "electron"
 
-/**
- * Check if Content View Pool is enabled
- * Call this once at startup and cache the result
- */
-export function isPoolEnabled(): Promise<boolean> {
-    return ipcRenderer.invoke("is-content-view-pool-enabled")
-}
-
 export interface ContentViewBounds {
     x: number
     y: number
@@ -59,20 +51,11 @@ export interface PoolStatus {
  * ContentViewPool Bridge
  * 
  * Usage:
- * - isEnabled: Check if pool is enabled (call once at startup)
  * - navigateToArticle: Navigate to an article (instant if cached)
  * - requestPrefetch: Manually request prefetch for an article
  * - setReadingDirection: Inform pool about reading direction
  */
 export const contentViewPoolBridge = {
-    /**
-     * Check if Content View Pool is enabled
-     * Call this once at startup and cache the result
-     */
-    isEnabled: (): Promise<boolean> => {
-        return ipcRenderer.invoke("is-content-view-pool-enabled")
-    },
-    
     /**
      * Navigate to an article
      * Returns immediately if article is cached (instant swap)
@@ -92,6 +75,7 @@ export const contentViewPoolBridge = {
         articleIndex: number,
         listLength: number
     ): Promise<boolean> => {
+        console.log(`[ContentViewPool Bridge] navigateToArticle: ${articleId}, index=${articleIndex}`)
         return ipcRenderer.invoke(
             "cvp-navigate",
             articleId,
@@ -101,6 +85,14 @@ export const contentViewPoolBridge = {
             articleIndex,
             listLength
         )
+    },
+    
+    /**
+     * Navigate with settings (direct URL navigation without prefetch/cache)
+     * Used for HTML content (RSS articles) where caching doesn't apply
+     */
+    navigateWithSettings: (url: string, settings: NavigationSettings): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-navigate-with-settings", url, settings)
     },
     
     /**
@@ -254,6 +246,113 @@ export const contentViewPoolBridge = {
         ipcRenderer.send("cvp-clear")
     },
     
+    // ========== Additional methods for feature parity ==========
+    
+    /**
+     * Go back in history
+     */
+    goBack: (): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-go-back")
+    },
+    
+    /**
+     * Go forward in history
+     */
+    goForward: (): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-go-forward")
+    },
+    
+    /**
+     * Can go back in history?
+     */
+    canGoBack: (): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-can-go-back")
+    },
+    
+    /**
+     * Can go forward in history?
+     */
+    canGoForward: (): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-can-go-forward")
+    },
+    
+    /**
+     * Get zoom factor
+     */
+    getZoomFactor: (): Promise<number> => {
+        return ipcRenderer.invoke("cvp-get-zoom-factor")
+    },
+    
+    /**
+     * Get emulated viewport info (synchronous)
+     */
+    getEmulatedViewportInfo: (): { zoomPercent: number, viewportWidth: number, viewportHeight: number, mobileMode: boolean } => {
+        return ipcRenderer.sendSync("cvp-get-emulated-viewport-info")
+    },
+    
+    /**
+     * Focus active view
+     */
+    focus: (): void => {
+        ipcRenderer.send("cvp-focus")
+    },
+    
+    /**
+     * Set mobile mode
+     */
+    setMobileMode: (enabled: boolean): void => {
+        ipcRenderer.send("cvp-set-mobile-mode", enabled)
+    },
+    
+    /**
+     * Get mobile mode (synchronous)
+     */
+    getMobileMode: (): boolean => {
+        return ipcRenderer.sendSync("cvp-get-mobile-mode")
+    },
+    
+    /**
+     * Load HTML directly
+     */
+    loadHtml: (html: string, baseURL?: string): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-load-html", html, baseURL)
+    },
+    
+    /**
+     * Navigate via JavaScript (SPA-style)
+     */
+    navigateViaJs: (url: string): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-navigate-via-js", url)
+    },
+    
+    /**
+     * Set user agent
+     */
+    setUserAgent: (userAgent: string): void => {
+        ipcRenderer.send("cvp-set-user-agent", userAgent)
+    },
+    
+    /**
+     * Stop loading
+     */
+    stop: (): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-stop")
+    },
+    
+    /**
+     * Capture screen
+     */
+    captureScreen: (): Promise<string | null> => {
+        return ipcRenderer.invoke("cvp-capture-screen")
+    },
+    
+    /**
+     * Recreate active view (for visual zoom toggle)
+     */
+    recreate: (): Promise<boolean> => {
+        return ipcRenderer.invoke("cvp-recreate")
+    },
+    
     // ========== Event Listeners ==========
     
     /**
@@ -286,12 +385,23 @@ export const contentViewPoolBridge = {
     },
     
     /**
+     * Listen for bounds request from main process
+     * Called when the pool needs real bounds from the renderer
+     */
+    onBoundsRequest: (callback: () => void): (() => void) => {
+        const handler = () => callback()
+        ipcRenderer.on("cvp-request-bounds", handler)
+        return () => ipcRenderer.removeListener("cvp-request-bounds", handler)
+    },
+    
+    /**
      * Remove all pool event listeners
      */
     removeAllListeners: (): void => {
         ipcRenderer.removeAllListeners("cvp-navigation-complete")
         ipcRenderer.removeAllListeners("cvp-request-prefetch-info")
         ipcRenderer.removeAllListeners("cvp-error")
+        ipcRenderer.removeAllListeners("cvp-request-bounds")
     }
 }
 

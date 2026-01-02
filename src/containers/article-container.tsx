@@ -42,22 +42,34 @@ const getContextMenuType = (state: RootState) => state.app.contextMenu.type
 const getFeedId = (state: RootState) => state.page.feedId
 const getFeeds = (state: RootState) => state.feeds
 const getItemId = (_state: RootState, props: ArticleContainerProps) => props.itemId
+const getItems = (state: RootState) => state.items
+const getSources = (state: RootState) => state.sources
 
 // Import ContextMenuType for comparison
 import { ContextMenuType } from "../scripts/models/app"
 
 const makeMapStateToProps = () => {
     return createSelector(
-        [getItem, getSource, getLocale, getMenuOpen, getSettingsOpen, getLogMenuOpen, getContextMenuType, getFeedId, getFeeds, getItemId],
-        (item, source, locale, menuOpen, settingsOpen, logMenuOpen, contextMenuType, feedId, feeds, itemId) => {
+        [getItem, getSource, getLocale, getMenuOpen, getSettingsOpen, getLogMenuOpen, getContextMenuType, getFeedId, getFeeds, getItemId, getItems, getSources],
+        (item, source, locale, menuOpen, settingsOpen, logMenuOpen, contextMenuType, feedId, feeds, itemId, items, sources) => {
             // Calculate article position in feed for ContentViewPool
             let articleIndex = -1
             let listLength = 0
+            let articleIds: number[] = []
             
             if (feedId && feeds[feedId]) {
                 const iids = feeds[feedId].iids
                 listLength = iids.length
                 articleIndex = iids.indexOf(itemId)
+                articleIds = iids  // Pass the full list for prefetch
+                
+                // DEBUG: Log article position calculation
+                console.log(`[ArticleContainer] feedId=${feedId}, itemId=${itemId}, articleIndex=${articleIndex}, listLength=${listLength}`)
+                if (articleIndex === -1 && listLength > 0) {
+                    console.warn(`[ArticleContainer] Item ${itemId} NOT FOUND in iids! First 5 iids:`, iids.slice(0, 5))
+                }
+            } else {
+                console.warn(`[ArticleContainer] No feed found for feedId=${feedId}`)
             }
             
             return {
@@ -72,6 +84,10 @@ const makeMapStateToProps = () => {
                 articleIndex: articleIndex,
                 listLength: listLength,
                 feedId: feedId,
+                // For prefetch: access to article list and store data
+                articleIds: articleIds,
+                items: items,
+                sources: sources,
             }
         }
     )

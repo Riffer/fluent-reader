@@ -70,7 +70,7 @@ export class ContentViewPool {
     // === Configuration ===
     private config: PoolConfig = {
         size: 3,
-        prefetchDelay: 400,
+        prefetchDelay: 1,  // Reduced for testing (was 400ms)
         enabled: true
     }
     
@@ -79,12 +79,27 @@ export class ContentViewPool {
     
     // === Bounds ===
     private visibleBounds: ContentViewBounds = { x: 0, y: 0, width: 800, height: 600 }
+    private boundsReceived: boolean = false  // Track if real bounds have been received from renderer
     private isPoolVisible: boolean = false
     
     // === Reading Direction ===
     private readingDirection: ReadingDirection = 'unknown'
     private currentArticleIndex: number = -1
     private articleListLength: number = 0
+    
+    // === Navigation Lock ===
+    // Prevents concurrent navigations - only one navigation can be in flight at a time
+    // Problem: Multiple sources trigger navigation (IPC from ContentView, componentDidUpdate, etc.)
+    // When user presses ArrowRight quickly, multiple navigations can queue up and cause skipping
+    private isNavigationInProgress: boolean = false
+    private navigationLockTimeout: NodeJS.Timeout | null = null
+    private readonly NAVIGATION_LOCK_TIMEOUT_MS = 2000  // Auto-release lock after 2 seconds (safety net)
+    
+    // === Navigation Deduplication (secondary protection) ===
+    // Even with lock, deduplicate same-article requests within short window
+    private lastNavigationArticleId: string | null = null
+    private lastNavigationTime: number = 0
+    private readonly NAVIGATION_DEBOUNCE_MS = 100  // Ignore duplicate navigations within 100ms
     
     // === Prefetch Timer ===
     private prefetchTimer: NodeJS.Timeout | null = null
@@ -93,6 +108,7 @@ export class ContentViewPool {
     // === Zoom State ===
     private cssZoomLevel: number = 0
     private visualZoomEnabled: boolean = false
+    private mobileMode: boolean = false
     
     // === Singleton ===
     private static instance: ContentViewPool | null = null
@@ -144,6 +160,7 @@ export class ContentViewPool {
     
     /**
      * Create a view and setup all event handlers
+     * Also applies current bounds so the view is correctly positioned
      */
     private createViewWithEvents(view: CachedContentView): void {
         if (!this.parentWindow) {
@@ -154,7 +171,44 @@ export class ContentViewPool {
         view.create(this.parentWindow)
         this.setupViewKeyboardEvents(view)
         this.setupViewContextMenu(view)
+        this.setupFocusGuard(view)  // Prevent background views from stealing focus
         this.updateWebContentsMapping()
+        
+        // Apply current bounds to the newly created view
+        view.setBounds(this.visibleBounds)
+    }
+    
+    /**
+     * Setup focus guard: When a background view fires dom-ready,
+     * ensure focus stays on the active view.
+     * 
+     * Problem: Electron may internally shift focus when a WebContentsView
+     * completes loading (dom-ready). This causes the active view to lose
+     * keyboard input.
+     * 
+     * Solution: Listen to dom-ready on all views and refocus the active view
+     * if a background view triggered the event.
+     */
+    private setupFocusGuard(view: CachedContentView): void {
+        const wc = view.getWebContents()
+        if (!wc) return
+        
+        wc.on('dom-ready', () => {
+            // If THIS view is NOT active but another view IS active,
+            // refocus the active view to prevent focus theft
+            if (!view.isActive && this.activeViewId) {
+                const activeView = this.getActiveView()
+                if (activeView && activeView.isReady) {
+                    console.log(`[ContentViewPool] Focus guard: Background ${view.id} fired dom-ready, refocusing active ${activeView.id}`)
+                    // Small delay to ensure Electron has finished its internal focus handling
+                    setTimeout(() => {
+                        if (activeView.isActive) {
+                            activeView.focus()
+                        }
+                    }, 10)
+                }
+            }
+        })
     }
     
     /**
@@ -165,6 +219,15 @@ export class ContentViewPool {
         if (!wc) return
         
         wc.on("before-input-event", (event, input: Input) => {
+            // IMPORTANT: Only process keyDown events, NOT keyUp!
+            // When user presses ArrowRight:
+            // 1. keyDown fires on view-0 → navigation triggers → view-1 becomes active
+            // 2. keyUp fires on view-1 (now active!) → would trigger ANOTHER navigation!
+            // This causes article skipping.
+            if (input.type !== 'keyDown') {
+                return
+            }
+            
             // Only forward events from the active view
             if (!view.isActive) return
             
@@ -174,6 +237,7 @@ export class ContentViewPool {
             }
             
             // Forward to renderer for processing
+            console.log(`[ContentViewPool] Forwarding ${input.key} from ${view.id} to renderer`)
             this.sendToRenderer("content-view-input", input)
         })
     }
@@ -400,6 +464,17 @@ export class ContentViewPool {
     // ========== Navigation ==========
     
     /**
+     * Release the navigation lock and clear timeout
+     */
+    private releaseNavigationLock(): void {
+        this.isNavigationInProgress = false
+        if (this.navigationLockTimeout) {
+            clearTimeout(this.navigationLockTimeout)
+            this.navigationLockTimeout = null
+        }
+    }
+    
+    /**
      * Navigate to an article
      * Returns immediately if article is already cached (instant swap)
      */
@@ -411,6 +486,35 @@ export class ContentViewPool {
         articleIndex: number,
         listLength: number
     ): Promise<boolean> {
+        // === Navigation Lock Check ===
+        // Only one navigation can be in flight at a time
+        // This prevents article skipping when multiple sources trigger navigation
+        if (this.isNavigationInProgress) {
+            console.log(`[ContentViewPool] Navigation BLOCKED (lock active) - request for ${articleId} ignored`)
+            return false  // Return false to signal navigation was not performed
+        }
+        
+        // === Navigation Deduplication (secondary) ===
+        // Even with lock, deduplicate same-article requests within short window
+        const now = Date.now()
+        if (articleId === this.lastNavigationArticleId && 
+            now - this.lastNavigationTime < this.NAVIGATION_DEBOUNCE_MS) {
+            console.log(`[ContentViewPool] Navigation DEDUPLICATED - same article ${articleId} within ${this.NAVIGATION_DEBOUNCE_MS}ms`)
+            return true  // Return success but don't actually navigate again
+        }
+        
+        // === Acquire Navigation Lock ===
+        this.isNavigationInProgress = true
+        // Safety timeout - release lock if navigation takes too long
+        this.navigationLockTimeout = setTimeout(() => {
+            console.log(`[ContentViewPool] Navigation lock auto-released (timeout)`)
+            this.releaseNavigationLock()
+        }, this.NAVIGATION_LOCK_TIMEOUT_MS)
+        
+        // Track this navigation for deduplication
+        this.lastNavigationArticleId = articleId
+        this.lastNavigationTime = now
+        
         // Cancel any pending prefetch
         this.cancelPrefetch()
         
@@ -433,30 +537,51 @@ export class ContentViewPool {
             // Schedule prefetch for next articles
             this.schedulePrefetch()
             
+            // Release navigation lock - instant swap is complete
+            this.releaseNavigationLock()
+            
             return true
         }
         
         // Need to load - find or create a view
         const view = cachedView ?? this.getOrCreateView(articleId)
         
-        // Deactivate current view
+        // Deactivate current view - hide it
         const currentActive = this.getActiveView()
-        if (currentActive) {
+        if (currentActive && currentActive !== view) {
+            console.log(`[ContentViewPool] Deactivating and hiding ${currentActive.id}`)
             currentActive.setActive(false)
-            currentActive.hide()
+            currentActive.setVisible(false)  // Hide using native visibility
         }
         
-        // Set as active (but not visible yet)
+        // Set as active (but not visible yet - will show after load)
         this.activeViewId = view.id
         view.setActive(true)
+        
+        // Apply bounds immediately
+        view.setBounds(this.visibleBounds)
         
         // Load the article
         try {
             await view.load(url, articleId, feedId, settings, isMobileUserAgentEnabled())
             
-            // Show view when ready
-            if (this.isPoolVisible) {
+            // IMPORTANT: Check if this view is still the active one!
+            // User may have navigated to another article while we were loading
+            if (this.activeViewId !== view.id) {
+                console.log(`[ContentViewPool] Load complete for ${view.id}, but ${this.activeViewId} is now active - not showing`)
+                // Still release lock - navigation completed (just not shown)
+                this.releaseNavigationLock()
+                return true  // Load was successful, just not shown
+            }
+            
+            // Show view when ready (only if still active AND bounds are available)
+            if (this.isPoolVisible && this.boundsReceived) {
                 view.setBounds(this.visibleBounds)
+                view.setVisible(true)  // Show using native visibility
+                view.focus()  // Single focus call after visibility is set
+                console.log(`[ContentViewPool] Load complete, showing ${view.id}`)
+            } else if (this.isPoolVisible) {
+                console.log(`[ContentViewPool] Load complete for ${view.id}, waiting for bounds`)
             }
             
             // Notify renderer
@@ -465,10 +590,17 @@ export class ContentViewPool {
             // Schedule prefetch
             this.schedulePrefetch()
             
+            // Release navigation lock - load complete
+            this.releaseNavigationLock()
+            
             return true
         } catch (err) {
             console.error(`[ContentViewPool] Navigation failed:`, err)
             this.sendToRenderer('cvp-error', articleId, String(err))
+            
+            // Release navigation lock even on error
+            this.releaseNavigationLock()
+            
             return false
         }
     }
@@ -550,17 +682,28 @@ export class ContentViewPool {
      * Schedule prefetch after active view is ready
      */
     private schedulePrefetch(): void {
-        if (!this.config.enabled) return
+        console.log(`[ContentViewPool] schedulePrefetch() called, enabled=${this.config.enabled}`)
+        if (!this.config.enabled) {
+            console.log(`[ContentViewPool] Prefetch disabled, skipping`)
+            return
+        }
         
         // Cancel any existing timer
         this.cancelPrefetch()
         
         // Wait for active view to be ready
         const activeView = this.getActiveView()
-        if (!activeView) return
+        if (!activeView) {
+            console.log(`[ContentViewPool] No active view, skipping prefetch`)
+            return
+        }
+        
+        console.log(`[ContentViewPool] Active view ${activeView.id} isReady=${activeView.isReady}`)
         
         const doPrefetch = () => {
+            console.log(`[ContentViewPool] Starting prefetch timer (${this.config.prefetchDelay}ms)`)
             this.prefetchTimer = setTimeout(() => {
+                console.log(`[ContentViewPool] Prefetch timer fired, executing...`)
                 this.prefetchTimer = null
                 this.executePrefetch()
             }, this.config.prefetchDelay)
@@ -568,10 +711,13 @@ export class ContentViewPool {
         
         if (activeView.isReady) {
             // Already ready - schedule with delay
+            console.log(`[ContentViewPool] View already ready, scheduling prefetch`)
             doPrefetch()
         } else {
             // Wait for ready event
+            console.log(`[ContentViewPool] View not ready, waiting for dom-ready`)
             activeView.setOnDomReady(() => {
+                console.log(`[ContentViewPool] dom-ready received, scheduling prefetch`)
                 activeView.setOnDomReady(null)  // One-shot
                 doPrefetch()
             })
@@ -593,7 +739,11 @@ export class ContentViewPool {
      * Execute prefetch based on reading direction
      */
     private executePrefetch(): void {
-        if (this.currentArticleIndex < 0) return
+        console.log(`[ContentViewPool] executePrefetch() - index=${this.currentArticleIndex}, listLength=${this.articleListLength}, direction=${this.readingDirection}`)
+        if (this.currentArticleIndex < 0) {
+            console.log(`[ContentViewPool] No current article index, skipping prefetch`)
+            return
+        }
         
         // Determine what to prefetch based on direction
         const targets = this.determinePrefetchTargets()
@@ -603,9 +753,11 @@ export class ContentViewPool {
         // Request prefetch info from renderer
         // The renderer knows the article URLs
         if (targets.primary !== null) {
+            console.log(`[ContentViewPool] Requesting prefetch info for primary target index ${targets.primary}`)
             this.sendToRenderer('cvp-request-prefetch-info', targets.primary)
         }
         if (targets.secondary !== null) {
+            console.log(`[ContentViewPool] Requesting prefetch info for secondary target index ${targets.secondary}`)
             this.sendToRenderer('cvp-request-prefetch-info', targets.secondary)
         }
     }
@@ -727,20 +879,26 @@ export class ContentViewPool {
      * Activate a view (make it the visible one)
      */
     private activateView(view: CachedContentView): void {
-        // Deactivate current
+        // Deactivate current - hide it
         const current = this.getActiveView()
         if (current && current !== view) {
             current.setActive(false)
-            current.hide()
+            current.setVisible(false)  // Hide using native visibility
         }
         
         // Activate new
         this.activeViewId = view.id
         view.setActive(true)
         
-        // Show if pool is visible
-        if (this.isPoolVisible) {
+        // Apply bounds and show if pool is visible AND we have real bounds
+        if (this.isPoolVisible && this.boundsReceived) {
             view.setBounds(this.visibleBounds)
+            view.setVisible(true)
+            view.focus()  // Single focus call after visibility is set
+            console.log(`[ContentViewPool] Activated ${view.id} - visible with bounds:`, this.visibleBounds)
+        } else if (this.isPoolVisible) {
+            // Pool is visible but no bounds yet - view will be shown when bounds arrive
+            console.log(`[ContentViewPool] Activated ${view.id} - waiting for bounds before showing`)
         }
         
         // Notify renderer
@@ -760,36 +918,79 @@ export class ContentViewPool {
         }
     }
     
-    // ========== Visibility ==========
+    // ========== Bounds & Visibility ==========
     
     /**
-     * Set the visible bounds for the active view
+     * Set the visible bounds for ALL views in the pool
+     * 
+     * All views share the same bounds - only visibility differs.
+     * This is called by ResizeObserver and window resize listeners.
      */
     setBounds(bounds: ContentViewBounds): void {
+        // Basic validation - width/height must be positive
+        if (bounds.width <= 0 || bounds.height <= 0) {
+            return
+        }
+        
+        // Check if these are "real" bounds (not default 0,0)
+        // Real bounds from the renderer will have x > 0 (because of the navigation panel)
+        // or at minimum be different from our default 800x600
+        const isRealBounds = bounds.x > 0 || bounds.y > 0 || 
+                             bounds.width !== 800 || bounds.height !== 600
+        
+        const firstRealBounds = !this.boundsReceived && isRealBounds
+        
+        // Store bounds
         this.visibleBounds = bounds
         
-        // Update active view
-        if (this.isPoolVisible) {
-            const active = this.getActiveView()
-            if (active) {
-                active.setBounds(bounds)
+        // Only mark as received if real bounds
+        if (isRealBounds) {
+            this.boundsReceived = true
+        }
+        
+        console.log(`[ContentViewPool] setBounds:`, bounds, `real=${isRealBounds}, boundsReceived=${this.boundsReceived}`)
+        
+        // Apply bounds to ALL views
+        for (const view of this.views) {
+            view.setBounds(bounds)
+        }
+        
+        // If we have an active view that's waiting for real bounds, show it now
+        const active = this.getActiveView()
+        if (active && this.isPoolVisible && isRealBounds) {
+            if (firstRealBounds) {
+                console.log(`[ContentViewPool] First real bounds received! Showing active view ${active.id} at:`, bounds)
             }
+            active.setBounds(bounds)
+            active.setVisible(true)
+            active.focus()
         }
     }
     
     /**
-     * Show/hide the pool
+     * Show/hide the pool (controls visibility of active view)
      */
     setVisible(visible: boolean): void {
+        const wasVisible = this.isPoolVisible
         this.isPoolVisible = visible
         
         const active = this.getActiveView()
         if (active) {
             if (visible) {
-                active.setBounds(this.visibleBounds)
+                // Only show if we have real bounds, otherwise wait for setBounds
+                if (this.boundsReceived) {
+                    active.setBounds(this.visibleBounds)
+                    active.setVisible(true)
+                    active.focus()
+                    console.log(`[ContentViewPool] Showing ${active.id} at bounds:`, this.visibleBounds)
+                } else {
+                    console.log(`[ContentViewPool] setVisible(true) - waiting for bounds before showing ${active.id}`)
+                }
             } else {
-                active.hide()
+                active.setVisible(false)
             }
+        } else if (visible && !wasVisible) {
+            console.log(`[ContentViewPool] setVisible(true) - no active view yet`)
         }
     }
     
@@ -799,20 +1000,87 @@ export class ContentViewPool {
      * Setup IPC handlers for pool operations
      */
     private setupIpcHandlers(): void {
+        console.log('[ContentViewPool] Setting up IPC handlers...')
+        
+        // =====================================================
+        // Legacy channel handlers (for code paths that haven't migrated yet)
+        // These forward to the Pool implementation
+        // =====================================================
+        
+        // Legacy: content-view-navigate-with-settings
+        ipcMain.handle("content-view-navigate-with-settings", async (event, url: string, settings: NavigationSettings) => {
+            console.log('[ContentViewPool] Legacy channel content-view-navigate-with-settings forwarded to Pool')
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (!wc || wc.isDestroyed()) {
+                console.error("[ContentViewPool] Cannot navigate - no active view")
+                return false
+            }
+            
+            try {
+                // Apply settings
+                this.visualZoomEnabled = settings.visualZoom
+                this.mobileMode = settings.mobileMode
+                const clampedZoom = Math.max(0.25, Math.min(5.0, settings.zoomFactor))
+                this.cssZoomLevel = (clampedZoom - 1.0) / 0.1
+                
+                // Apply mobile user agent if enabled
+                const mobileUA = "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36"
+                if (isMobileUserAgentEnabled()) {
+                    wc.setUserAgent(mobileUA)
+                } else {
+                    wc.setUserAgent("")
+                }
+                
+                // Navigate
+                await wc.loadURL(url)
+                return true
+            } catch (e) {
+                console.error("[ContentViewPool] navigateWithSettings error:", e)
+                return false
+            }
+        })
+        
+        // Legacy: content-view-close-devtools
+        ipcMain.handle("content-view-close-devtools", () => {
+            console.log('[ContentViewPool] Legacy channel content-view-close-devtools forwarded to Pool')
+            const active = this.getActiveView()
+            active?.getWebContents()?.closeDevTools()
+        })
+        
+        // Legacy: get-css-zoom-level (sync - used by content-preload.js)
+        ipcMain.on("get-css-zoom-level", (event) => {
+            event.returnValue = this.cssZoomLevel
+        })
+        
+        // Legacy: get-mobile-mode (sync - used by content-preload.js)
+        ipcMain.on("get-mobile-mode", (event) => {
+            event.returnValue = this.mobileMode
+        })
+        
+        // =====================================================
+        // Pool-specific handlers (cvp-* prefix)
+        // =====================================================
+        
         // Navigate to article
         ipcMain.handle('cvp-navigate', async (event, articleId, url, feedId, settings, index, listLength) => {
+            console.log(`[ContentViewPool] IPC cvp-navigate received: articleId=${articleId}, index=${index}`)
             return this.navigateToArticle(articleId, url, feedId, settings, index, listLength)
         })
         
         // Prefetch article
         ipcMain.on('cvp-prefetch', (event, articleId, url, feedId, settings) => {
+            console.log(`[ContentViewPool] IPC cvp-prefetch received: articleId=${articleId}`)
             this.prefetch(articleId, url, feedId, settings)
         })
         
         // Prefetch info response from renderer
         ipcMain.on('cvp-prefetch-info', (event, articleIndex, articleId, url, feedId, settings) => {
+            console.log(`[ContentViewPool] IPC cvp-prefetch-info received: index=${articleIndex}, articleId=${articleId}, url=${url?.substring(0, 50)}...`)
             if (articleId && url) {
                 this.prefetch(articleId, url, feedId, settings)
+            } else {
+                console.log(`[ContentViewPool] Prefetch info incomplete, skipping`)
             }
         })
         
@@ -923,6 +1191,204 @@ export class ContentViewPool {
             if (active) {
                 active.getWebContents()?.loadURL("about:blank")
             }
+        })
+        
+        // === Additional handlers for feature parity with ContentViewManager ===
+        
+        // Go back in history
+        ipcMain.handle("cvp-go-back", () => {
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (wc?.canGoBack()) {
+                wc.goBack()
+                return true
+            }
+            return false
+        })
+        
+        // Go forward in history
+        ipcMain.handle("cvp-go-forward", () => {
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (wc?.canGoForward()) {
+                wc.goForward()
+                return true
+            }
+            return false
+        })
+        
+        // Can go back?
+        ipcMain.handle("cvp-can-go-back", () => {
+            const active = this.getActiveView()
+            return active?.getWebContents()?.canGoBack() ?? false
+        })
+        
+        // Can go forward?
+        ipcMain.handle("cvp-can-go-forward", () => {
+            const active = this.getActiveView()
+            return active?.getWebContents()?.canGoForward() ?? false
+        })
+        
+        // Get zoom factor
+        ipcMain.handle("cvp-get-zoom-factor", () => {
+            return 1.0 + (this.cssZoomLevel * 0.1)
+        })
+        
+        // Get emulated viewport info
+        ipcMain.on("cvp-get-emulated-viewport-info", (event) => {
+            const factor = 1.0 + (this.cssZoomLevel * 0.1)
+            event.returnValue = {
+                zoomPercent: Math.round(factor * 100),
+                viewportWidth: Math.round(1440 / factor),
+                viewportHeight: Math.round(900 / factor),
+                mobileMode: this.mobileMode
+            }
+        })
+        
+        // Legacy channel for settings.ts compatibility
+        ipcMain.on("get-emulated-viewport-info", (event) => {
+            const factor = 1.0 + (this.cssZoomLevel * 0.1)
+            event.returnValue = {
+                zoomPercent: Math.round(factor * 100),
+                viewportWidth: Math.round(1440 / factor),
+                viewportHeight: Math.round(900 / factor),
+                scale: factor,
+                mobileMode: this.mobileMode
+            }
+        })
+        
+        // Focus active view
+        ipcMain.on("cvp-focus", () => {
+            const active = this.getActiveView()
+            active?.focus()
+        })
+        
+        // Set mobile mode
+        ipcMain.on("cvp-set-mobile-mode", (event, enabled: boolean) => {
+            this.mobileMode = enabled
+        })
+        
+        // Get mobile mode
+        ipcMain.on("cvp-get-mobile-mode", (event) => {
+            event.returnValue = this.mobileMode
+        })
+        
+        // Navigate with settings (direct URL navigation without prefetch/cache)
+        // Used for HTML content (RSS articles) where caching doesn't apply
+        ipcMain.handle("cvp-navigate-with-settings", async (event, url: string, settings: NavigationSettings) => {
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (!wc || wc.isDestroyed()) {
+                console.error("[ContentViewPool] Cannot navigate - no active view")
+                return false
+            }
+            
+            try {
+                // Apply settings
+                this.visualZoomEnabled = settings.visualZoom
+                this.mobileMode = settings.mobileMode
+                // Convert zoomFactor to cssZoomLevel (0 = 100%, 1 = 110%, -1 = 90%, etc.)
+                const clampedZoom = Math.max(0.25, Math.min(5.0, settings.zoomFactor))
+                this.cssZoomLevel = (clampedZoom - 1.0) / 0.1
+                
+                // Apply mobile user agent if enabled
+                const mobileUA = "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36"
+                if (isMobileUserAgentEnabled()) {
+                    wc.setUserAgent(mobileUA)
+                } else {
+                    wc.setUserAgent("")
+                }
+                
+                // Navigate
+                await wc.loadURL(url)
+                return true
+            } catch (e) {
+                console.error("[ContentViewPool] navigateWithSettings error:", e)
+                return false
+            }
+        })
+        
+        // Load HTML directly
+        ipcMain.handle("cvp-load-html", async (event, html: string, baseURL?: string) => {
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (wc && !wc.isDestroyed()) {
+                await wc.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+                return true
+            }
+            return false
+        })
+        
+        // Navigate via JS (for SPA-style navigation)
+        ipcMain.handle("cvp-navigate-via-js", async (event, url: string) => {
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (wc && !wc.isDestroyed()) {
+                await wc.executeJavaScript(`window.location.href = ${JSON.stringify(url)}`)
+                return true
+            }
+            return false
+        })
+        
+        // Set user agent
+        ipcMain.on("cvp-set-user-agent", (event, userAgent: string) => {
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (wc && !wc.isDestroyed()) {
+                wc.setUserAgent(userAgent)
+            }
+        })
+        
+        // Stop loading
+        ipcMain.handle("cvp-stop", () => {
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (wc && !wc.isDestroyed()) {
+                wc.stop()
+                return true
+            }
+            return false
+        })
+        
+        // JS dialog forwarding (from content-preload)
+        ipcMain.on("cvp-js-dialog", (event, data: { type: string, message: string, defaultValue?: string }) => {
+            // Forward to main window for logging
+            if (this.parentWindow && !this.parentWindow.isDestroyed()) {
+                this.parentWindow.webContents.send("content-view-js-dialog", data)
+            }
+        })
+        
+        // Capture screen
+        ipcMain.handle("cvp-capture-screen", async () => {
+            const active = this.getActiveView()
+            const wc = active?.getWebContents()
+            if (wc && !wc.isDestroyed()) {
+                const image = await wc.capturePage()
+                return image.toDataURL()
+            }
+            return null
+        })
+        
+        // Recreate active view (for visual zoom toggle)
+        ipcMain.handle("cvp-recreate", async () => {
+            const active = this.getActiveView()
+            if (active) {
+                const articleId = active.articleId
+                const url = active.getWebContents()?.getURL()
+                if (articleId && url) {
+                    // Recycle and reload
+                    active.recycle()
+                    this.createViewWithEvents(active)
+                    await active.load(url, articleId, active.feedId, {
+                        zoomFactor: 1.0 + (this.cssZoomLevel * 0.1),
+                        visualZoom: this.visualZoomEnabled,
+                        mobileMode: this.mobileMode,
+                        showZoomOverlay: false
+                    }, isMobileUserAgentEnabled())
+                    return true
+                }
+            }
+            return false
         })
     }
     

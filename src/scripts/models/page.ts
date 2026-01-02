@@ -302,14 +302,29 @@ export const toggleSearch = (): AppThunk => {
     }
 }
 
+// === Navigation Debounce ===
+// Simple "deaf period" after each navigation to prevent rapid-fire skipping
+// ANY navigation within the debounce window is blocked, regardless of target
+let lastNavigationTime = 0
+const NAVIGATION_DEBOUNCE_MS = 200  // Block ALL navigations for 200ms after each navigation
+
 export function showOffsetItem(offset: number): AppThunk {
     return (dispatch, getState) => {
+        // === Simple Debounce: Block ANY navigation within the deaf period ===
+        const now = Date.now()
+        if (now - lastNavigationTime < NAVIGATION_DEBOUNCE_MS) {
+            console.log(`[showOffsetItem] BLOCKED - within ${NAVIGATION_DEBOUNCE_MS}ms deaf period (${now - lastNavigationTime}ms since last)`)
+            return
+        }
+        
         let state = getState()
         if (!state.page.itemFromFeed) return
         let [itemId, feedId] = [state.page.itemId, state.page.feedId]
         let feed = state.feeds[feedId]
         let iids = feed.iids
         let itemIndex = iids.indexOf(itemId)
+        
+        // Calculate target index
         let newIndex = itemIndex + offset
         if (itemIndex < 0) {
             let item = state.items[itemId]
@@ -328,6 +343,12 @@ export function showOffsetItem(offset: number): AppThunk {
                 newIndex = offset - 1
             }
         }
+        
+        console.log(`[showOffsetItem] Navigation: index ${itemIndex} → ${newIndex} (offset ${offset})`)
+        
+        // Mark navigation time BEFORE dispatch to block any rapid follow-ups
+        lastNavigationTime = now
+        
         if (newIndex >= 0) {
             if (newIndex < iids.length) {
                 let item = state.items[iids[newIndex]]

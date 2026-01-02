@@ -14,17 +14,8 @@ import {
     extractHost,
     listSavedHosts
 } from "./cookie-persist"
-import { getContentViewManager, destroyContentViewManager } from "./content-view-manager"
+// ContentViewPool is now the only implementation
 import { initializeContentViewPool, destroyContentViewPool, getContentViewPool } from "./content-view-pool"
-
-// Feature flag for Content View Pool (prefetching)
-// Set to true to enable the new pool-based article view with prefetching
-export const USE_CONTENT_VIEW_POOL = true
-
-// Export getter for bridge access
-export function isContentViewPoolEnabled(): boolean {
-    return USE_CONTENT_VIEW_POOL
-}
 
 /**
  * Set up cookies to bypass consent dialogs and age gates
@@ -105,11 +96,8 @@ export class WindowManager {
 
         // Close database cleanly on app quit
         app.on("before-quit", () => {
-            // Destroy content view pool and manager first
-            if (USE_CONTENT_VIEW_POOL) {
-                destroyContentViewPool()
-            }
-            destroyContentViewManager()
+            // Destroy content view pool
+            destroyContentViewPool()
             closeDatabase()
         })
     }
@@ -139,11 +127,6 @@ export class WindowManager {
                     this.mainWindow.webContents.openDevTools()
                 }
             }
-        })
-        
-        // Check if Content View Pool is enabled
-        ipcMain.handle("is-content-view-pool-enabled", () => {
-            return USE_CONTENT_VIEW_POOL
         })
 
         // Stores which webContentsIds have emulation already enabled
@@ -318,15 +301,9 @@ export class WindowManager {
                 this.mainWindow.focus()
                 if (!app.isPackaged) this.mainWindow.webContents.openDevTools()
                 
-                // Initialize ContentViewManager after window is ready
-                const contentViewManager = getContentViewManager()
-                contentViewManager.initialize(this.mainWindow)
-                
-                // Initialize ContentViewPool (parallel for testing)
-                if (USE_CONTENT_VIEW_POOL) {
-                    console.log('[WindowManager] Initializing ContentViewPool...')
-                    initializeContentViewPool(this.mainWindow)
-                }
+                // Initialize ContentViewPool
+                console.log('[WindowManager] Initializing ContentViewPool (Pool mode)...')
+                initializeContentViewPool(this.mainWindow)
             })
             this.mainWindow.loadFile(
                 (app.isPackaged ? "dist/" : "") + "index.html"
@@ -360,12 +337,9 @@ export class WindowManager {
                 }
             })
             
-            // Cleanup content view manager when window closes
+            // Cleanup content view pool when window closes
             this.mainWindow.on("closed", () => {
-                if (USE_CONTENT_VIEW_POOL) {
-                    destroyContentViewPool()
-                }
-                destroyContentViewManager()
+                destroyContentViewPool()
             })
         }
     }

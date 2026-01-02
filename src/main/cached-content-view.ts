@@ -85,8 +85,27 @@ export class CachedContentView {
         )
     }
     
+    // === Debug Background Colors (for visual differentiation) ===
+    private static readonly DEBUG_COLORS: string[] = [
+        '#FF6B6B',  // Red for view-0
+        '#4ECDC4',  // Green/Teal for view-1  
+        '#FFE66D',  // Yellow for view-2
+        '#95E1D3',  // Mint for view-3 (if needed)
+        '#F38181',  // Coral for view-4 (if needed)
+    ]
+    
     constructor(id: string) {
         this.id = id
+    }
+    
+    /**
+     * Get debug background color based on view ID
+     */
+    private getDebugBackgroundColor(): string {
+        // Extract numeric index from id like "view-0", "view-1", etc.
+        const match = this.id.match(/view-(\d+)/)
+        const index = match ? parseInt(match[1], 10) : 0
+        return CachedContentView.DEBUG_COLORS[index % CachedContentView.DEBUG_COLORS.length]
     }
     
     // ========== Getters ==========
@@ -195,11 +214,14 @@ export class CachedContentView {
                 }
             })
             
-            // Set background color to prevent white flash
-            this._view.setBackgroundColor('#00000000')  // Transparent
+            // Set debug background color for visual differentiation of views
+            // Each view gets a distinct color: red, green, yellow
+            const debugColor = this.getDebugBackgroundColor()
+            this._view.setBackgroundColor(debugColor)
+            console.log(`[CachedContentView:${this.id}] Background color set to ${debugColor}`)
             
-            // Start hidden (off-screen)
-            this._view.setBounds({ x: -10000, y: -10000, width: 800, height: 600 })
+            // Start hidden (using native visibility)
+            this._view.setVisible(false)
             
             // Add to parent window
             if (parentWindow && !parentWindow.isDestroyed()) {
@@ -311,18 +333,69 @@ export class CachedContentView {
         
         console.log(`[CachedContentView:${this.id}] Loading: ${articleId} (${url.substring(0, 50)}...)`)
         
-        // Start navigation
-        try {
-            await this._view.webContents.loadURL(url)
-        } catch (err: any) {
-            // Ignore aborted navigations (user navigated away)
-            if (err.code !== "ERR_ABORTED") {
-                console.error(`[CachedContentView:${this.id}] Load error:`, err)
-                this._loadError = err
-                this.setStatus('error')
-                this.onLoadError?.(err)
+        // Start navigation and wait for dom-ready
+        // loadURL resolves when navigation starts, but we need to wait for dom-ready
+        // to ensure the page is actually rendered and ready
+        return new Promise<void>((resolve, reject) => {
+            const wc = this._view!.webContents
+            
+            // Timeout after 30 seconds
+            const timeout = setTimeout(() => {
+                console.warn(`[CachedContentView:${this.id}] Load timeout after 30s`)
+                cleanup()
+                // Resolve anyway - partial content is better than nothing
+                resolve()
+            }, 30000)
+            
+            // Handler for dom-ready
+            const onDomReady = () => {
+                console.log(`[CachedContentView:${this.id}] dom-ready received in load()`)
+                cleanup()
+                resolve()
             }
-        }
+            
+            // Handler for load failure
+            const onDidFailLoad = (event: Electron.Event, errorCode: number, errorDescription: string, validatedURL: string, isMainFrame: boolean) => {
+                if (isMainFrame && errorCode !== -3) {  // -3 = ERR_ABORTED
+                    cleanup()
+                    const err = new Error(`${errorDescription} (${errorCode})`)
+                    this._loadError = err
+                    this.setStatus('error')
+                    this.onLoadError?.(err)
+                    reject(err)
+                }
+            }
+            
+            // Cleanup function
+            const cleanup = () => {
+                clearTimeout(timeout)
+                wc.removeListener('dom-ready', onDomReady)
+                wc.removeListener('did-fail-load', onDidFailLoad)
+            }
+            
+            // Register listeners
+            wc.once('dom-ready', onDomReady)
+            wc.on('did-fail-load', onDidFailLoad)
+            
+            // Start the navigation
+            wc.loadURL(url).catch((err: any) => {
+                // Ignore aborted navigations (user navigated away)
+                // ERR_ABORTED can come as err.code === "ERR_ABORTED" or err.errno === -3
+                const isAborted = err.code === "ERR_ABORTED" || err.errno === -3
+                if (!isAborted) {
+                    console.error(`[CachedContentView:${this.id}] Load error:`, err)
+                    cleanup()
+                    this._loadError = err
+                    this.setStatus('error')
+                    this.onLoadError?.(err)
+                    reject(err)
+                } else {
+                    // Aborted - clean up silently
+                    cleanup()
+                    resolve()  // Resolve instead of reject - aborted is not an error
+                }
+            })
+        })
     }
     
     // ========== Activity State ==========
@@ -345,10 +418,10 @@ export class CachedContentView {
         console.log(`[CachedContentView:${this.id}] Active: ${active}`)
     }
     
-    // ========== Bounds ==========
+    // ========== Visibility & Bounds ==========
     
     /**
-     * Set the bounds of this view (for showing/hiding)
+     * Set the bounds of this view
      */
     setBounds(bounds: { x: number, y: number, width: number, height: number }): void {
         if (this._view) {
@@ -357,10 +430,39 @@ export class CachedContentView {
     }
     
     /**
-     * Hide this view (move off-screen)
+     * Show or hide this view using native visibility
+     * This is cleaner than moving off-screen with setBounds
+     */
+    setVisible(visible: boolean): void {
+        if (this._view) {
+            console.log(`[CachedContentView:${this.id}] setVisible(${visible})`)
+            this._view.setVisible(visible)
+        }
+    }
+    
+    /**
+     * Focus this view's webContents
+     * Important for keyboard input to be captured
+     */
+    focus(): void {
+        if (this._view?.webContents && !this._view.webContents.isDestroyed()) {
+            this._view.webContents.focus()
+            console.log(`[CachedContentView:${this.id}] focused`)
+        }
+    }
+    
+    /**
+     * Hide this view (using native visibility)
      */
     hide(): void {
-        this.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
+        this.setVisible(false)
+    }
+    
+    /**
+     * Show this view (using native visibility)
+     */
+    show(): void {
+        this.setVisible(true)
     }
     
     // ========== WebContents Access ==========

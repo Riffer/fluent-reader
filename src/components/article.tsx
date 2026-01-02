@@ -70,6 +70,10 @@ type ArticleProps = {
     articleIndex?: number
     listLength?: number
     feedId?: string
+    // For prefetch: access to article list and store data
+    articleIds?: number[]
+    items?: { [id: number]: RSSItem }
+    sources?: { [id: string]: RSSSource }
 }
 
 type ArticleState = {
@@ -96,7 +100,6 @@ type ArticleState = {
     menuBlurScreenshot: string | null  // Screenshot for blur placeholder when menu is open
     isNavigatingWithVisualZoom: boolean  // Show loading spinner during Visual Zoom navigation
     videoFullscreen: boolean  // Video playing in fullscreen mode (ContentView fills window)
-    useContentViewPool: boolean  // Feature flag: Use Pool for prefetching
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -121,6 +124,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     // Centralized overlay state management - replaces fragmented tracking
     private overlayStateManager = new OverlayStateManager()
     private overlayVisibilityListener: ((e: OverlayVisibilityEvent) => void) | null = null
+    
+    // Navigation Lock: Prevents rapid-fire navigation during async operations
+    // Problem: Arrow key events can queue up during article transitions, causing skips
+    // Solution: Lock navigation during transitions, release after navigation completes
+    private isNavigating: boolean = false
+    private navigationTimeout: NodeJS.Timeout | null = null
     
     // Unified Key Debounce: Prevents duplicate key processing from multiple sources
     // Problem 1: OS sends keydown to BOTH BrowserWindow (document.keydown) AND
@@ -155,6 +164,32 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private markKeyProcessed(key: string): void {
         this.lastProcessedKey = key
         this.lastProcessedKeyTime = Date.now()
+    }
+    
+    // Navigation lock management
+    private setNavigationLock(locked: boolean): void {
+        this.isNavigating = locked
+        
+        // Clear any existing timeout
+        if (this.navigationTimeout) {
+            clearTimeout(this.navigationTimeout)
+            this.navigationTimeout = null
+        }
+        
+        if (locked) {
+            // Auto-release lock after timeout (safety net)
+            this.navigationTimeout = setTimeout(() => {
+                console.log('[Article] Navigation lock auto-released (timeout)')
+                this.isNavigating = false
+                this.navigationTimeout = null
+            }, 500)  // 500ms max lock time
+        }
+    }
+    
+    // Release navigation lock (called when navigation completes)
+    private releaseNavigationLock(): void {
+        this.setNavigationLock(false)
+        console.log('[Article] Navigation lock released')
     }
 
     // Helper getters for content mode checks
@@ -204,7 +239,6 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             menuBlurScreenshot: null,
             isNavigatingWithVisualZoom: false,
             videoFullscreen: false,
-            useContentViewPool: false,  // Will be set in componentDidMount
         }
 
         // IPC listener for zoom changes from preload script
@@ -221,12 +255,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private contentViewZoomFactor: number = 1.0;
     
     /**
-     * Apply zoom to the current view (always ContentView now)
+     * Apply zoom to the current view (Pool)
      * - Visual Zoom ON: uses Device Emulation scale (native pinch-to-zoom works)
      * - Visual Zoom OFF: uses CSS-based zoom via preload
      */
     private applyZoom = (zoomLevel: number) => {
-        if (!window.contentView) {
+        if (!window.contentViewPool) {
             return;
         }
         
@@ -238,10 +272,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Visual Zoom ON: use Device Emulation scale (native zoom)
             const factor = 1.0 + (clampedLevel * 0.1);
             this.contentViewZoomFactor = factor;
-            window.contentView.setZoomFactor(factor);
+            window.contentViewPool.setZoomFactor(factor);
         } else {
             // Visual Zoom OFF: use CSS-based zoom via preload
-            window.contentView.setCssZoom(clampedLevel);
+            window.contentViewPool.setCssZoom(clampedLevel);
         }
         
         // Update state and persist
@@ -295,35 +329,58 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     
     /**
-     * Navigate to content using either Pool (if enabled) or legacy ContentView
+     * Navigate to content using Pool
      * This is the central navigation method that handles Pool prefetching
      */
     private navigateToContent = (url: string, articleId?: string): void => {
-        const settings = this.getNavigationSettings();
-        
-        if (this.state.useContentViewPool && window.contentViewPool) {
-            // Use Pool for navigation (with prefetching)
-            const { articleIndex = -1, listLength = 0, feedId = null } = this.props;
-            const artId = articleId || String(this.props.item?._id) || 'unknown';
-            
-            console.log(`[Article] Pool navigate: ${artId} (${articleIndex}/${listLength})`);
-            
-            window.contentViewPool.navigateToArticle(
-                artId,
-                url,
-                feedId,
-                settings,
-                articleIndex,
-                listLength
-            ).catch((err: any) => {
-                console.error("[Article] Pool navigation failed:", err);
-            });
-        } else {
-            // Legacy: use ContentView directly
-            window.contentView?.navigateWithSettings(url, settings);
+        if (!window.contentViewPool) {
+            console.error('[Article] contentViewPool not available');
+            return;
         }
         
+        const settings = this.getNavigationSettings();
+        const { articleIndex = -1, listLength = 0, feedId = null } = this.props;
+        const artId = articleId || String(this.props.item?._id) || 'unknown';
+        
+        console.log(`[Article] Pool navigate: ${artId} (${articleIndex}/${listLength})`);
+        
+        // Set visible first - Pool will apply stored bounds when available
+        window.contentViewPool.setVisible(true);
+        
+        // Schedule multiple bounds updates to handle initial render timing
+        // The placeholder may not have valid bounds immediately
+        this.scheduleBoundsUpdates();
+        
+        window.contentViewPool.navigateToArticle(
+            artId,
+            url,
+            feedId,
+            settings,
+            articleIndex,
+            listLength
+        ).catch((err: any) => {
+            console.error("[Article] Pool navigation failed:", err);
+        });
+        
         this.contentViewCurrentUrl = url;
+    }
+    
+    /**
+     * Schedule multiple bounds updates to handle initial render timing
+     * The placeholder may not have valid bounds immediately after mount
+     */
+    private scheduleBoundsUpdates = (): void => {
+        // Immediate
+        this.updateContentViewBounds();
+        // After microtask
+        Promise.resolve().then(() => this.updateContentViewBounds());
+        // After next frame
+        requestAnimationFrame(() => this.updateContentViewBounds());
+        // After layout stabilizes (various delays for different scenarios)
+        setTimeout(() => this.updateContentViewBounds(), 10);
+        setTimeout(() => this.updateContentViewBounds(), 50);
+        setTimeout(() => this.updateContentViewBounds(), 100);
+        setTimeout(() => this.updateContentViewBounds(), 200);
     }
 
     /**
@@ -332,7 +389,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      *             Use navigateWithSettings() for navigation.
      */
     private sendSettingsToContentView = () => {
-        if (!window.contentView) return;
+        if (!window.contentViewPool) return;
         
         const zoomLevel = this.currentZoom;
         const showOverlay = this.state.showZoomOverlay;
@@ -340,22 +397,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const visualZoom = this.state.visualZoomEnabled;
         
         // Send all settings to preload
-        window.contentView.send('set-zoom-overlay-setting', showOverlay);
-        window.contentView.send('set-mobile-mode', mobileMode);
-        window.contentView.send('set-visual-zoom-mode', visualZoom);
+        window.contentViewPool.send('set-zoom-overlay-setting', showOverlay);
+        window.contentViewPool.send('set-mobile-mode', mobileMode);
+        window.contentViewPool.send('set-visual-zoom-mode', visualZoom);
         
         // Apply zoom based on mode
         if (visualZoom) {
             const factor = 1.0 + (zoomLevel * 0.1);
-            window.contentView.setZoomFactor(factor);
+            window.contentViewPool.setZoomFactor(factor);
         } else {
-            window.contentView.setCssZoom(zoomLevel);
+            window.contentViewPool.setCssZoom(zoomLevel);
         }
     }
 
     private sendZoomOverlaySettingToContentView = (show: boolean) => {
-        if (!window.contentView) return;
-        window.contentView.send('set-zoom-overlay-setting', show);
+        if (!window.contentViewPool) return;
+        window.contentViewPool.send('set-zoom-overlay-setting', show);
     }
 
     private toggleZoomOverlay = () => {
@@ -378,8 +435,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.setState({ mobileUserAgentEnabled: newValue });
         
         // Reload current page to apply new User-Agent
-        if (window.contentView) {
-            window.contentView.reload();
+        if (window.contentViewPool) {
+            window.contentViewPool.reload();
         }
     }
 
@@ -403,13 +460,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Recreate WebContentsView to apply new CSS layout and touch handling
         // This is necessary because the preload script reads the visual zoom setting
         // at initialization and sets up CSS/event handlers accordingly.
-        if (window.contentView) {
-            window.contentView.setVisualZoom(newValue);
-            await window.contentView.recreate();
-            
-            // If we have an article loaded, reload it in the new view
+        if (window.contentViewPool) {
+            window.contentViewPool.setVisualZoom(newValue);
+            // Pool doesn't support recreate() - reload current article instead
             if (this.props.item) {
-                // Small delay to ensure the view is fully initialized
                 setTimeout(() => {
                     this.reloadCurrentArticle();
                 }, 100);
@@ -425,7 +479,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         if (!this.props.item) return;
         
         // Check if we have a view to navigate
-        if (!this.state.useContentViewPool && !window.contentView) return;
+        if (!window.contentViewPool) return;
         
         const contentMode = this.state.contentMode;
         
@@ -441,8 +495,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         // Focus ContentView after short delay
         setTimeout(() => {
-            if (window.contentView) {
-                window.contentView.focus();
+            if (window.contentViewPool) {
+                window.contentViewPool.focus();
             }
         }, 100);
     }
@@ -450,108 +504,138 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     // ===== ContentView Methods (WebContentsView - now used for ALL display modes) =====
     
     /**
-     * Setup ContentView event listeners
+     * Setup Pool-specific event listeners
+     * Pool uses same IPC channels as legacy ContentView for input/context events
      */
-    private setupContentViewListeners = () => {
-        // Guard: Ensure contentView bridge is available
-        if (!window.contentView) {
-            console.warn('[ContentView] Cannot setup listeners - contentView bridge not available');
+    private setupPoolListeners = () => {
+        const ipc = (window as any).ipcRenderer;
+        if (!ipc) {
+            console.warn('[ContentViewPool] Cannot setup listeners - ipcRenderer not available');
             return;
         }
         
-        // Loading state
-        const unsubLoading = window.contentView.onLoading((loading) => {
-            if (!loading && this._isMounted) {
+        console.log('[ContentViewPool] Setting up Pool listeners');
+        
+        // Keyboard input forwarding from Pool views
+        // Pool sends 'content-view-input' just like legacy ContentView
+        const inputHandler = (_event: any, input: Electron.Input) => {
+            this.keyDownHandler(input);
+        };
+        ipc.on("content-view-input", inputHandler);
+        this.contentViewCleanup.push(() => ipc.removeListener("content-view-input", inputHandler));
+        
+        // Video fullscreen state changes
+        const onVideoFullscreen = (_: any, isFullscreen: boolean) => {
+            console.log('[Article] Video fullscreen:', isFullscreen);
+            setVideoFullscreen(isFullscreen);
+            if (this._isMounted) {
+                this.setState({ videoFullscreen: isFullscreen });
+            }
+        };
+        ipc.on('content-view-video-fullscreen', onVideoFullscreen);
+        this.contentViewCleanup.push(() => ipc.removeListener('content-view-video-fullscreen', onVideoFullscreen));
+        
+        // Pool-specific events
+        const onNavigationComplete = (_event: any, articleId: string) => {
+            console.log(`[ContentViewPool] Navigation complete: ${articleId}`);
+            // Release navigation lock when pool reports navigation complete
+            this.releaseNavigationLock();
+            if (this._isMounted) {
                 this.setState({ loaded: true });
             }
-        });
-        this.contentViewCleanup.push(unsubLoading);
+        };
+        ipc.on('cvp-navigation-complete', onNavigationComplete);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-navigation-complete', onNavigationComplete));
         
-        // Error handling
-        const unsubError = window.contentView.onError((error) => {
-            console.error('[ContentView] Load error:', error);
+        // Pool error events
+        const onPoolError = (_event: any, articleId: string, error: string) => {
+            console.error(`[ContentViewPool] Error for ${articleId}:`, error);
             if (this._isMounted) {
                 this.setState({ 
                     error: true, 
-                    errorDescription: error.errorDescription 
+                    errorDescription: error 
                 });
             }
-        });
-        this.contentViewCleanup.push(unsubError);
-        
-        // Context menu - ContentView uses native Electron menu (Menu.popup)
-        // We no longer need to open the React context menu for ContentView
-        // The native menu handles everything: text, links, images, navigation
-        const unsubContextMenu = window.contentView.onContextMenu((params) => {
-            // Native menu is shown by ContentViewManager, nothing to do here
-            // This handler is kept for potential future needs (e.g. analytics)
-        });
-        this.contentViewCleanup.push(unsubContextMenu);
-        
-        // JavaScript Dialog Interceptor - log alerts/confirms/prompts from article pages
-        // These are suppressed in content-preload.js but we log them here for debugging
-        const jsDialogHandler = (_event: any, data: { type: string, message: string, url: string }) => {
-            console.warn(`[Article] Website JavaScript ${data.type}():`, {
-                url: data.url,
-                message: data.message || '(empty message)'
-            });
         };
-        (window as any).ipcRenderer?.on("content-view-js-dialog", jsDialogHandler);
-        this.contentViewCleanup.push(() => {
-            (window as any).ipcRenderer?.removeListener("content-view-js-dialog", jsDialogHandler);
-        });
+        ipc.on('cvp-error', onPoolError);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-error', onPoolError));
         
-        // Keyboard input forwarding
-        const unsubInput = window.contentView.onInput((input) => {
-            this.keyDownHandler(input);
-        });
-        this.contentViewCleanup.push(unsubInput);
+        // Prefetch info request from Pool
+        const onPrefetchRequest = (_event: any, articleIndex: number) => {
+            console.log(`[ContentViewPool] Prefetch request for index ${articleIndex}`);
+            this.handlePrefetchRequest(articleIndex);
+        };
+        ipc.on('cvp-request-prefetch-info', onPrefetchRequest);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-request-prefetch-info', onPrefetchRequest));
         
-        // Navigation (for cookie persistence)
-        const unsubNavigated = window.contentView.onNavigated((url) => {
-            if (this.props.source.persistCookies && this.isWebpageMode) {
-                this.savePersistedCookiesDebounced();
-            }
-        });
-        this.contentViewCleanup.push(unsubNavigated);
+        // Bounds request from Pool - send current bounds immediately
+        const onBoundsRequest = () => {
+            console.log(`[ContentViewPool] Bounds request received`);
+            this.updateContentViewBounds();
+        };
+        ipc.on('cvp-request-bounds', onBoundsRequest);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-request-bounds', onBoundsRequest));
+    }
+    
+    /**
+     * Handle prefetch request from ContentViewPool
+     * Provides article info for a specific index
+     */
+    private handlePrefetchRequest = (articleIndex: number) => {
+        const { articleIds, items, sources, feedId } = this.props;
         
-        // Visual Zoom loading spinner events
-        if ((window as any).ipcRenderer) {
-            const ipc = (window as any).ipcRenderer;
-            
-            // Show loading spinner when Visual Zoom navigation starts
-            const onVisualZoomLoading = () => {
-                if (this._isMounted) {
-                    this.setState({ isNavigatingWithVisualZoom: true });
-                }
-            };
-            ipc.on('content-view-visual-zoom-loading', onVisualZoomLoading);
-            this.contentViewCleanup.push(() => ipc.removeAllListeners('content-view-visual-zoom-loading'));
-            
-            // Hide loading spinner when Visual Zoom is ready
-            const onVisualZoomReady = () => {
-                if (this._isMounted) {
-                    this.setState({ isNavigatingWithVisualZoom: false });
-                }
-            };
-            ipc.on('content-view-visual-zoom-ready', onVisualZoomReady);
-            this.contentViewCleanup.push(() => ipc.removeAllListeners('content-view-visual-zoom-ready'));
-            
-            // Video fullscreen state changes
-            // When video enters fullscreen, ContentView expands to fill window
-            // We also notify the overlay system so P2P dialogs go to bell instead
-            const onVideoFullscreen = (_: any, isFullscreen: boolean) => {
-                console.log('[Article] Video fullscreen:', isFullscreen);
-                // Update global overlay state
-                setVideoFullscreen(isFullscreen);
-                // Track locally for any future use
-                if (this._isMounted) {
-                    this.setState({ videoFullscreen: isFullscreen });
-                }
-            };
-            ipc.on('content-view-video-fullscreen', onVideoFullscreen);
-            this.contentViewCleanup.push(() => ipc.removeAllListeners('content-view-video-fullscreen'));
+        if (!articleIds || !items || !sources) {
+            console.log(`[ContentViewPool] Cannot handle prefetch - missing props`);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null);
+            return;
         }
+        
+        if (articleIndex < 0 || articleIndex >= articleIds.length) {
+            console.log(`[ContentViewPool] Prefetch index ${articleIndex} out of bounds (0-${articleIds.length - 1})`);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null);
+            return;
+        }
+        
+        const itemId = articleIds[articleIndex];
+        const item = items[itemId];
+        
+        if (!item) {
+            console.log(`[ContentViewPool] Item ${itemId} not found in store`);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null);
+            return;
+        }
+        
+        const source = sources[item.source];
+        if (!source) {
+            console.log(`[ContentViewPool] Source ${item.source} not found for item ${itemId}`);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null);
+            return;
+        }
+        
+        // Build the URL
+        const url = item.link;
+        
+        // Use same settings as current view (for prefetch, use current zoom/mode)
+        const settings = this.getNavigationSettings();
+        
+        console.log(`[ContentViewPool] Providing prefetch info for index ${articleIndex}: item=${itemId}, url=${url?.substring(0, 50)}...`);
+        window.contentViewPool?.providePrefetchInfo(
+            articleIndex,
+            String(itemId),
+            url,
+            feedId || null,
+            settings
+        );
+    }
+    
+    /**
+     * Setup ContentView event listeners (legacy - removed)
+     * All listeners are now handled via setupPoolListeners
+     */
+    private setupContentViewListeners = () => {
+        // Legacy method - all listeners now handled by setupPoolListeners
+        console.log('[ContentView] setupContentViewListeners called - delegating to setupPoolListeners');
+        this.setupPoolListeners();
     }
     
     /**
@@ -592,12 +676,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.lastContentViewBounds = null;
         this.contentViewCurrentUrl = null;
         
-        // Hide ContentView, clear content, and reset bounds (with null check)
-        if (window.contentView) {
-            window.contentView.setVisible(false);
-            window.contentView.clear(); // Load about:blank to clear old content
+        // Hide ContentView, clear content, and reset bounds via Pool
+        if (window.contentViewPool) {
+            window.contentViewPool.setVisible(false);
+            window.contentViewPool.clear(); // Load about:blank to clear old content
             // Set bounds to 0 to ensure it's completely out of the way
-            window.contentView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+            window.contentViewPool.setBounds({ x: 0, y: 0, width: 0, height: 0 });
         }
         
         // Clear blur screenshot (only if mounted)
@@ -611,8 +695,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Update ContentView bounds based on placeholder position
      */
     private updateContentViewBounds = () => {
-        if (!this.contentViewPlaceholderRef) return;
-        if (!window.contentView) return;
+        if (!this.contentViewPlaceholderRef) {
+            console.warn('[Article] updateContentViewBounds: No placeholder ref!');
+            return;
+        }
         
         // Don't update bounds if ContentView is hidden for overlay
         if (this.contentViewHiddenForMenu) return;
@@ -625,6 +711,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             height: Math.round(rect.height),
         };
         
+        console.log('[Article] updateContentViewBounds:', bounds);
+        
         // Only update if bounds actually changed (avoid unnecessary IPC)
         if (this.lastContentViewBounds &&
             this.lastContentViewBounds.x === bounds.x &&
@@ -635,7 +723,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         
         this.lastContentViewBounds = bounds;
-        window.contentView.setBounds(bounds);
+        
+        // Update bounds for Pool
+        if (window.contentViewPool) {
+            window.contentViewPool.setBounds(bounds);
+        }
     }
     
     private lastContentViewBounds: { x: number, y: number, width: number, height: number } | null = null;
@@ -646,20 +738,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Initialize ContentView for ALL content types
      * - Webpage mode: navigate to URL
      * - RSS/Full content: load HTML directly via data URL
+     * 
+     * Uses Pool for all navigation (prefetching supported)
      */
     private initializeContentView = async () => {
         if (!this.contentViewPlaceholderRef) return;
         
-        // Check if contentView bridge is available
-        if (!window.contentView) {
-            console.error('[ContentView] contentView bridge not available!');
+        // Check if Pool bridge is available
+        if (!window.contentViewPool) {
+            console.error('[ContentView] contentViewPool bridge not available!');
             return;
         }
         
         try {
             // Setup listeners if not already done
             if (this.contentViewCleanup.length === 0) {
-                this.setupContentViewListeners();
+                this.setupPoolListeners();
             }
             
             // Update bounds
@@ -719,40 +813,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 window.addEventListener(OVERLAY_VISIBILITY_EVENT, this.overlayVisibilityListener as EventListener);
             }
             
-            // Load content with bundled settings (all settings applied BEFORE navigation)
-            if (this.isWebpageMode) {
-                // Webpage mode: Navigate to URL with bundled settings
-                const targetUrl = this.props.item.link;
-                if (this.contentViewCurrentUrl !== targetUrl) {
-                    this.contentViewCurrentUrl = targetUrl;
-                    await window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
-                    // Mark ContentView as initialized (Device Emulation is now active)
-                    this.contentViewInitialized = true;
-                } else {
-                    // URL unchanged, skip navigation
-                }
-            } else {
-                // Local (RSS) or FullContent mode: Load HTML directly with bundled settings
-                const htmlDataUrl = this.articleView();
-                // Navigate with settings bundled - all settings applied BEFORE navigation starts
-                await window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
-                this.contentViewCurrentUrl = htmlDataUrl;
-                // Mark ContentView as initialized (Device Emulation is now active)
-                this.contentViewInitialized = true;
-            }
+            // Wait for layout to stabilize before navigating
+            requestAnimationFrame(() => {
+                // Double-rAF ensures layout is complete
+                requestAnimationFrame(() => {
+                    if (this.isWebpageMode) {
+                        this.navigateToContent(this.props.item.link);
+                    } else {
+                        this.navigateToContent(this.articleView());
+                    }
+                });
+            });
             
-            // Settings are now bundled with navigation - no need for separate send
-            // The preload reads settings via synchronous IPC on load
-            
-            // Show ContentView (if Visual Zoom is enabled, main process handles showing after emulation)
-            // We still call setVisible(true) here - main process will handle the timing
-            if (!this.state.visualZoomEnabled) {
-                window.contentView.setVisible(true);
-            }
-            // For Visual Zoom: ContentViewManager shows the view after emulation is applied (dom-ready)
+            // Show ContentView
+            window.contentViewPool.setVisible(true);
             
             // Focus
-            window.contentView.focus();
+            window.contentViewPool.focus();
             
             this.setState({ contentVisible: true, loaded: true });
         } catch (e) {
@@ -763,10 +840,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     // Input Mode: Sends status to ContentView to disable keyboard navigation
     private setInputMode = (enabled: boolean) => {
         this.setState({ inputModeEnabled: enabled });
-        // Send to ContentView
-        if (window.contentView) {
+        // Send to ContentView via Pool
+        if (window.contentViewPool) {
             try {
-                window.contentView.send('set-input-mode', enabled);
+                window.contentViewPool.send('set-input-mode', enabled);
             } catch (e) {
                 // ContentView not ready - ignore
             }
@@ -784,9 +861,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Set global Mobile Mode status (for new ContentViews on article change)
         this.setGlobalMobileMode(newMobileMode);
         
-        // Use ContentView bridge - this handles User-Agent, Device Emulation, and reload
-        if (window.contentView) {
-            window.contentView.setMobileMode(newMobileMode);
+        // Use ContentView Pool bridge - this handles User-Agent, Device Emulation, and reload
+        if (window.contentViewPool) {
+            window.contentViewPool.setMobileMode(newMobileMode);
         }
     }
 
@@ -801,7 +878,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     // Note: enableMobileEmulation and disableMobileEmulation removed
-    // Mobile mode is now handled via window.contentView.setMobileMode()
+    // Mobile mode is now handled via window.contentViewPool.setMobileMode()
 
     // Sets global Mobile Mode status in Main process
     // Main process then automatically applies emulation to new ContentViews
@@ -1051,8 +1128,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             onClick: () => {
                                 if (this.isFullContentMode && this.state.fullContent) {
                                     window.utils.writeClipboard(this.state.fullContent)
-                                } else if (window.contentView) {
-                                    window.contentView.executeJavaScript(`
+                                } else if (window.contentViewPool) {
+                                    window.contentViewPool.executeJavaScript(`
                                         (function() {
                                             const html = document.documentElement.outerHTML;
                                             return html;
@@ -1073,8 +1150,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             iconProps: { iconName: "CodeEdit" },
                             disabled: this.isLocalMode,  // Only available for Webpage/FullContent
                             onClick: () => {
-                                if (window.contentView) {
-                                    window.contentView.executeJavaScript(`
+                                if (window.contentViewPool) {
+                                    window.contentViewPool.executeJavaScript(`
                                         (function() {
                                             let contentEl = document.getElementById('fr-zoom-container') || document.documentElement;
                                             let clone = contentEl.cloneNode(true);
@@ -1197,8 +1274,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             text: "Artikel Developer Tools",
                             iconProps: { iconName: "FileHTML" },
                             onClick: () => {
-                                if (window.contentView) {
-                                    window.contentView.openDevTools()
+                                if (window.contentViewPool) {
+                                    window.contentViewPool.openDevTools()
                                 }
                             },
                         },
@@ -1297,7 +1374,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "ArrowRight":
                     // Ignore key repeat (held key) for article navigation
                     if (!input.isAutoRepeat) {
+                        // Navigation Lock: DISABLED FOR TESTING
+                        // The central debounce in showOffsetItem should handle duplicates
+                        // if (this.isNavigating) {
+                        //     console.log(`[Article] Navigation locked - ignoring ${input.key}`)
+                        //     return
+                        // }
                         this.markKeyProcessed(keyWithMods)
+                        // this.setNavigationLock(true)
+                        
+                        // WORKAROUND: Focus the article card before navigation
+                        // This releases focus from the current WebContentsView, allowing
+                        // the new view to receive focus cleanly after navigation
+                        const currentCard = document.querySelector(
+                            `#refocus div[data-iid="${this.props.item._id}"]`
+                        ) as HTMLElement
+                        if (currentCard) {
+                            currentCard.focus()
+                            console.log(`[Article] Pre-navigation: focused card for article ${this.props.item._id}`)
+                        }
+                        
+                        console.log(`[Article] Arrow key navigation: ${input.key}, current index: ${this.props.articleIndex}`)
                         this.props.offsetItem(input.key === "ArrowLeft" ? -1 : 1)
                     }
                     break
@@ -1384,10 +1481,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     
     contentReload = () => {
-        // Use ContentView reload
-        if (window.contentView) {
+        // Use ContentView Pool reload
+        if (window.contentViewPool) {
             this.setState({ loaded: false, error: false })
-            window.contentView.reload()
+            window.contentViewPool.reload()
         } else if (this.isFullContentMode) {
             this.loadFull()
         }
@@ -1406,16 +1503,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             })
         }
         
-        // Check if Content View Pool is enabled
+        // Content View Pool is now always used - no feature flag check needed
         if (window.contentViewPool) {
-            window.contentViewPool.isEnabled().then((enabled: boolean) => {
-                if (this._isMounted && enabled) {
-                    this.setState({ useContentViewPool: enabled })
-                    console.log("[Article] Content View Pool enabled")
-                }
-            }).catch(() => {
-                // Pool not available, use legacy ContentView
-            })
+            console.log("[Article] Using Content View Pool")
+        } else {
+            console.warn("[Article] Content View Pool not available!")
         }
         
         // Set global Mobile Mode status initially (in case already enabled)
@@ -1517,6 +1609,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     componentDidUpdate = (prevProps: ArticleProps, prevState: ArticleState) => {
         if (prevProps.item._id != this.props.item._id) {
+            // Article changed - DO NOT release navigation lock here!
+            // The lock is released by cvp-navigation-complete IPC when the view is actually ready.
+            // Releasing here would allow another arrow key press before the navigation completes.
+            
             // Reset error state on article change
             if (this.state.error) {
                 this.setState({ error: false, errorDescription: "" });
@@ -1564,7 +1660,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Close DevTools before article change to prevent crash
             // closeDevTools is safe to call even if DevTools is not opened
             try {
-                window.contentView?.closeDevTools()
+                window.contentViewPool?.closeDevTools()
             } catch {}
             
             // Load cookies for new article (if persistCookies is enabled)
@@ -1582,25 +1678,25 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.setState({ isLoadingFull: true })
                     this.loadFull()
                 } else if (newContentMode === SourceOpenTarget.Webpage) {
-                    // For webpage mode - Navigate to URL (Pool or ContentView)
+                    // For webpage mode - Navigate to URL (Pool)
                     const targetUrl = this.props.item.link;
                     if (this.contentViewCurrentUrl !== targetUrl) {
                         this.navigateToContent(targetUrl);
                     }
                     // Focus ContentView for keyboard input (with delay to ensure it's ready)
                     setTimeout(() => {
-                        if (window.contentView) {
-                            window.contentView.focus();
+                        if (window.contentViewPool) {
+                            window.contentViewPool.focus();
                         }
                     }, 100);
                 } else {
-                    // For Local (RSS) mode - Load HTML (Pool or ContentView)
+                    // For Local (RSS) mode - Load HTML (Pool)
                     const htmlDataUrl = this.articleView();
                     this.navigateToContent(htmlDataUrl);
                     // Focus ContentView
                     setTimeout(() => {
-                        if (window.contentView) {
-                            window.contentView.focus();
+                        if (window.contentViewPool) {
+                            window.contentViewPool.focus();
                         }
                     }, 100);
                     // CSS zoom for non-Visual-Zoom mode is handled by preload via sync IPC
@@ -1655,30 +1751,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * @param shouldHideCheck - Optional callback to verify we should still hide (for async timing)
      */
     private hideContentViewWithScreenshot = async (reason: string, shouldHideCheck?: () => boolean): Promise<void> => {
-        if (!window.contentView) return
-        if (this.contentViewHiddenForMenu) return  // Already hidden
+        if (!window.contentViewPool) return;
+        if (this.contentViewHiddenForMenu) return;  // Already hidden
         
-        try {
-            const screenshot = await window.contentView.captureScreen()
-            if (screenshot && this._isMounted) {
-                // Use setState callback to hide ContentView after React renders the placeholder
-                this.setState({ menuBlurScreenshot: screenshot }, () => {
-                    // Re-check conditions after async setState
-                    if (this._isMounted && window.contentView && (!shouldHideCheck || shouldHideCheck())) {
-                        window.contentView.setVisible(false, true) // preserveContent for blur-div
-                        this.contentViewHiddenForMenu = true
-                    }
-                })
-                return
-            }
-        } catch (e) {
-            console.error('[Article] Error capturing screenshot:', e)
-        }
-        
-        // Fallback: hide without screenshot (error case or no screenshot)
+        // Pool mode: Just hide without screenshot for now (Pool views have different lifecycle)
         if (!shouldHideCheck || shouldHideCheck()) {
-            window.contentView.setVisible(false, true) // preserveContent for blur-div
-            this.contentViewHiddenForMenu = true
+            window.contentViewPool.setVisible(false);
+            this.contentViewHiddenForMenu = true;
         }
     }
     
@@ -1688,7 +1767,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Replaces fragmented handlers: handleOverlayVisibilityChange, handleLocalDialogVisibilityChange, etc.
      */
     private handleOverlayVisibilityEvent = async (source: string, visible: boolean) => {
-        if (!window.contentView) return
+        if (!window.contentViewPool) return;
         
         const anyOpen = this.overlayStateManager.update(source as any, visible)
         
@@ -1769,8 +1848,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Restore ContentView after overlay interaction
      */
     private restoreContentView = () => {
-        if (!window.contentView) return
-        if (!this.contentViewHiddenForMenu) return
+        if (!window.contentViewPool) return;
+        if (!this.contentViewHiddenForMenu) return;
         
         // Clear hover timer
         if (this.blurHoverTimer) {
@@ -1778,12 +1857,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.blurHoverTimer = null
         }
         
-        // Show ContentView FIRST, then remove blur screenshot
-        // This prevents a flash where neither is visible
-        window.contentView.setVisible(true)
-        this.contentViewHiddenForMenu = false
+        // Show Pool
+        window.contentViewPool.setVisible(true);
+        this.contentViewHiddenForMenu = false;
         
-        // Small delay to ensure ContentView is rendered before removing blur
+        // Small delay to ensure view is rendered before removing blur
         setTimeout(() => {
             if (this._isMounted) {
                 this.setState({ menuBlurScreenshot: null })
@@ -1797,6 +1875,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      */
     private handleContentViewMouseLeave = async () => {
         if (!this.state.visualZoomEnabled || !this.usesContentView) return
+        if (!window.contentViewPool) return
         
         await this.hideContentViewWithScreenshot('Mouse left ContentView area')
     }
@@ -1807,7 +1886,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      */
     private handleContentViewMouseEnter = () => {
         if (!this.state.visualZoomEnabled || !this.usesContentView) return
-        if (!window.contentView) return
+        if (!window.contentViewPool) return
         if (!this.contentViewHiddenForMenu) return  // Not hidden, nothing to do
         
         // Check if any Redux overlay is still active (menu, settings, etc.)
@@ -1821,7 +1900,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             return
         }
         
-        window.contentView.setVisible(true)
+        window.contentViewPool.setVisible(true)
         this.contentViewHiddenForMenu = false
         
         // Clear screenshot after a short delay
@@ -1863,27 +1942,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     
     // Focus ContentView after full content is loaded
     private focusContentViewAfterLoad = () => {
-        if (window.contentView) {
+        if (window.contentViewPool) {
             // Check if we're waiting to focus ContentView after mode switch
             if (this.pendingContentViewFocus) {
                 this.pendingContentViewFocus = false;
                 // Multiple focus attempts to ensure it sticks
-                window.contentView.focus();
+                window.contentViewPool.focus();
                 setTimeout(() => {
-                    if (window.contentView && this._isMounted) {
-                        window.contentView.focus();
+                    if (window.contentViewPool && this._isMounted) {
+                        window.contentViewPool.focus();
                     }
                 }, 50);
                 setTimeout(() => {
-                    if (window.contentView && this._isMounted) {
-                        window.contentView.focus();
+                    if (window.contentViewPool && this._isMounted) {
+                        window.contentViewPool.focus();
                     }
                 }, 200);
             } else {
                 // Normal focus with small delay
                 setTimeout(() => {
-                    if (window.contentView && this._isMounted) {
-                        window.contentView.focus()
+                    if (window.contentViewPool && this._isMounted) {
+                        window.contentViewPool.focus()
                     }
                 }, 100)
             }
@@ -1897,8 +1976,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.cleanupContentView()
         
         // Restore ContentView visibility if hidden for menu
-        if (this.contentViewHiddenForMenu && window.contentView) {
-            window.contentView.setVisible(true)
+        if (this.contentViewHiddenForMenu && window.contentViewPool) {
+            window.contentViewPool.setVisible(true)
             this.contentViewHiddenForMenu = false
         }
         
@@ -1920,7 +1999,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Close DevTools before unmount to prevent crash
         // closeDevTools is safe to call even if DevTools is not opened
         try {
-            window.contentView?.closeDevTools()
+            window.contentViewPool?.closeDevTools()
         } catch {}
         
         let refocus = document.querySelector(
