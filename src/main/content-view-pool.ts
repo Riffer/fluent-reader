@@ -13,7 +13,7 @@
  * - Other views prefetch next/previous articles
  * - When user navigates, views are swapped instantly if target is cached
  */
-import { ipcMain, BrowserWindow, Menu, clipboard, shell, nativeImage, net } from "electron"
+import { ipcMain, BrowserWindow, Menu, clipboard, shell, nativeImage, net, app } from "electron"
 import type { MenuItemConstructorOptions, Input } from "electron"
 import { CachedContentView, NavigationSettings, CachedViewStatus } from "./cached-content-view"
 import { isMobileUserAgentEnabled, isVisualZoomEnabled } from "./settings"
@@ -648,8 +648,10 @@ export class ContentViewPool {
             // Instant swap!
             console.log(`[ContentViewPool] Cache HIT - instant swap to ${cachedView.id}`)
             
-            // Play sound on cache hit (for debugging)
-            shell.beep()
+            // Play sound on cache hit (dev mode only, for debugging)
+            if (!app.isPackaged) {
+                shell.beep()
+            }
             
             this.activateView(cachedView)
             
