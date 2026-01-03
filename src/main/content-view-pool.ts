@@ -291,27 +291,30 @@ export class ContentViewPool {
     }
     
     /**
-     * Setup focus guard: When a background view fires dom-ready,
+     * Setup focus guard: When a background view triggers navigation events,
      * ensure focus stays on the active view.
      * 
      * Problem: Electron may internally shift focus when a WebContentsView
-     * completes loading (dom-ready). This causes the active view to lose
+     * starts or completes loading. This causes the active view to lose
      * keyboard input.
      * 
-     * Solution: Listen to dom-ready on all views and refocus the active view
-     * if a background view triggered the event.
+     * Known Electron bug: https://github.com/electron/electron/issues/42578
+     * 
+     * Solution: Listen to multiple navigation events on all views and refocus
+     * the active view if a background view triggered the event.
      */
     private setupFocusGuard(view: CachedContentView): void {
         const wc = view.getWebContents()
         if (!wc) return
         
-        wc.on('dom-ready', () => {
+        // Helper to refocus active view if this is a background view
+        const refocusIfNeeded = (eventName: string) => {
             // If THIS view is NOT active but another view IS active,
             // refocus the active view to prevent focus theft
             if (!view.isActive && this.activeViewId) {
                 const activeView = this.getActiveView()
                 if (activeView && activeView.isReady) {
-                    console.log(`[ContentViewPool] Focus guard: Background ${view.id} fired dom-ready, refocusing active ${activeView.id}`)
+                    console.log(`[ContentViewPool] Focus guard: Background ${view.id} fired ${eventName}, refocusing active ${activeView.id}`)
                     // Small delay to ensure Electron has finished its internal focus handling
                     setTimeout(() => {
                         if (activeView.isActive) {
@@ -320,7 +323,14 @@ export class ContentViewPool {
                     }, 10)
                 }
             }
-        })
+        }
+        
+        // Listen to multiple events that may cause focus theft
+        // Earlier events = faster focus recovery
+        wc.on('did-start-loading', () => refocusIfNeeded('did-start-loading'))
+        wc.on('did-start-navigation', () => refocusIfNeeded('did-start-navigation'))
+        wc.on('did-navigate', () => refocusIfNeeded('did-navigate'))
+        wc.on('dom-ready', () => refocusIfNeeded('dom-ready'))
     }
     
     /**
