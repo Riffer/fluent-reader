@@ -78,6 +78,63 @@ try {
     return null;
   };
 
+  // ===== Cursor Auto-Hide =====
+  // Hide cursor after inactivity, show on any mouse movement
+  let cursorHideTimeout = null;
+  const CURSOR_HIDE_DELAY = 2000; // 2 seconds of inactivity
+  let cursorStyleElement = null;
+  
+  function setupCursorAutoHide() {
+    // Create style element for cursor hiding
+    if (!cursorStyleElement) {
+      cursorStyleElement = document.createElement('style');
+      cursorStyleElement.id = 'fr-cursor-autohide';
+      cursorStyleElement.textContent = `
+        html.hide-cursor, html.hide-cursor * {
+          cursor: none !important;
+        }
+      `;
+      document.head.appendChild(cursorStyleElement);
+    }
+    
+    // Show cursor
+    function showCursor() {
+      document.documentElement.classList.remove('hide-cursor');
+    }
+    
+    // Hide cursor
+    function hideCursor() {
+      document.documentElement.classList.add('hide-cursor');
+    }
+    
+    // Reset timer on mouse movement
+    function resetCursorTimer() {
+      showCursor();
+      if (cursorHideTimeout) {
+        clearTimeout(cursorHideTimeout);
+      }
+      cursorHideTimeout = setTimeout(hideCursor, CURSOR_HIDE_DELAY);
+    }
+    
+    // Listen for mouse movement
+    document.addEventListener('mousemove', resetCursorTimer, { passive: true });
+    
+    // Also show cursor on click (in case user clicks without moving)
+    document.addEventListener('mousedown', resetCursorTimer, { passive: true });
+    
+    // Start the timer immediately
+    resetCursorTimer();
+    
+    logToMain('[ContentPreload] Cursor auto-hide initialized');
+  }
+  
+  // Setup cursor auto-hide when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupCursorAutoHide);
+  } else {
+    setupCursorAutoHide();
+  }
+
   let zoomLevel = 0; // zoomLevel: 0 = 100%, 1 = 110%, -1 = 90%, etc. (lineare 10%-Schritte)
   const MIN_ZOOM_LEVEL = -6;  // 40% minimum zoom (100% - 6*10%)
   const MAX_ZOOM_LEVEL = 40;  // 500% maximum zoom (100% + 40*10%)

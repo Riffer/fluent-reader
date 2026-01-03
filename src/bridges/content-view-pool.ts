@@ -24,6 +24,41 @@ export interface NavigationSettings {
 }
 
 /**
+ * Source open target modes (must match SourceOpenTarget enum)
+ */
+export enum PrefetchOpenTarget {
+    Local = 0,       // RSS/Local content
+    Webpage = 1,     // Load webpage directly
+    External = 2,    // Open in external browser
+    FullContent = 3  // Extract and show full content
+}
+
+/**
+ * Text direction for article rendering
+ */
+export enum PrefetchTextDirection {
+    LTR = 0,
+    RTL = 1,
+    Vertical = 2
+}
+
+/**
+ * Extended prefetch info for all content modes
+ */
+export interface PrefetchArticleInfo {
+    articleId: string
+    itemLink: string           // URL of the article (for fetching)
+    itemContent: string        // RSS content (for Local mode)
+    itemTitle: string          // Article title
+    itemDate: number           // Article date (timestamp)
+    openTarget: PrefetchOpenTarget
+    textDir: PrefetchTextDirection
+    fontSize: number
+    fontFamily: string
+    locale: string
+}
+
+/**
  * Reading direction for prefetch prioritization
  */
 export type ReadingDirection = 'forward' | 'backward' | 'unknown'
@@ -111,15 +146,20 @@ export const contentViewPoolBridge = {
     /**
      * Provide prefetch info for a specific article index
      * Called in response to 'cvp-request-prefetch-info' event
+     * 
+     * For Webpage mode: url is the webpage URL
+     * For RSS/Local mode: url is the data URL with rendered content
+     * For FullContent mode: articleInfo contains data for extraction
      */
     providePrefetchInfo: (
         articleIndex: number,
         articleId: string | null,
         url: string | null,
         feedId: string | null,
-        settings: NavigationSettings | null
+        settings: NavigationSettings | null,
+        articleInfo?: PrefetchArticleInfo | null
     ): void => {
-        ipcRenderer.send("cvp-prefetch-info", articleIndex, articleId, url, feedId, settings)
+        ipcRenderer.send("cvp-prefetch-info", articleIndex, articleId, url, feedId, settings, articleInfo)
     },
     
     /**

@@ -582,17 +582,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Provides article info for a specific index
      */
     private handlePrefetchRequest = (articleIndex: number) => {
-        const { articleIds, items, sources, feedId } = this.props;
+        const { articleIds, items, sources, feedId, locale } = this.props;
         
         if (!articleIds || !items || !sources) {
             console.log(`[ContentViewPool] Cannot handle prefetch - missing props`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
             return;
         }
         
         if (articleIndex < 0 || articleIndex >= articleIds.length) {
             console.log(`[ContentViewPool] Prefetch index ${articleIndex} out of bounds (0-${articleIds.length - 1})`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
             return;
         }
         
@@ -601,35 +601,46 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         if (!item) {
             console.log(`[ContentViewPool] Item ${itemId} not found in store`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
             return;
         }
         
         const source = sources[item.source];
         if (!source) {
             console.log(`[ContentViewPool] Source ${item.source} not found for item ${itemId}`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
             return;
         }
         
         // Determine URL based on source's openTarget
-        let url: string;
+        let url: string | null = null;
         const openTarget = source.openTarget;
+        
+        // Build article info for FullContent mode (Main process will do extraction)
+        const articleInfo = {
+            articleId: String(itemId),
+            itemLink: item.link,
+            itemContent: item.content || '',
+            itemTitle: item.title || '',
+            itemDate: item.date.getTime(),
+            openTarget: openTarget,
+            textDir: source.textDir || 0,
+            fontSize: this.state.fontSize,
+            fontFamily: this.state.fontFamily || '',
+            locale: locale || 'en-US'
+        };
         
         if (openTarget === SourceOpenTarget.Webpage) {
             // Webpage mode: Use the article link
             url = item.link;
         } else if (openTarget === SourceOpenTarget.FullContent) {
-            // FullContent mode: Cannot prefetch - extraction happens at navigation time
-            // The extracted content is generated dynamically and stored in component state
-            // Prefetching the webpage would show wrong content on Cache HIT
-            console.log(`[ContentViewPool] Prefetch skip for index ${articleIndex}: FullContent requires extraction`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null);
-            return;
+            // FullContent mode: Send article info, Main process will fetch & extract
+            console.log(`[ContentViewPool] Prefetch for FullContent index ${articleIndex}: sending to Main for extraction`);
+            // url stays null - Main will generate it after extraction
         } else if (openTarget === SourceOpenTarget.External) {
             // External mode: Opens in browser, no prefetch needed
             console.log(`[ContentViewPool] Prefetch skip for index ${articleIndex}: External mode`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
             return;
         } else {
             // Local/RSS mode: Generate the article HTML view (content is local, no network needed)
@@ -640,13 +651,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Use same settings as current view (for prefetch, use current zoom/mode)
         const settings = this.getNavigationSettings();
         
-        console.log(`[ContentViewPool] Providing prefetch info for index ${articleIndex}: item=${itemId}, openTarget=${SourceOpenTarget[openTarget]}, url=${url?.substring(0, 50)}...`);
+        console.log(`[ContentViewPool] Providing prefetch info for index ${articleIndex}: item=${itemId}, openTarget=${SourceOpenTarget[openTarget]}, url=${url?.substring(0, 50) || 'null (FullContent)'}...`);
         window.contentViewPool?.providePrefetchInfo(
             articleIndex,
             String(itemId),
             url,
             feedId || null,
-            settings
+            settings,
+            articleInfo
         );
     }
     

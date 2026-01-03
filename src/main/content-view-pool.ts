@@ -13,10 +13,12 @@
  * - Other views prefetch next/previous articles
  * - When user navigates, views are swapped instantly if target is cached
  */
-import { ipcMain, BrowserWindow, Menu, clipboard, shell, nativeImage } from "electron"
+import { ipcMain, BrowserWindow, Menu, clipboard, shell, nativeImage, net } from "electron"
 import type { MenuItemConstructorOptions, Input } from "electron"
 import { CachedContentView, NavigationSettings, CachedViewStatus } from "./cached-content-view"
 import { isMobileUserAgentEnabled, isVisualZoomEnabled } from "./settings"
+import { extractFromHtml } from "@extractus/article-extractor"
+import { generateArticleHtml, generateFullContentHtml, textDirToString, TextDirection } from "./article-html-generator"
 import https from "https"
 import http from "http"
 import fs from "fs"
@@ -54,6 +56,32 @@ interface PrefetchRequest {
     url: string
     feedId: string | null
     settings: NavigationSettings
+}
+
+/**
+ * Source open target modes (must match renderer's SourceOpenTarget)
+ */
+enum PrefetchOpenTarget {
+    Local = 0,       // RSS/Local content
+    Webpage = 1,     // Load webpage directly
+    External = 2,    // Open in external browser
+    FullContent = 3  // Extract and show full content
+}
+
+/**
+ * Extended prefetch info from renderer (for FullContent)
+ */
+interface PrefetchArticleInfo {
+    articleId: string
+    itemLink: string
+    itemContent: string
+    itemTitle: string
+    itemDate: number
+    openTarget: PrefetchOpenTarget
+    textDir: number
+    fontSize: number
+    fontFamily: string
+    locale: string
 }
 
 /**
@@ -632,6 +660,125 @@ export class ContentViewPool {
             })
     }
     
+    /**
+     * Prefetch FullContent article - fetch webpage and extract content
+     * This runs entirely in the main process
+     */
+    async prefetchFullContent(
+        articleId: string,
+        feedId: string | null,
+        settings: NavigationSettings,
+        articleInfo: PrefetchArticleInfo
+    ): Promise<void> {
+        if (!this.config.enabled) return
+        
+        // Check if article is already in a view
+        const existingView = this.getViewByArticleId(articleId)
+        if (existingView && (existingView.status === 'ready' || existingView.status === 'loading')) {
+            console.log(`[ContentViewPool] FullContent prefetch skip - already ${existingView.status}: ${articleId}`)
+            return
+        }
+        
+        // Find a free view
+        let freeView = this.findFreeView()
+        if (!freeView) {
+            freeView = this.findRecyclableView()
+            if (freeView) {
+                console.log(`[ContentViewPool] FullContent prefetch: recycling ${freeView.id}`)
+                freeView.recycle()
+            }
+        }
+        
+        if (!freeView) {
+            console.log(`[ContentViewPool] FullContent prefetch skip - no free view for: ${articleId}`)
+            return
+        }
+        
+        console.log(`[ContentViewPool] FullContent prefetch starting: ${articleId} in ${freeView.id}`)
+        
+        // Recycle if needed
+        if (!freeView.isEmpty) {
+            freeView.recycle()
+        }
+        
+        // Ensure view is created
+        if (!freeView.view && this.parentWindow) {
+            this.createViewWithEvents(freeView)
+        }
+        
+        try {
+            // Step 1: Fetch the webpage
+            console.log(`[ContentViewPool] FullContent: fetching ${articleInfo.itemLink}`)
+            const html = await this.fetchWebpage(articleInfo.itemLink)
+            
+            // Step 2: Extract article content
+            console.log(`[ContentViewPool] FullContent: extracting content`)
+            const extracted = await extractFromHtml(html, articleInfo.itemLink)
+            
+            // Step 3: Use extracted content or fallback to RSS content
+            let contentToUse = extracted?.content || articleInfo.itemContent || ''
+            
+            // Step 4: Generate HTML data URL
+            const dataUrl = generateFullContentHtml({
+                title: articleInfo.itemTitle,
+                date: new Date(articleInfo.itemDate),
+                content: contentToUse,
+                baseUrl: articleInfo.itemLink,
+                textDir: textDirToString(articleInfo.textDir),
+                fontSize: articleInfo.fontSize,
+                fontFamily: articleInfo.fontFamily,
+                locale: articleInfo.locale,
+                extractorTitle: extracted?.title,
+                extractorDate: extracted?.published ? new Date(extracted.published) : undefined
+            })
+            
+            console.log(`[ContentViewPool] FullContent: loading extracted content for ${articleId}`)
+            
+            // Step 5: Load the generated HTML
+            await freeView.load(dataUrl, articleId, feedId, settings, false)
+            
+            console.log(`[ContentViewPool] FullContent prefetch complete: ${articleId}`)
+        } catch (err) {
+            console.error(`[ContentViewPool] FullContent prefetch failed for ${articleId}:`, err)
+            // On error, the view stays empty/error state
+        }
+    }
+    
+    /**
+     * Fetch webpage content using Electron's net module
+     */
+    private async fetchWebpage(url: string): Promise<string> {
+        return new Promise((resolve, reject) => {
+            const request = net.request(url)
+            let data = ''
+            
+            request.on('response', (response) => {
+                if (response.statusCode !== 200) {
+                    reject(new Error(`HTTP ${response.statusCode}`))
+                    return
+                }
+                
+                response.on('data', (chunk) => {
+                    data += chunk.toString()
+                })
+                
+                response.on('end', () => {
+                    resolve(data)
+                })
+                
+                response.on('error', (err) => {
+                    reject(err)
+                })
+            })
+            
+            request.on('error', (err) => {
+                reject(err)
+            })
+            
+            request.end()
+        })
+    }
+    
     // ========== Reading Direction ==========
     
     /**
@@ -1118,10 +1265,16 @@ export class ContentViewPool {
             this.prefetch(articleId, url, feedId, settings)
         })
         
-        // Prefetch info response from renderer
-        ipcMain.on('cvp-prefetch-info', (event, articleIndex, articleId, url, feedId, settings) => {
-            console.log(`[ContentViewPool] IPC cvp-prefetch-info received: index=${articleIndex}, articleId=${articleId}, url=${url?.substring(0, 50)}...`)
-            if (articleId && url) {
+        // Prefetch info response from renderer (extended with articleInfo for FullContent)
+        ipcMain.on('cvp-prefetch-info', (event, articleIndex, articleId, url, feedId, settings, articleInfo) => {
+            console.log(`[ContentViewPool] IPC cvp-prefetch-info received: index=${articleIndex}, articleId=${articleId}, url=${url?.substring(0, 50) || 'null'}...`)
+            
+            if (articleId && articleInfo?.openTarget === PrefetchOpenTarget.FullContent) {
+                // FullContent mode: fetch and extract in background
+                console.log(`[ContentViewPool] Starting FullContent prefetch for ${articleId}`)
+                this.prefetchFullContent(articleId, feedId, settings, articleInfo)
+            } else if (articleId && url) {
+                // Webpage or RSS mode: use URL directly
                 this.prefetch(articleId, url, feedId, settings)
             } else {
                 console.log(`[ContentViewPool] Prefetch info incomplete, skipping`)
