@@ -70,6 +70,7 @@ export class CachedContentView {
     private onStatusChanged: ((status: CachedViewStatus) => void) | null = null
     private onDomReady: (() => void) | null = null
     private onLoadError: ((error: Error) => void) | null = null
+    private onVideoFullscreen: ((isFullscreen: boolean) => void) | null = null
     
     // === Mobile User Agent ===
     private static readonly MOBILE_USER_AGENT = 
@@ -85,7 +86,21 @@ export class CachedContentView {
         )
     }
     
-    // === Debug Background Colors (for visual differentiation) ===
+    // === Debug Mode ===
+    // Debug colors are only shown in development mode (not packaged)
+    // Can be overridden with environment variable FLUENT_READER_DEBUG_COLORS=1
+    private static get debugColorsEnabled(): boolean {
+        // Enable debug colors in dev mode, unless packaged
+        // Override with env var: FLUENT_READER_DEBUG_COLORS=1 to enable in packaged builds
+        //                        FLUENT_READER_DEBUG_COLORS=0 to disable in dev builds
+        const envOverride = process.env.FLUENT_READER_DEBUG_COLORS
+        if (envOverride !== undefined) {
+            return envOverride === '1' || envOverride.toLowerCase() === 'true'
+        }
+        return !app.isPackaged
+    }
+    
+    // === Debug Background Colors (for visual differentiation in dev mode) ===
     private static readonly DEBUG_COLORS: string[] = [
         '#FF6B6B',  // Red for view-0
         '#4ECDC4',  // Green/Teal for view-1  
@@ -94,14 +109,21 @@ export class CachedContentView {
         '#F38181',  // Coral for view-4 (if needed)
     ]
     
+    // Transparent background for production
+    private static readonly TRANSPARENT_COLOR = '#00000000'
+    
     constructor(id: string) {
         this.id = id
     }
     
     /**
-     * Get debug background color based on view ID
+     * Get background color for view
+     * Returns debug color in dev mode, transparent in production
      */
-    private getDebugBackgroundColor(): string {
+    private getBackgroundColor(): string {
+        if (!CachedContentView.debugColorsEnabled) {
+            return CachedContentView.TRANSPARENT_COLOR
+        }
         // Extract numeric index from id like "view-0", "view-1", etc.
         const match = this.id.match(/view-(\d+)/)
         const index = match ? parseInt(match[1], 10) : 0
@@ -184,6 +206,10 @@ export class CachedContentView {
         this.onLoadError = callback
     }
     
+    setOnVideoFullscreen(callback: ((isFullscreen: boolean) => void) | null): void {
+        this.onVideoFullscreen = callback
+    }
+    
     // ========== Lifecycle ==========
     
     /**
@@ -216,7 +242,7 @@ export class CachedContentView {
             
             // Set debug background color for visual differentiation of views
             // Each view gets a distinct color: red, green, yellow
-            const debugColor = this.getDebugBackgroundColor()
+            const debugColor = this.getBackgroundColor()
             this._view.setBackgroundColor(debugColor)
             console.log(`[CachedContentView:${this.id}] Background color set to ${debugColor}`)
             
@@ -283,6 +309,9 @@ export class CachedContentView {
         
         // Reset activity
         this._isActive = false
+        
+        // Reset visibility state (start off-screen)
+        this._isOffScreen = true
     }
     
     // ========== Navigation ==========
@@ -403,40 +432,128 @@ export class CachedContentView {
     /**
      * Set whether this view is the active (visible) one
      * Inactive views should not send IPC events to the renderer
+     * Also mutes audio when becoming inactive to stop background playback
      */
     setActive(active: boolean): void {
         if (this._isActive === active) return
         
         this._isActive = active
         
-        // Inform the preload script about activity state
-        // Channel: 'cvp-set-active-state' (ContentViewPool prefix)
         if (this._view?.webContents && !this._view.webContents.isDestroyed()) {
+            // Inform the preload script about activity state
+            // Channel: 'cvp-set-active-state' (ContentViewPool prefix)
             this._view.webContents.send('cvp-set-active-state', active)
+            
+            // Mute audio when becoming inactive to stop background video/audio playback
+            // Unmute when becoming active again
+            this._view.webContents.setAudioMuted(!active)
+            
+            // Additionally, pause all media when becoming inactive
+            if (!active) {
+                this._view.webContents.executeJavaScript(`
+                    document.querySelectorAll('video, audio').forEach(el => {
+                        if (!el.paused) el.pause();
+                    });
+                `).catch(() => {
+                    // Ignore errors (e.g., page not ready)
+                })
+            }
         }
         
-        console.log(`[CachedContentView:${this.id}] Active: ${active}`)
+        console.log(`[CachedContentView:${this.id}] Active: ${active}, audioMuted: ${!active}`)
     }
     
     // ========== Visibility & Bounds ==========
     
     /**
+     * Off-screen position for hidden views
+     * Using large negative values to move views completely off-screen
+     * This preserves the view's rendering state (unlike setVisible which may suspend rendering)
+     */
+    private static readonly OFF_SCREEN_POSITION = -10000
+    
+    /**
+     * Whether the view is currently positioned off-screen
+     */
+    private _isOffScreen: boolean = true
+    
+    /**
      * Set the bounds of this view
+     * 
+     * For on-screen views: applies bounds directly
+     * For off-screen views: applies bounds at off-screen position (preserves correct size)
+     * 
+     * This ensures off-screen views always have the correct size, so no resize
+     * rendering is needed when they become visible again.
      */
     setBounds(bounds: { x: number, y: number, width: number, height: number }): void {
         if (this._view) {
-            this._view.setBounds(bounds)
+            if (this._isOffScreen) {
+                // Apply size at off-screen position
+                // This keeps off-screen views at the correct size
+                this._view.setBounds({
+                    x: CachedContentView.OFF_SCREEN_POSITION,
+                    y: CachedContentView.OFF_SCREEN_POSITION,
+                    width: bounds.width,
+                    height: bounds.height
+                })
+            } else {
+                // Apply bounds directly
+                this._view.setBounds(bounds)
+            }
         }
     }
     
     /**
-     * Show or hide this view using native visibility
-     * This is cleaner than moving off-screen with setBounds
+     * Show or hide this view by moving it on-screen or off-screen
+     * Using off-screen positioning instead of native setVisible() to preserve rendering state
+     * (e.g., video playback position, scroll position, etc.)
+     * 
+     * @param visible - true to show, false to hide
+     * @param bounds - The bounds to apply (from the pool's placeholder)
+     *                 Required when visible=true, optional for visible=false (uses current size if not provided)
      */
-    setVisible(visible: boolean): void {
+    setVisible(visible: boolean, bounds?: { x: number, y: number, width: number, height: number }): void {
         if (this._view) {
-            console.log(`[CachedContentView:${this.id}] setVisible(${visible})`)
-            this._view.setVisible(visible)
+            console.log(`[CachedContentView:${this.id}] setVisible(${visible}, bounds=${bounds ? `${bounds.width}x${bounds.height}@${bounds.x},${bounds.y}` : 'none'})`)
+            
+            if (visible) {
+                // Move on-screen with provided bounds
+                this._isOffScreen = false
+                if (bounds) {
+                    console.log(`[CachedContentView:${this.id}] Applying bounds: ${bounds.width}x${bounds.height}@${bounds.x},${bounds.y}`)
+                    this._view.setBounds(bounds)
+                } else {
+                    console.warn(`[CachedContentView:${this.id}] setVisible(true) called WITHOUT bounds!`)
+                }
+                // Keep native visibility on (in case it was ever turned off)
+                this._view.setVisible(true)
+            } else {
+                // Move off-screen
+                this._isOffScreen = true
+                
+                // Determine size to use at off-screen position
+                let width: number, height: number
+                if (bounds) {
+                    // Use provided bounds (from pool) - ensures correct size
+                    width = bounds.width
+                    height = bounds.height
+                } else {
+                    // Fallback: use current size
+                    const currentBounds = this._view.getBounds()
+                    width = currentBounds.width > 0 ? currentBounds.width : 800
+                    height = currentBounds.height > 0 ? currentBounds.height : 600
+                }
+                
+                // Move to off-screen position with correct size
+                this._view.setBounds({
+                    x: CachedContentView.OFF_SCREEN_POSITION,
+                    y: CachedContentView.OFF_SCREEN_POSITION,
+                    width,
+                    height
+                })
+                // Note: We don't call setVisible(false) to preserve rendering
+            }
         }
     }
     
@@ -535,6 +652,36 @@ export class CachedContentView {
     private _visualZoomEnabled: boolean = false
     
     /**
+     * Whether video is currently in fullscreen mode (disables Device Emulation)
+     */
+    private _videoFullscreenActive: boolean = false
+    
+    /**
+     * Set video fullscreen mode
+     * When entering fullscreen, Device Emulation is disabled to allow native video sizing
+     * When exiting fullscreen, Device Emulation is restored if it was enabled
+     */
+    setVideoFullscreen(isFullscreen: boolean): void {
+        this._videoFullscreenActive = isFullscreen
+        
+        if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
+            return
+        }
+        
+        console.log(`[CachedContentView:${this.id}] setVideoFullscreen: ${isFullscreen}, visualZoom=${this._visualZoomEnabled}`)
+        
+        if (isFullscreen) {
+            // Disable Device Emulation to let video take full screen
+            this._view.webContents.disableDeviceEmulation()
+        } else if (this._visualZoomEnabled && this._status === 'ready') {
+            // Restore Device Emulation when exiting fullscreen
+            const scale = 1.0 + (this._visualZoomLevel * 0.1)
+            const clampedScale = Math.max(0.25, Math.min(5.0, scale))
+            this.applyDeviceEmulation(clampedScale)
+        }
+    }
+    
+    /**
      * Set visual zoom level and apply Device Emulation
      * Level: 0 = 100%, 1 = 110%, -1 = 90%, etc.
      */
@@ -551,9 +698,9 @@ export class CachedContentView {
         
         console.log(`[CachedContentView:${this.id}] setVisualZoomLevel: level=${level}, scale=${clampedScale}, status=${this._status}`)
         
-        // Apply Device Emulation with new scale - only if ready
+        // Apply Device Emulation with new scale - only if ready AND not in video fullscreen
         // For empty/loading views, it will be applied at dom-ready
-        if (this._visualZoomEnabled && this._status === 'ready') {
+        if (this._visualZoomEnabled && this._status === 'ready' && !this._videoFullscreenActive) {
             this.applyDeviceEmulation(clampedScale)
         }
         
@@ -767,6 +914,18 @@ export class CachedContentView {
                 this.setStatus('error')
                 this.onLoadError?.(error)
             }
+        })
+        
+        // HTML5 Video Fullscreen - entering
+        wc.on('enter-html-full-screen', () => {
+            console.log(`[CachedContentView:${this.id}] Video entering fullscreen`)
+            this.onVideoFullscreen?.(true)
+        })
+        
+        // HTML5 Video Fullscreen - leaving
+        wc.on('leave-html-full-screen', () => {
+            console.log(`[CachedContentView:${this.id}] Video leaving fullscreen`)
+            this.onVideoFullscreen?.(false)
         })
     }
     

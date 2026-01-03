@@ -97,7 +97,7 @@ export class ContentViewPool {
     
     // === Configuration ===
     private config: PoolConfig = {
-        size: 3,
+        size: 5,
         prefetchDelay: 1,  // Reduced for testing (was 400ms)
         enabled: true
     }
@@ -109,6 +109,7 @@ export class ContentViewPool {
     private visibleBounds: ContentViewBounds = { x: 0, y: 0, width: 800, height: 600 }
     private boundsReceived: boolean = false  // Track if real bounds have been received from renderer
     private isPoolVisible: boolean = false
+    private videoFullscreenActive: boolean = false  // Track if video is in fullscreen mode
     
     // === Reading Direction ===
     private readingDirection: ReadingDirection = 'unknown'
@@ -118,6 +119,7 @@ export class ContentViewPool {
     // === Prefetch Timer ===
     private prefetchTimer: NodeJS.Timeout | null = null
     private pendingPrefetch: PrefetchRequest[] = []
+    private protectedArticleIds: Set<string> = new Set()  // Articles that should not be recycled (prefetch targets)
     
     // === Zoom State ===
     private cssZoomLevel: number = 0
@@ -189,6 +191,7 @@ export class ContentViewPool {
         this.setupViewKeyboardEvents(view)
         this.setupViewContextMenu(view)
         this.setupFocusGuard(view)  // Prevent background views from stealing focus
+        this.setupVideoFullscreenEvents(view)  // Handle HTML5 video fullscreen
         this.updateWebContentsMapping()
         
         // Apply current bounds to the newly created view
@@ -206,6 +209,85 @@ export class ContentViewPool {
         } else {
             view.setCssZoom(this.cssZoomLevel)
         }
+    }
+    
+    /**
+     * Setup video fullscreen event handling
+     * When a video enters/leaves fullscreen, notify renderer to adjust UI
+     */
+    private setupVideoFullscreenEvents(view: CachedContentView): void {
+        view.setOnVideoFullscreen((isFullscreen) => {
+            // Only send events for the active view
+            if (view.isActive) {
+                console.log(`[ContentViewPool] Video fullscreen: ${isFullscreen}`)
+                this.sendToRenderer('content-view-video-fullscreen', isFullscreen)
+                
+                // Track fullscreen state to prevent setBounds from overriding
+                this.videoFullscreenActive = isFullscreen
+                
+                // When entering fullscreen, expand view to fill entire window
+                if (isFullscreen && this.parentWindow && !this.parentWindow.isDestroyed()) {
+                    // Disable Device Emulation FIRST for proper video sizing
+                    view.setVideoFullscreen(true)
+                    
+                    // Make window fullscreen for immersive experience
+                    if (!this.parentWindow.isFullScreen()) {
+                        this.parentWindow.setFullScreen(true)
+                    }
+                    
+                    // Then set view bounds to full window - use setTimeout to ensure window is fullscreen
+                    setTimeout(() => {
+                        if (this.parentWindow && !this.parentWindow.isDestroyed()) {
+                            const [width, height] = this.parentWindow.getContentSize()
+                            console.log(`[ContentViewPool] Setting fullscreen bounds: ${width}x${height}`)
+                            view.setBounds({ x: 0, y: 0, width, height })
+                            
+                            // Force the content to recognize the new size by triggering a resize event
+                            this.triggerContentResize(view)
+                        }
+                    }, 100)
+                } else if (!isFullscreen) {
+                    // Exit window fullscreen if we entered it
+                    if (this.parentWindow && !this.parentWindow.isDestroyed() && this.parentWindow.isFullScreen()) {
+                        this.parentWindow.setFullScreen(false)
+                    }
+                    
+                    // Restore normal bounds FIRST, then restore Device Emulation
+                    // This ensures Device Emulation uses the correct viewport size
+                    setTimeout(() => {
+                        view.setBounds(this.visibleBounds)
+                        
+                        // Force the content to recognize the restored size
+                        this.triggerContentResize(view)
+                        
+                        // Now restore Device Emulation with correct bounds
+                        // Small additional delay to ensure bounds are applied
+                        setTimeout(() => {
+                            view.setVideoFullscreen(false)
+                        }, 50)
+                    }, 100)
+                }
+            }
+        })
+    }
+    
+    /**
+     * Force the WebContents to recognize new bounds by triggering a resize event
+     * and invalidating the render cache
+     */
+    private triggerContentResize(view: CachedContentView): void {
+        const wc = view.getWebContents()
+        if (!wc || wc.isDestroyed()) return
+        
+        // Dispatch resize event to the window in the WebContents
+        wc.executeJavaScript(`
+            window.dispatchEvent(new Event('resize'));
+        `).catch(() => {
+            // Ignore errors (e.g., if page is not ready)
+        })
+        
+        // Invalidate render cache to force repaint
+        wc.invalidate()
     }
     
     /**
@@ -242,6 +324,35 @@ export class ContentViewPool {
     }
     
     /**
+     * Keys that are handled by the app and should NOT be passed to the page
+     * These keys are processed via IPC and would cause conflicts if also handled by the page
+     * (e.g., "m" for mobile mode would also mute HTML5 videos)
+     */
+    private static readonly BLOCKED_KEYS = new Set([
+        'm', 'M',           // Mobile mode toggle (conflicts with video mute)
+        'w', 'W',           // Full content toggle
+        'p', 'P',           // Visual zoom toggle
+        'h', 'H',           // Hide toggle
+        '+', '=',           // Zoom in
+        '-', '_',           // Zoom out
+        '#',                // Reset zoom
+        'ArrowLeft',        // Previous article
+        'ArrowRight',       // Next article
+        'Escape',           // Close/back
+        // Note: ArrowUp/ArrowDown are NOT blocked - needed for scrolling in page
+    ])
+    
+    /**
+     * Keys that should be passed through to the page during video fullscreen
+     * These are typically video player controls that conflict with app shortcuts
+     */
+    private static readonly VIDEO_FULLSCREEN_PASSTHROUGH_KEYS = new Set([
+        'm', 'M',           // Video mute toggle
+        'ArrowLeft',        // Video seek backward
+        'ArrowRight',       // Video seek forward
+    ])
+    
+    /**
      * Setup keyboard event forwarding for a view
      */
     private setupViewKeyboardEvents(view: CachedContentView): void {
@@ -264,6 +375,19 @@ export class ContentViewPool {
             // Don't forward F11/F12 - global shortcuts handled by main window
             if (input.key === 'F11' || input.key === 'F12') {
                 return
+            }
+            
+            // During video fullscreen, let certain keys pass through to the video player
+            // instead of being handled by the app (e.g., ArrowLeft/Right for seeking, m for mute)
+            if (this.videoFullscreenActive && ContentViewPool.VIDEO_FULLSCREEN_PASSTHROUGH_KEYS.has(input.key)) {
+                console.log(`[ContentViewPool] Video fullscreen: passing ${input.key} to page`)
+                return  // Don't block, don't forward to renderer - let page handle it
+            }
+            
+            // Block keys that we handle via IPC to prevent page from also handling them
+            // e.g., "m" toggles mobile mode but would also mute videos
+            if (ContentViewPool.BLOCKED_KEYS.has(input.key)) {
+                event.preventDefault()
             }
             
             // Forward to renderer for processing
@@ -538,12 +662,12 @@ export class ContentViewPool {
         // Need to load - find or create a view
         const view = cachedView ?? this.getOrCreateView(articleId)
         
-        // Deactivate current view - hide it
+        // Deactivate current view - hide it (with current bounds so size is preserved)
         const currentActive = this.getActiveView()
         if (currentActive && currentActive !== view) {
             console.log(`[ContentViewPool] Deactivating and hiding ${currentActive.id}`)
             currentActive.setActive(false)
-            currentActive.setVisible(false)  // Hide using native visibility
+            currentActive.setVisible(false, this.visibleBounds)  // Pass bounds to preserve size
         }
         
         // Set as active (but not visible yet - will show after load)
@@ -566,8 +690,7 @@ export class ContentViewPool {
             
             // Show view when ready (only if still active AND bounds are available)
             if (this.isPoolVisible && this.boundsReceived) {
-                view.setBounds(this.visibleBounds)
-                view.setVisible(true)  // Show using native visibility
+                view.setVisible(true, this.visibleBounds)
                 view.focus()  // Single focus call after visibility is set
                 console.log(`[ContentViewPool] Load complete, showing ${view.id}`)
             } else if (this.isPoolVisible) {
@@ -894,6 +1017,14 @@ export class ContentViewPool {
     /**
      * Execute prefetch based on reading direction
      */
+    /**
+     * Execute prefetch for adjacent articles
+     * 
+     * IMPORTANT: Before requesting prefetch info from renderer, we protect
+     * the current article and its neighbors from being recycled. This prevents
+     * a race condition where the primary prefetch recycles a view that holds
+     * an article needed by the secondary prefetch.
+     */
     private executePrefetch(): void {
         console.log(`[ContentViewPool] executePrefetch() - index=${this.currentArticleIndex}, listLength=${this.articleListLength}, direction=${this.readingDirection}`)
         if (this.currentArticleIndex < 0) {
@@ -905,6 +1036,28 @@ export class ContentViewPool {
         const targets = this.determinePrefetchTargets()
         
         console.log(`[ContentViewPool] Prefetch targets:`, targets)
+        
+        // Clear old protected articles and protect current neighbors
+        // This prevents recycling views that hold articles we might navigate to
+        this.protectedArticleIds.clear()
+        
+        // Protect the active article
+        const activeView = this.getActiveView()
+        if (activeView?.articleId) {
+            this.protectedArticleIds.add(activeView.articleId)
+        }
+        
+        // Protect articles at target indices (we don't know their IDs yet,
+        // but we can protect any view holding articles at adjacent indices)
+        // For simplicity, protect all non-active ready views for the duration of prefetch
+        // The protection will be updated on next navigation
+        for (const view of this.views) {
+            if (!view.isActive && view.articleId && view.status === 'ready') {
+                this.protectedArticleIds.add(view.articleId)
+            }
+        }
+        
+        console.log(`[ContentViewPool] Protected articles:`, Array.from(this.protectedArticleIds))
         
         // Request prefetch info from renderer
         // The renderer knows the article URLs
@@ -1019,10 +1172,19 @@ export class ContentViewPool {
     /**
      * Find the best view to recycle based on reading direction
      * Prefers views that hold articles in the opposite direction of reading
+     * NEVER recycles views holding protected articles (current prefetch targets)
      */
     private findRecyclableView(): CachedContentView | null {
-        // Don't recycle active view
-        const candidates = this.views.filter(v => !v.isActive)
+        // Don't recycle active view or views with protected articles
+        const candidates = this.views.filter(v => {
+            if (v.isActive) return false
+            // Don't recycle if article is protected (needed as prefetch target)
+            if (v.articleId && this.protectedArticleIds.has(v.articleId)) {
+                console.log(`[ContentViewPool] Skipping ${v.id} (protected article ${v.articleId})`)
+                return false
+            }
+            return true
+        })
         
         if (candidates.length === 0) return null
         
@@ -1065,11 +1227,11 @@ export class ContentViewPool {
      * Activate a view (make it the visible one)
      */
     private activateView(view: CachedContentView): void {
-        // Deactivate current - hide it
+        // Deactivate current - hide it (with current bounds so size is preserved)
         const current = this.getActiveView()
         if (current && current !== view) {
             current.setActive(false)
-            current.setVisible(false)  // Hide using native visibility
+            current.setVisible(false, this.visibleBounds)  // Pass bounds to preserve size
         }
         
         // Activate new
@@ -1078,8 +1240,7 @@ export class ContentViewPool {
         
         // Apply bounds and show if pool is visible AND we have real bounds
         if (this.isPoolVisible && this.boundsReceived) {
-            view.setBounds(this.visibleBounds)
-            view.setVisible(true)
+            view.setVisible(true, this.visibleBounds)
             view.focus()  // Single focus call after visibility is set
             console.log(`[ContentViewPool] Activated ${view.id} - visible with bounds:`, this.visibleBounds)
         } else if (this.isPoolVisible) {
@@ -1126,12 +1287,24 @@ export class ContentViewPool {
         
         const firstRealBounds = !this.boundsReceived && isRealBounds
         
-        // Store bounds
+        // Store bounds (always store for later restoration)
         this.visibleBounds = bounds
         
         // Only mark as received if real bounds
         if (isRealBounds) {
             this.boundsReceived = true
+        }
+        
+        // If video is in fullscreen mode, don't apply normal bounds - keep view at full window size
+        if (this.videoFullscreenActive) {
+            console.log(`[ContentViewPool] setBounds skipped (video fullscreen active):`, bounds)
+            // Instead, ensure active view stays at full window bounds
+            const activeView = this.getActiveView()
+            if (activeView && this.parentWindow && !this.parentWindow.isDestroyed()) {
+                const [width, height] = this.parentWindow.getContentSize()
+                activeView.setBounds({ x: 0, y: 0, width, height })
+            }
+            return
         }
         
         console.log(`[ContentViewPool] setBounds:`, bounds, `real=${isRealBounds}, boundsReceived=${this.boundsReceived}`)
@@ -1147,8 +1320,7 @@ export class ContentViewPool {
             if (firstRealBounds) {
                 console.log(`[ContentViewPool] First real bounds received! Showing active view ${active.id} at:`, bounds)
             }
-            active.setBounds(bounds)
-            active.setVisible(true)
+            active.setVisible(true, bounds)
             active.focus()
         }
     }
@@ -1165,15 +1337,14 @@ export class ContentViewPool {
             if (visible) {
                 // Only show if we have real bounds, otherwise wait for setBounds
                 if (this.boundsReceived) {
-                    active.setBounds(this.visibleBounds)
-                    active.setVisible(true)
+                    active.setVisible(true, this.visibleBounds)
                     active.focus()
                     console.log(`[ContentViewPool] Showing ${active.id} at bounds:`, this.visibleBounds)
                 } else {
                     console.log(`[ContentViewPool] setVisible(true) - waiting for bounds before showing ${active.id}`)
                 }
             } else {
-                active.setVisible(false)
+                active.setVisible(false, this.visibleBounds)  // Pass bounds to preserve size
             }
         } else if (visible && !wasVisible) {
             console.log(`[ContentViewPool] setVisible(true) - no active view yet`)
@@ -1601,8 +1772,7 @@ export class ContentViewPool {
                 // Mark as active again and restore visibility with current bounds
                 active.setActive(true)
                 if (this.isPoolVisible && this.boundsReceived) {
-                    active.setBounds(this.visibleBounds)
-                    active.setVisible(true)
+                    active.setVisible(true, this.visibleBounds)
                 }
                 
                 console.log("[ContentViewPool] cvp-nuke: View recycled, ready for new navigation")

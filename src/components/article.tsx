@@ -1965,8 +1965,30 @@ window.__articleData = ${JSON.stringify({
         if (!window.contentViewPool) return;
         if (this.contentViewHiddenForMenu) return;  // Already hidden
         
-        // Pool mode: Just hide without screenshot for now (Pool views have different lifecycle)
-        if (!shouldHideCheck || shouldHideCheck()) {
+        // Check if we should proceed (for async timing safety)
+        if (shouldHideCheck && !shouldHideCheck()) return;
+        
+        try {
+            // Capture screenshot BEFORE hiding the view
+            const screenshot = await window.contentViewPool.captureScreen();
+            
+            // Double-check we should still hide (timing race protection)
+            if (shouldHideCheck && !shouldHideCheck()) return;
+            if (this.contentViewHiddenForMenu) return;  // Something else already hid it
+            
+            // Set screenshot in state (this shows the blur placeholder)
+            if (screenshot && this._isMounted) {
+                this.setState({ menuBlurScreenshot: screenshot });
+            }
+            
+            // Now hide the ContentView
+            window.contentViewPool.setVisible(false);
+            this.contentViewHiddenForMenu = true;
+            
+            console.log(`[Article] ContentView hidden with screenshot for: ${reason}`);
+        } catch (error) {
+            console.error(`[Article] Failed to capture screenshot for ${reason}:`, error);
+            // Fall back to hiding without screenshot
             window.contentViewPool.setVisible(false);
             this.contentViewHiddenForMenu = true;
         }
@@ -3262,7 +3284,7 @@ window.__articleData = ${JSON.stringify({
                                 backgroundSize: "100% 100%",
                                 backgroundPosition: "top left",
                                 backgroundRepeat: "no-repeat",
-                                filter: "blur(4px) brightness(0.9)",
+                                filter: "blur(1px) brightness(1.0)",
                                 zIndex: 10,
                                 cursor: "pointer",
                             }}
