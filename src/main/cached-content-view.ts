@@ -560,6 +560,14 @@ export class CachedContentView {
     /**
      * Focus this view's webContents
      * Important for keyboard input to be captured
+     * 
+     * WORKAROUND: WebContentsView steals focus from the main window when loading URLs.
+     * We must explicitly call focus() after load operations to restore keyboard input.
+     * 
+     * This is a known Electron bug:
+     * https://github.com/electron/electron/issues/42578
+     * 
+     * Once fixed, the explicit focus() calls after load/activate can potentially be removed.
      */
     focus(): void {
         if (this._view?.webContents && !this._view.webContents.isDestroyed()) {
