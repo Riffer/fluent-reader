@@ -757,9 +757,20 @@ export class CachedContentView {
             const mobileToActualScale = actualWidth / CachedContentView.MOBILE_VIEWPORT_WIDTH
             totalScale = mobileToActualScale * zoomScale
         } else {
-            // Normal mode: Use actual view dimensions, only apply zoom scale
-            viewWidth = actualWidth
-            viewHeight = actualHeight
+            // Normal mode: Adjust viewport size inversely to zoom scale
+            // This ensures content fills the full width at any zoom level
+            // 
+            // Example: At 90% zoom (zoomScale = 0.9):
+            //   - Simulated viewport = actualSize / 0.9 = ~111% larger
+            //   - Content renders for larger viewport
+            //   - After 0.9x scale, content fills actual width perfectly
+            //
+            // At 110% zoom (zoomScale = 1.1):
+            //   - Simulated viewport = actualSize / 1.1 = ~91% smaller  
+            //   - Content renders for smaller viewport
+            //   - After 1.1x scale, content fills actual width perfectly
+            viewWidth = Math.round(actualWidth / zoomScale)
+            viewHeight = Math.round(actualHeight / zoomScale)
             totalScale = zoomScale
         }
         
