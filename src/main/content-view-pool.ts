@@ -126,6 +126,11 @@ export class ContentViewPool {
     private visualZoomEnabled: boolean = false
     private mobileMode: boolean = false
     
+    // === Focus Tracking ===
+    // Track if ContentView had focus before window lost focus
+    // This allows restoring focus when window regains focus
+    private contentViewHadFocus: boolean = false
+    
     // === Singleton ===
     private static instance: ContentViewPool | null = null
     
@@ -157,7 +162,58 @@ export class ContentViewPool {
         this.visualZoomEnabled = isVisualZoomEnabled()
         console.log(`[ContentViewPool] Initialized with pool size: ${this.config.size}, visualZoom: ${this.visualZoomEnabled}`)
         
+        // Setup window focus tracking
+        this.setupWindowFocusTracking()
+        
         // Views are created lazily when needed
+    }
+    
+    /**
+     * Setup window focus/blur tracking to restore ContentView focus
+     * 
+     * Problem: When the window loses focus and regains it, the ContentView
+     * loses keyboard focus to other UI elements (like buttons).
+     * 
+     * Solution: If ContentView is visible when window loses focus, restore focus on regain.
+     * 
+     * Note: We cannot reliably check webContents.isFocused() at blur time because
+     * focus has already moved to the other window by the time the event fires.
+     * Therefore we use a simple heuristic: if ContentView is visible, restore its focus.
+     */
+    private setupWindowFocusTracking(): void {
+        if (!this.parentWindow) return
+        
+        // When window loses focus, remember if ContentView was visible
+        this.parentWindow.on('blur', () => {
+            const activeView = this.getActiveView()
+            
+            if (activeView && this.isPoolVisible && activeView.isReady) {
+                // ContentView is visible and ready - restore its focus when window regains focus
+                this.contentViewHadFocus = true
+                console.log(`[ContentViewPool] Window blur - ContentView ${activeView.id} visible, will restore focus`)
+            } else {
+                this.contentViewHadFocus = false
+                console.log('[ContentViewPool] Window blur - ContentView not visible/ready')
+            }
+        })
+        
+        // When window regains focus, restore ContentView focus if it was visible before
+        this.parentWindow.on('focus', () => {
+            console.log(`[ContentViewPool] Window focus - contentViewHadFocus=${this.contentViewHadFocus}, isPoolVisible=${this.isPoolVisible}`)
+            if (this.contentViewHadFocus && this.isPoolVisible) {
+                const activeView = this.getActiveView()
+                if (activeView && activeView.isReady) {
+                    console.log('[ContentViewPool] Window focus - restoring ContentView focus')
+                    // Small delay to let window focus settle
+                    setTimeout(() => {
+                        if (this.contentViewHadFocus && activeView.isActive) {
+                            activeView.focus()
+                            console.log('[ContentViewPool] ContentView focus restored')
+                        }
+                    }, 50)
+                }
+            }
+        })
     }
     
     /**
