@@ -1964,8 +1964,8 @@ export class ContentViewPool {
             }
         }
         
-        // Sync to all views in pool (so prefetched articles have same zoom)
-        this.syncZoomToAllViews()
+        // Sync to views of the same feed (zoom is feed-specific)
+        this.syncZoomToSameFeedViews()
     }
     
     /**
@@ -1991,8 +1991,8 @@ export class ContentViewPool {
             console.log(`[ContentViewPool] setCssZoom: no active view!`)
         }
         
-        // Sync to all views
-        this.syncZoomToAllViews()
+        // Sync to views of the same feed (zoom is feed-specific)
+        this.syncZoomToSameFeedViews()
     }
     
     /**
@@ -2022,14 +2022,29 @@ export class ContentViewPool {
     }
     
     /**
-     * Sync zoom level to all views in pool
+     * Sync zoom level to views of the same feed in pool
+     * 
+     * The zoom level is feed-specific (stored in source.defaultZoom),
+     * so we only sync to views that have the same feedId as the active view.
      */
-    private syncZoomToAllViews(): void {
+    private syncZoomToSameFeedViews(): void {
+        const activeView = this.getActiveView()
+        const activeFeedId = activeView?.feedId
+        
+        if (!activeFeedId) {
+            console.log('[ContentViewPool] syncZoomToSameFeedViews: no active feed, skipping')
+            return
+        }
+        
         for (const view of this.views) {
-            if (this.visualZoomEnabled) {
-                view.setVisualZoomLevel(this.cssZoomLevel)
-            } else {
-                view.setCssZoom(this.cssZoomLevel)
+            // Only sync to views of the same feed (excluding the active view which is already updated)
+            if (view !== activeView && view.feedId === activeFeedId) {
+                console.log(`[ContentViewPool] syncZoomToSameFeedViews: syncing ${view.id} (same feed: ${activeFeedId})`)
+                if (this.visualZoomEnabled) {
+                    view.setVisualZoomLevel(this.cssZoomLevel)
+                } else {
+                    view.setCssZoom(this.cssZoomLevel)
+                }
             }
         }
     }

@@ -648,10 +648,18 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             url = this.generateArticleHtml(item, source);
         }
         
-        // Use same settings as current view (for prefetch, use current zoom/mode)
-        const settings = this.getNavigationSettings();
+        // Use TARGET feed's default zoom, not current view's zoom
+        // This ensures prefetched articles from different feeds have correct initial zoom
+        const targetZoom = source.defaultZoom || 0;
+        const targetZoomFactor = 1.0 + (targetZoom * 0.1);
+        const settings = {
+            zoomFactor: targetZoomFactor,
+            visualZoom: this.state.visualZoomEnabled,
+            mobileMode: this.localMobileMode,
+            showZoomOverlay: this.state.showZoomOverlay
+        };
         
-        console.log(`[ContentViewPool] Providing prefetch info for index ${articleIndex}: item=${itemId}, openTarget=${SourceOpenTarget[openTarget]}, url=${url?.substring(0, 50) || 'null (FullContent)'}...`);
+        console.log(`[ContentViewPool] Providing prefetch info for index ${articleIndex}: item=${itemId}, openTarget=${SourceOpenTarget[openTarget]}, targetZoom=${targetZoom}, url=${url?.substring(0, 50) || 'null (FullContent)'}...`);
         window.contentViewPool?.providePrefetchInfo(
             articleIndex,
             String(itemId),
@@ -967,7 +975,11 @@ window.__articleData = ${JSON.stringify({
             
             // Setup ResizeObserver for dynamic bounds updates
             if (!this.resizeObserver) {
-                this.resizeObserver = new ResizeObserver(() => {
+                this.resizeObserver = new ResizeObserver((entries) => {
+                    for (const entry of entries) {
+                        const { width, height } = entry.contentRect;
+                        console.log(`[Article] ResizeObserver: placeholder size changed to ${Math.round(width)}x${Math.round(height)}`);
+                    }
                     this.updateContentViewBounds();
                 });
                 this.resizeObserver.observe(this.contentViewPlaceholderRef);
@@ -977,6 +989,7 @@ window.__articleData = ${JSON.stringify({
             // Use multiple delayed updates to handle maximize/fullscreen animations
             if (!this.windowResizeListener) {
                 this.windowResizeListener = () => {
+                    console.log(`[Article] Window resize event fired, innerSize: ${window.innerWidth}x${window.innerHeight}`);
                     // Immediate update
                     this.updateContentViewBounds();
                     // Delayed updates to catch post-animation layout changes

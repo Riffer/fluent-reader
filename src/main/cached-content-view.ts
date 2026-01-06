@@ -346,6 +346,15 @@ export class CachedContentView {
         this._loadedWithMobileMode = settings.mobileMode
         this._loadedWithVisualZoom = settings.visualZoom
         
+        // Apply visual zoom settings BEFORE navigation
+        // This ensures Device Emulation is applied correctly on dom-ready
+        this._visualZoomEnabled = settings.visualZoom
+        this._mobileMode = settings.mobileMode
+        // Convert zoomFactor back to level: factor = 1.0 + (level * 0.1) → level = (factor - 1.0) / 0.1
+        this._visualZoomLevel = Math.round((settings.zoomFactor - 1.0) / 0.1)
+        
+        console.log(`[CachedContentView:${this.id}] Load settings: visualZoom=${settings.visualZoom}, zoomLevel=${this._visualZoomLevel}, mobileMode=${settings.mobileMode}`)
+        
         // Reset error state
         this._loadError = null
         this._loadStartTime = performance.now()
@@ -485,6 +494,9 @@ export class CachedContentView {
      * 
      * This ensures off-screen views always have the correct size, so no resize
      * rendering is needed when they become visible again.
+     * 
+     * IMPORTANT: Also re-applies Device Emulation when bounds change and visual zoom is enabled,
+     * because Device Emulation viewport must match the actual view bounds.
      */
     setBounds(bounds: { x: number, y: number, width: number, height: number }): void {
         if (this._view) {
@@ -500,6 +512,14 @@ export class CachedContentView {
             } else {
                 // Apply bounds directly
                 this._view.setBounds(bounds)
+            }
+            
+            // Re-apply Device Emulation when bounds change (if visual zoom is enabled)
+            // This is necessary because Device Emulation uses a fixed viewport size
+            // that must match the actual view bounds for proper rendering
+            if (this._visualZoomEnabled && this._status === 'ready' && !this._videoFullscreenActive) {
+                const scale = 1.0 + (this._visualZoomLevel * 0.1)
+                this.applyDeviceEmulation(Math.max(0.25, Math.min(5.0, scale)))
             }
         }
     }
@@ -765,20 +785,33 @@ export class CachedContentView {
             const mobileToActualScale = actualWidth / CachedContentView.MOBILE_VIEWPORT_WIDTH
             totalScale = mobileToActualScale * zoomScale
         } else {
-            // Normal mode: Adjust viewport size inversely to zoom scale
-            // This ensures content fills the full width at any zoom level
-            // 
-            // Example: At 90% zoom (zoomScale = 0.9):
-            //   - Simulated viewport = actualSize / 0.9 = ~111% larger
-            //   - Content renders for larger viewport
-            //   - After 0.9x scale, content fills actual width perfectly
-            //
-            // At 110% zoom (zoomScale = 1.1):
-            //   - Simulated viewport = actualSize / 1.1 = ~91% smaller  
-            //   - Content renders for smaller viewport
-            //   - After 1.1x scale, content fills actual width perfectly
-            viewWidth = Math.round(actualWidth / zoomScale)
-            viewHeight = Math.round(actualHeight / zoomScale)
+            // Check if this is a local content view (RSS/Local mode uses data: URLs)
+            // Webpage mode uses http:// or https:// URLs
+            const isLocalContent = this._url?.startsWith('data:')
+            
+            if (isLocalContent) {
+                // RSS/Local mode: Scale WIDTH but keep HEIGHT at full placeholder size
+                // 
+                // The `scale` factor is applied to BOTH dimensions by Device Emulation.
+                // To achieve "scaled width, full height":
+                // - Width: Use actual width → after scale, width = actualWidth * scale (scaled!)
+                // - Height: Compensate with larger viewport → after scale, height = actualHeight (full!)
+                //
+                // Example at 60% zoom (scale = 0.6):
+                //   viewWidth = actualWidth → final width = actualWidth * 0.6 = 60% (scaled)
+                //   viewHeight = actualHeight / 0.6 → final height = (actualHeight / 0.6) * 0.6 = 100% (full)
+                //
+                // This keeps content vertically filling the full placeholder while
+                // horizontally scaling to show the zoom effect.
+                viewWidth = actualWidth  // No compensation → will be scaled
+                viewHeight = Math.round(actualHeight / zoomScale)  // Compensate → will stay full height
+            } else {
+                // Webpage/FullContent mode: Scale BOTH dimensions equally
+                // This ensures the webpage layout is preserved at any zoom level
+                // (width and height both scale proportionally)
+                viewWidth = Math.round(actualWidth / zoomScale)
+                viewHeight = Math.round(actualHeight / zoomScale)
+            }
             totalScale = zoomScale
         }
         
@@ -795,7 +828,7 @@ export class CachedContentView {
             scale: totalScale
         }
         
-        console.log(`[CachedContentView:${this.id}] Device Emulation: zoomScale=${zoomScale.toFixed(2)}, totalScale=${totalScale.toFixed(2)}, viewport=${viewWidth}x${viewHeight}, mobileMode=${this._mobileMode}`)
+        console.log(`[CachedContentView:${this.id}] Device Emulation: article=${this._articleId}, zoomScale=${zoomScale.toFixed(2)}, totalScale=${totalScale.toFixed(2)}, viewport=${viewWidth}x${viewHeight}, mobileMode=${this._mobileMode}`)
         wc.enableDeviceEmulation(emulationParams)
     }
     
