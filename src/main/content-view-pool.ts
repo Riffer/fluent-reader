@@ -1297,7 +1297,9 @@ export class ContentViewPool {
     private activateView(view: CachedContentView): void {
         // Deactivate current - hide it (with current bounds so size is preserved)
         const current = this.getActiveView()
-        if (current && current !== view) {
+        const sameView = current === view
+        
+        if (current && !sameView) {
             current.setActive(false)
             current.setVisible(false, this.visibleBounds)  // Pass bounds to preserve size
         }
@@ -1307,10 +1309,15 @@ export class ContentViewPool {
         view.setActive(true)
         
         // Apply bounds and show if pool is visible AND we have real bounds
+        // IMPORTANT: Always ensure visibility is set, even for same view (it might have been hidden)
         if (this.isPoolVisible && this.boundsReceived) {
             view.setVisible(true, this.visibleBounds)
             view.focus()  // Single focus call after visibility is set
-            console.log(`[ContentViewPool] Activated ${view.id} - visible with bounds:`, this.visibleBounds)
+            if (sameView) {
+                console.log(`[ContentViewPool] Re-activated same ${view.id} - ensuring visible with bounds:`, this.visibleBounds)
+            } else {
+                console.log(`[ContentViewPool] Activated ${view.id} - visible with bounds:`, this.visibleBounds)
+            }
         } else if (this.isPoolVisible) {
             // Pool is visible but no bounds yet - view will be shown when bounds arrive
             console.log(`[ContentViewPool] Activated ${view.id} - waiting for bounds before showing`)

@@ -932,6 +932,22 @@ try {
     return null;
   }
   
+  // Helper to get absolute scroll position of an element
+  // Uses getBoundingClientRect which accounts for nested elements correctly
+  function getAbsoluteTop(element, ctx) {
+    if (visualZoomEnabled) {
+      // In Visual Zoom mode: element's position relative to viewport + current scroll
+      return element.getBoundingClientRect().top + window.scrollY;
+    } else {
+      // In CSS zoom mode: element's position relative to container + container's scroll
+      const container = ctx.container;
+      const containerRect = container.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      // Element's top relative to container's top, plus container's current scroll
+      return (elementRect.top - containerRect.top) + container.scrollTop;
+    }
+  }
+  
   // Helper to get scroll container and scroll position based on mode
   function getScrollContext() {
     if (visualZoomEnabled) {
@@ -965,8 +981,9 @@ try {
   }
   
   // Check if an image extends beyond the viewport bottom
-  function getImageOverflow(img, viewportTop, viewportHeight) {
-    const imgTop = img.offsetTop;
+  // Uses absolute positioning for correct calculation with nested elements
+  function getImageOverflow(img, viewportTop, viewportHeight, ctx) {
+    const imgTop = getAbsoluteTop(img, ctx);
     const imgBottom = imgTop + img.offsetHeight;
     const viewportBottom = viewportTop + viewportHeight;
     
@@ -989,8 +1006,9 @@ try {
     
     // Maximum scroll distance = one page (80% of viewport for overlap)
     const maxScrollDistance = viewportHeight * 0.8;
-    // Threshold: element must be at least this far into viewport to be "current"
-    const visibilityThreshold = viewportHeight * 0.15;
+    // Small threshold: element must be at least this far from top to be "not yet aligned"
+    // Using a small fixed value (30px) instead of percentage for precise alignment
+    const alignmentThreshold = 30;
     
     // If no substantial images, use page scrolling with overlap
     if (images.length === 0) {
@@ -1009,8 +1027,9 @@ try {
       
       // First, check if any currently visible image overflows the viewport
       // If so, scroll to show more of that image instead of jumping to the next one
+      let hasOverflowingImage = false;
       for (let i = 0; i < images.length; i++) {
-        const overflow = getImageOverflow(images[i], viewportTop, viewportHeight);
+        const overflow = getImageOverflow(images[i], viewportTop, viewportHeight, ctx);
         
         if (overflow.isVisible && overflow.overflowsBottom) {
           // This image is visible but extends below viewport
@@ -1022,22 +1041,40 @@ try {
           ctx.scrollBy(scrollAmount);
           return true;
         }
+        if (overflow.isVisible) {
+          hasOverflowingImage = false; // Current image is fully visible
+        }
       }
       
-      // No overflowing image - find next anchor point within reach
-      // "Within reach" = within one page scroll distance
+      // No overflowing image - find next anchor point
+      // Use extended reach if current content is fully visible (no overflow)
+      // This allows jumping directly to the next item even if slightly beyond 80%
+      const extendedMaxDistance = viewportHeight * 1.2; // Extended reach for "snap to next"
       const maxTargetPosition = viewportTop + maxScrollDistance;
+      const extendedTargetPosition = viewportTop + extendedMaxDistance;
       let nextTarget = null;
       let nextTargetIndex = -1;
+      let nextTargetDistance = 0;
       
       for (let i = 0; i < targets.length; i++) {
-        const targetTop = targets[i].target.offsetTop;
+        const targetTop = getAbsoluteTop(targets[i].target, ctx);
         
-        // Target must be below current view (not already visible at top)
-        if (targetTop > viewportTop + visibilityThreshold) {
-          // Check if target is within one page distance
+        // Target must not be already aligned at top (allow small tolerance)
+        if (targetTop > viewportTop + alignmentThreshold) {
+          nextTargetDistance = targetTop - viewportTop;
+          
+          // Check if target is within normal reach (80%)
           if (targetTop <= maxTargetPosition) {
             // Found an anchor within reach - scroll to it
+            nextTarget = targets[i];
+            nextTargetIndex = i;
+            break;
+          } 
+          // Check if target is within extended reach (120%) - snap directly to it
+          // This handles the case where current item is fully visible but next item
+          // is just slightly beyond the 80% threshold
+          else if (targetTop <= extendedTargetPosition) {
+            // Target is in "extended reach" zone - snap to it directly
             nextTarget = targets[i];
             nextTargetIndex = i;
             break;
@@ -1049,8 +1086,10 @@ try {
       }
       
       if (nextTarget) {
-        // Scroll to the anchor point
-        nextTarget.target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Scroll to the anchor point - use scrollTo for consistent behavior
+        // scrollIntoView can behave unexpectedly with Device Emulation/Visual Zoom
+        const targetTop = getAbsoluteTop(nextTarget.target, ctx);
+        ctx.scrollTo(targetTop);
         currentImageIndex = nextTargetIndex;
         return true;
       }
@@ -1063,7 +1102,7 @@ try {
       let anchorInNewView = null;
       let anchorIndex = -1;
       for (let i = 0; i < targets.length; i++) {
-        const targetTop = targets[i].target.offsetTop;
+        const targetTop = getAbsoluteTop(targets[i].target, ctx);
         // Will this anchor be near the top of the new viewport?
         if (targetTop >= newScrollTop && targetTop <= newScrollTop + viewportHeight * 0.3) {
           anchorInNewView = targets[i];
@@ -1074,7 +1113,8 @@ try {
       
       if (anchorInNewView) {
         // An anchor will appear in the upper part of new view - snap to it
-        anchorInNewView.target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const anchorTop = getAbsoluteTop(anchorInNewView.target, ctx);
+        ctx.scrollTo(anchorTop);
         currentImageIndex = anchorIndex;
       } else {
         // No anchor in new view - just do page scroll
@@ -1089,12 +1129,12 @@ try {
       // (meaning we're in the middle of a tall image)
       for (let i = images.length - 1; i >= 0; i--) {
         const img = images[i];
-        const imgTop = img.offsetTop;
+        const imgTop = getAbsoluteTop(img, ctx);
         const imgBottom = imgTop + img.offsetHeight;
         
         // Image is visible and its top is above the viewport
         const topIsAbove = imgTop < viewportTop;
-        const isStillVisible = imgBottom > viewportTop + visibilityThreshold;
+        const isStillVisible = imgBottom > viewportTop + alignmentThreshold;
         
         if (topIsAbove && isStillVisible) {
           // We're in the middle of a tall image - scroll up to show its top
@@ -1114,12 +1154,12 @@ try {
       // Find current position in target list
       let currentIndex = -1;
       for (let i = 0; i < targets.length; i++) {
-        const targetTop = targets[i].target.offsetTop;
-        if (targetTop >= viewportTop - 50 && targetTop <= viewportTop + visibilityThreshold) {
+        const targetTop = getAbsoluteTop(targets[i].target, ctx);
+        if (targetTop >= viewportTop - 50 && targetTop <= viewportTop + alignmentThreshold) {
           currentIndex = i;
           break;
         }
-        if (targetTop > viewportTop + visibilityThreshold) {
+        if (targetTop > viewportTop + alignmentThreshold) {
           currentIndex = i - 1;
           break;
         }
@@ -1128,7 +1168,7 @@ try {
       // Look for previous anchor within reach
       const searchStartIndex = currentIndex >= 0 ? currentIndex - 1 : targets.length - 1;
       for (let i = searchStartIndex; i >= 0; i--) {
-        const targetTop = targets[i].target.offsetTop;
+        const targetTop = getAbsoluteTop(targets[i].target, ctx);
         
         // Target must be above current view
         if (targetTop < viewportTop - 10) {
@@ -1145,8 +1185,9 @@ try {
       }
       
       if (prevTarget) {
-        // Scroll to the anchor point
-        prevTarget.target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Scroll to the anchor point - use scrollTo for consistent behavior
+        const prevTargetTop = getAbsoluteTop(prevTarget.target, ctx);
+        ctx.scrollTo(prevTargetTop);
         currentImageIndex = prevTargetIndex;
         return true;
       }
@@ -1164,7 +1205,7 @@ try {
       let anchorInNewView = null;
       let anchorIndex = -1;
       for (let i = targets.length - 1; i >= 0; i--) {
-        const targetTop = targets[i].target.offsetTop;
+        const targetTop = getAbsoluteTop(targets[i].target, ctx);
         // Will this anchor be near the top of the new viewport?
         if (targetTop >= newScrollTop && targetTop <= newScrollTop + viewportHeight * 0.3) {
           anchorInNewView = targets[i];
@@ -1175,7 +1216,8 @@ try {
       
       if (anchorInNewView) {
         // An anchor will appear in the upper part of new view - snap to it
-        anchorInNewView.target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const anchorTopBack = getAbsoluteTop(anchorInNewView.target, ctx);
+        ctx.scrollTo(anchorTopBack);
         currentImageIndex = anchorIndex;
       } else {
         // No anchor in new view - just do page scroll
