@@ -126,6 +126,10 @@ export class ContentViewPool {
     private visualZoomEnabled: boolean = false
     private mobileMode: boolean = false
     
+    // === Input Mode ===
+    // When active, most keyboard shortcuts are passed to the page for form input
+    private inputModeActive: boolean = false
+    
     // === Focus Tracking ===
     // Track if ContentView had focus before window lost focus
     // This allows restoring focus when window regains focus
@@ -409,6 +413,15 @@ export class ContentViewPool {
     ])
     
     /**
+     * Keys that are ALWAYS blocked, even in Input Mode
+     * These are essential for exiting input mode and navigating away
+     */
+    private static readonly INPUT_MODE_BLOCKED_KEYS = new Set([
+        'Escape',           // Exit input mode / close article (Ctrl+I to toggle, ESC to exit)
+        // All other keys pass through to page for form input
+    ])
+    
+    /**
      * Keys that should be passed through to the page during video fullscreen
      * These are typically video player controls that conflict with app shortcuts
      */
@@ -450,7 +463,24 @@ export class ContentViewPool {
                 return  // Don't block, don't forward to renderer - let page handle it
             }
             
-            // Block keys that we handle via IPC to prevent page from also handling them
+            // Input Mode: Allow most keys to pass through for form input
+            // Only block essential keys (ESC to exit, Ctrl+I to toggle)
+            if (this.inputModeActive) {
+                // In input mode, only block minimal keys and forward Ctrl+I / ESC to renderer
+                const isCtrlI = input.key.toLowerCase() === 'i' && input.control && !input.alt && !input.meta
+                const isEscape = input.key === 'Escape'
+                
+                if (isCtrlI || isEscape) {
+                    // Block and forward to renderer for input mode handling
+                    event.preventDefault()
+                    console.log(`[ContentViewPool] Input mode: forwarding ${input.key} to renderer for mode toggle/exit`)
+                    this.sendToRenderer("content-view-input", input)
+                }
+                // All other keys pass through to page - no blocking, no forwarding
+                return
+            }
+            
+            // Normal mode: Block keys that we handle via IPC to prevent page from also handling them
             // e.g., "m" toggles mobile mode but would also mute videos
             if (ContentViewPool.BLOCKED_KEYS.has(input.key)) {
                 event.preventDefault()
@@ -697,6 +727,12 @@ export class ContentViewPool {
     ): Promise<boolean> {
         // Cancel any pending prefetch
         this.cancelPrefetch()
+        
+        // Reset input mode on article change (user may have left it on)
+        if (this.inputModeActive) {
+            this.inputModeActive = false
+            console.log('[ContentViewPool] Input mode reset on article change')
+        }
         
         // Update reading direction BEFORE updating currentArticleIndex
         // (needs old index to compare)
@@ -1588,6 +1624,12 @@ export class ContentViewPool {
         
         // Send message to active view
         ipcMain.on("cvp-send", (event, channel: string, ...args: any[]) => {
+            // Special handling for input mode - update pool's tracking
+            if (channel === 'set-input-mode') {
+                this.inputModeActive = !!args[0]
+                console.log(`[ContentViewPool] Input mode: ${this.inputModeActive ? 'ACTIVE' : 'inactive'}`)
+            }
+            
             const active = this.getActiveView()
             if (active) {
                 active.send(channel, ...args)

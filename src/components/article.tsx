@@ -507,6 +507,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
 
     // ===== ContentView Methods (WebContentsView - now used for ALL display modes) =====
     
+    // Track if Pool listeners have been set up to prevent duplicate registration
+    private poolListenersRegistered: boolean = false;
+    
     /**
      * Setup Pool-specific event listeners
      * Pool uses same IPC channels as legacy ContentView for input/context events
@@ -517,6 +520,13 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             console.warn('[ContentViewPool] Cannot setup listeners - ipcRenderer not available');
             return;
         }
+        
+        // Prevent duplicate listener registration
+        if (this.poolListenersRegistered) {
+            console.log('[ContentViewPool] Pool listeners already registered - skipping');
+            return;
+        }
+        this.poolListenersRegistered = true;
         
         console.log('[ContentViewPool] Setting up Pool listeners');
         
@@ -850,16 +860,6 @@ window.__articleData = ${JSON.stringify({
     }
     
     /**
-     * Setup ContentView event listeners (legacy - removed)
-     * All listeners are now handled via setupPoolListeners
-     */
-    private setupContentViewListeners = () => {
-        // Legacy method - all listeners now handled by setupPoolListeners
-        console.log('[ContentView] setupContentViewListeners called - delegating to setupPoolListeners');
-        this.setupPoolListeners();
-    }
-    
-    /**
      * Cleanup ContentView listeners and hide it
      */
     private cleanupContentView = () => {
@@ -867,6 +867,9 @@ window.__articleData = ${JSON.stringify({
         // Remove all event listeners
         this.contentViewCleanup.forEach(cleanup => cleanup());
         this.contentViewCleanup = [];
+        
+        // Reset listener registration flag so they can be re-registered
+        this.poolListenersRegistered = false;
         
         // Stop ResizeObserver
         if (this.resizeObserver) {
@@ -1065,6 +1068,9 @@ window.__articleData = ${JSON.stringify({
     
     // Input Mode: Sends status to ContentView to disable keyboard navigation
     private setInputMode = (enabled: boolean) => {
+        console.log(`[Article] setInputMode: ${enabled}`)
+        // Set local state synchronously for immediate access
+        this.localInputModeEnabled = enabled;
         this.setState({ inputModeEnabled: enabled });
         // Send to ContentView via Pool
         if (window.contentViewPool) {
@@ -1573,6 +1579,13 @@ window.__articleData = ${JSON.stringify({
         }
     }
 
+    // Track input mode locally for synchronous access (setState is async)
+    private localInputModeEnabled: boolean = false;
+    
+    // Timestamp when ESC exited input mode - blocks subsequent ESC from dismissing
+    private inputModeExitTime: number = 0;
+    private static readonly INPUT_MODE_EXIT_GRACE_PERIOD = 200; // ms to block ESC after exiting input mode
+    
     keyDownHandler = (input: Electron.Input) => {
         // Build key string with modifiers for accurate debounce comparison
         const keyWithMods = this.buildKeyWithModifiers(input.key, input.control, input.shift, input.alt, input.meta)
@@ -1583,28 +1596,12 @@ window.__articleData = ${JSON.stringify({
             return
         }
 
-        if (input.type === "keyDown")
-        {
-            if(input.control && !input.isAutoRepeat)
-            {
-            }
-        }
-        if (input.type === "keyUp")
-        {
-            if(input.control && !input.isAutoRepeat)
-            {
-            }
-        }
-
-        if (input.type === "")
-        {
-            
-        }
         if (input.type === "keyDown") {
             // Eingabe-Modus Toggle: Ctrl+I
             if (input.control && (input.key === 'i' || input.key === 'I')) {
                 this.markKeyProcessed(keyWithMods)
-                const newValue = !this.state.inputModeEnabled;
+                const newValue = !this.localInputModeEnabled;
+                console.log(`[Article] Input mode toggle: ${this.localInputModeEnabled} -> ${newValue}`)
                 // Cookies speichern beim Verlassen des Eingabe-Modus (z.B. nach Login)
                 if (!newValue && this.props.source.persistCookies && this.isWebpageMode) {
                     this.savePersistedCookies();
@@ -1614,8 +1611,11 @@ window.__articleData = ${JSON.stringify({
             }
             
             // Im Eingabe-Modus: nur Escape und Ctrl+I erlauben
-            if (this.state.inputModeEnabled) {
+            if (this.localInputModeEnabled) {
                 if (input.key === 'Escape') {
+                    console.log(`[Article] Escape in input mode - exiting input mode`)
+                    this.markKeyProcessed(keyWithMods)
+                    this.inputModeExitTime = Date.now(); // Record exit time
                     this.setInputMode(false);
                     // Cookies speichern beim Verlassen des Eingabe-Modus (z.B. nach Login)
                     if (this.props.source.persistCookies && this.isWebpageMode) {
@@ -1625,6 +1625,16 @@ window.__articleData = ${JSON.stringify({
                 }
                 // Alle anderen Tasten zum ContentView durchlassen (nicht als Shortcuts behandeln)
                 return;
+            }
+            
+            // Grace period: Block ESC shortly after exiting input mode
+            // This prevents duplicate ESC events from closing the view
+            if (input.key === 'Escape' && this.inputModeExitTime > 0) {
+                const timeSinceExit = Date.now() - this.inputModeExitTime;
+                if (timeSinceExit < Article.INPUT_MODE_EXIT_GRACE_PERIOD) {
+                    console.log(`[Article] ESC blocked - grace period after input mode exit (${timeSinceExit}ms < ${Article.INPUT_MODE_EXIT_GRACE_PERIOD}ms)`)
+                    return;
+                }
             }
             
             switch (input.key) {
@@ -1737,7 +1747,7 @@ window.__articleData = ${JSON.stringify({
     }
 
     // Note: Legacy loading methods removed
-    // ContentView handles loading events via setupContentViewListeners()
+    // ContentView handles loading events via setupPoolListeners()
     
     contentError = (reason: string) => {
         this.setState({ error: true, errorDescription: reason })
@@ -1778,9 +1788,9 @@ window.__articleData = ${JSON.stringify({
         // Set global Mobile Mode status initially (in case already enabled)
         this.setGlobalMobileMode(this.localMobileMode);
         
-        // Setup ContentView listeners - now for ALL modes (not just Webpage)
+        // Setup Pool listeners - now for ALL modes (not just Webpage)
         if (this.state.visualZoomEnabled) {
-            this.setupContentViewListeners()
+            this.setupPoolListeners()
         }
         
         // Note: ContentView restoration is handled by explicit click on blur placeholder
@@ -1887,6 +1897,8 @@ window.__articleData = ${JSON.stringify({
             if (this.state.inputModeEnabled) {
                 this.setInputMode(false);
             }
+            // Reset input mode exit time on article change
+            this.inputModeExitTime = 0;
             
             // Scroll feed list to new article (use stable scroll to prevent wobble at edges)
             const card = document.querySelector(
