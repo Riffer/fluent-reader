@@ -183,16 +183,20 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
 
     // Notify Article component when P2P dialog opens/closes (for screenshot placeholder)
     useEffect(() => {
+        console.log(`[P2P] useEffect - incomingArticle changed:`, incomingArticle ? incomingArticle.title : 'null')
         setOverlayVisible('p2p-incoming', incomingArticle !== null)
     }, [incomingArticle])
 
     const handleDismiss = useCallback(() => {
+        console.log(`[P2P] handleDismiss - queue length:`, queueRef.current.length)
         // Show next in queue or close
         if (queueRef.current.length > 0) {
             const [next, ...rest] = queueRef.current
             queueRef.current = rest
+            console.log(`[P2P] handleDismiss - showing next from queue:`, next.title)
             setIncomingArticle(next)
         } else {
+            console.log(`[P2P] handleDismiss - setting incomingArticle to null`)
             setIncomingArticle(null)
         }
     }, [])
@@ -233,11 +237,16 @@ export const P2PIncomingNotification: React.FC<P2PIncomingNotificationProps> = (
         // Store values before dismissing
         const { sourceId, articleId, feedName } = incomingArticle
         
+        console.log(`[P2P] handleGoToArticle - sourceId=${sourceId}, articleId=${articleId}, feedName=${feedName}`)
+        
         // Dismiss dialog first
+        console.log(`[P2P] handleGoToArticle - calling handleDismiss()`)
         handleDismiss()
         
         // Navigate after dialog has closed (async to prevent focus issues)
+        console.log(`[P2P] handleGoToArticle - scheduling navigation in 50ms`)
         setTimeout(() => {
+            console.log(`[P2P] handleGoToArticle - NOW calling navigateToArticle`)
             navigateToArticle(sourceId, articleId, feedName || "P2P Geteilt")
         }, 50)
     }, [incomingArticle, navigateToArticle, handleDismiss])

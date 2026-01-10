@@ -14,7 +14,8 @@ import {
     extractHost,
     listSavedHosts
 } from "./cookie-persist"
-import { getContentViewManager, destroyContentViewManager } from "./content-view-manager"
+// ContentViewPool is now the only implementation
+import { initializeContentViewPool, destroyContentViewPool, getContentViewPool } from "./content-view-pool"
 
 /**
  * Set up cookies to bypass consent dialogs and age gates
@@ -95,8 +96,8 @@ export class WindowManager {
 
         // Close database cleanly on app quit
         app.on("before-quit", () => {
-            // Destroy content view manager first
-            destroyContentViewManager()
+            // Destroy content view pool
+            destroyContentViewPool()
             closeDatabase()
         })
     }
@@ -206,21 +207,60 @@ export class WindowManager {
         })
 
         // Get cookies for a host from session and save them
-        // IMPORTANT: ContentView uses partition="sandbox" (without persist:)
+        // IMPORTANT: Try to get cookies from ContentViewPool first (uses actual WebContentsView session)
+        // Falls back to session.fromPartition("sandbox") if pool is not available
+        // NOTE: We save ALL session cookies because of cross-domain cookies (e.g., .threads.com for threads.net)
         ipcMain.handle("save-persisted-cookies", async (_event, url: string) => {
+            console.log(`[CookiePersist] save-persisted-cookies called for: ${url}`)
             const host = extractHost(url)
             if (!host) {
+                console.log(`[CookiePersist] Could not extract host from URL`)
                 return { success: false }
             }
 
-            // ContentView verwendet partition="sandbox" (ohne persist: prefix!)
-            const sandboxSession = session.fromPartition("sandbox")
-            const cookies = await getCookiesFromSession(sandboxSession, host)
+            // Try to get cookies from ContentViewPool first
+            const pool = getContentViewPool()
+            let cookies: Electron.Cookie[] = []
+            let viewSession: Electron.Session | null = null
+            
+            if (pool) {
+                // Get active view's webContents session
+                const activeView = pool.getActiveView()
+                const wc = activeView?.getWebContents()
+                if (wc && !wc.isDestroyed()) {
+                    viewSession = wc.session
+                    console.log(`[CookiePersist] Using Pool's active view session`)
+                } else {
+                    console.log(`[CookiePersist] Pool active view not available, falling back to sandbox session`)
+                    viewSession = session.fromPartition("sandbox")
+                }
+            } else {
+                // Fallback: ContentView verwendet partition="sandbox"
+                console.log(`[CookiePersist] Pool not available, using sandbox session`)
+                viewSession = session.fromPartition("sandbox")
+            }
+            
+            // Get ALL cookies from the session (not filtered by host)
+            // This handles cross-domain cookies (e.g., .threads.com for threads.net)
+            try {
+                cookies = await viewSession.cookies.get({})
+                console.log(`[CookiePersist] Total cookies in session: ${cookies.length}`)
+                cookies.forEach(c => {
+                    console.log(`[CookiePersist]   - ${c.name} @ ${c.domain}`)
+                })
+            } catch (e) {
+                console.log(`[CookiePersist] Error getting cookies:`, e)
+                return { success: false }
+            }
+            
             if (cookies.length === 0) {
+                console.log(`[CookiePersist] No cookies to save`)
                 return { success: true, count: 0 }
             }
 
+            // Save ALL cookies under the host key (they will be restored to the session on next visit)
             const success = await saveCookiesForHost(host, cookies)
+            console.log(`[CookiePersist] Saved ${cookies.length} cookies for ${host}, success: ${success}`)
             return { success, count: cookies.length }
         })
 
@@ -300,9 +340,9 @@ export class WindowManager {
                 this.mainWindow.focus()
                 if (!app.isPackaged) this.mainWindow.webContents.openDevTools()
                 
-                // Initialize ContentViewManager after window is ready
-                const contentViewManager = getContentViewManager()
-                contentViewManager.initialize(this.mainWindow)
+                // Initialize ContentViewPool
+                console.log('[WindowManager] Initializing ContentViewPool (Pool mode)...')
+                initializeContentViewPool(this.mainWindow)
             })
             this.mainWindow.loadFile(
                 (app.isPackaged ? "dist/" : "") + "index.html"
@@ -336,9 +376,9 @@ export class WindowManager {
                 }
             })
             
-            // Cleanup content view manager when window closes
+            // Cleanup content view pool when window closes
             this.mainWindow.on("closed", () => {
-                destroyContentViewManager()
+                destroyContentViewPool()
             })
         }
     }

@@ -66,6 +66,14 @@ type ArticleProps = {
         source: RSSSource,
         persistCookies: boolean
     ) => void
+    // ContentViewPool support: article position in feed
+    articleIndex?: number
+    listLength?: number
+    feedId?: string
+    // For prefetch: access to article list and store data
+    articleIds?: number[]
+    items?: { [id: number]: RSSItem }
+    sources?: { [id: string]: RSSSource }
 }
 
 type ArticleState = {
@@ -117,6 +125,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private overlayStateManager = new OverlayStateManager()
     private overlayVisibilityListener: ((e: OverlayVisibilityEvent) => void) | null = null
     
+    // Navigation Lock: Prevents rapid-fire navigation during async operations
+    // Problem: Arrow key events can queue up during article transitions, causing skips
+    // Solution: Lock navigation during transitions, release after navigation completes
+    private isNavigating: boolean = false
+    private navigationTimeout: NodeJS.Timeout | null = null
+    
     // Unified Key Debounce: Prevents duplicate key processing from multiple sources
     // Problem 1: OS sends keydown to BOTH BrowserWindow (document.keydown) AND
     //            ContentView (before-input-event → IPC), causing double execution
@@ -150,6 +164,32 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private markKeyProcessed(key: string): void {
         this.lastProcessedKey = key
         this.lastProcessedKeyTime = Date.now()
+    }
+    
+    // Navigation lock management
+    private setNavigationLock(locked: boolean): void {
+        this.isNavigating = locked
+        
+        // Clear any existing timeout
+        if (this.navigationTimeout) {
+            clearTimeout(this.navigationTimeout)
+            this.navigationTimeout = null
+        }
+        
+        if (locked) {
+            // Auto-release lock after timeout (safety net)
+            this.navigationTimeout = setTimeout(() => {
+                console.log('[Article] Navigation lock auto-released (timeout)')
+                this.isNavigating = false
+                this.navigationTimeout = null
+            }, 500)  // 500ms max lock time
+        }
+    }
+    
+    // Release navigation lock (called when navigation completes)
+    private releaseNavigationLock(): void {
+        this.setNavigationLock(false)
+        console.log('[Article] Navigation lock released')
     }
 
     // Helper getters for content mode checks
@@ -215,12 +255,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private contentViewZoomFactor: number = 1.0;
     
     /**
-     * Apply zoom to the current view (always ContentView now)
+     * Apply zoom to the current view (Pool)
      * - Visual Zoom ON: uses Device Emulation scale (native pinch-to-zoom works)
      * - Visual Zoom OFF: uses CSS-based zoom via preload
      */
     private applyZoom = (zoomLevel: number) => {
-        if (!window.contentView) {
+        if (!window.contentViewPool) {
             return;
         }
         
@@ -232,10 +272,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Visual Zoom ON: use Device Emulation scale (native zoom)
             const factor = 1.0 + (clampedLevel * 0.1);
             this.contentViewZoomFactor = factor;
-            window.contentView.setZoomFactor(factor);
+            window.contentViewPool.setZoomFactor(factor);
         } else {
             // Visual Zoom OFF: use CSS-based zoom via preload
-            window.contentView.setCssZoom(clampedLevel);
+            window.contentViewPool.setCssZoom(clampedLevel);
         }
         
         // Update state and persist
@@ -287,6 +327,61 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             showZoomOverlay: this.state.showZoomOverlay
         };
     }
+    
+    /**
+     * Navigate to content using Pool
+     * This is the central navigation method that handles Pool prefetching
+     */
+    private navigateToContent = (url: string, articleId?: string): void => {
+        if (!window.contentViewPool) {
+            console.error('[Article] contentViewPool not available');
+            return;
+        }
+        
+        const settings = this.getNavigationSettings();
+        const { articleIndex = -1, listLength = 0, feedId = null } = this.props;
+        const artId = articleId || String(this.props.item?._id) || 'unknown';
+        
+        console.log(`[Article] Pool navigate: ${artId} (${articleIndex}/${listLength})`);
+        
+        // Set visible first - Pool will apply stored bounds when available
+        window.contentViewPool.setVisible(true);
+        
+        // Schedule multiple bounds updates to handle initial render timing
+        // The placeholder may not have valid bounds immediately
+        this.scheduleBoundsUpdates();
+        
+        window.contentViewPool.navigateToArticle(
+            artId,
+            url,
+            feedId,
+            settings,
+            articleIndex,
+            listLength
+        ).catch((err: any) => {
+            console.error("[Article] Pool navigation failed:", err);
+        });
+        
+        this.contentViewCurrentUrl = url;
+    }
+    
+    /**
+     * Schedule multiple bounds updates to handle initial render timing
+     * The placeholder may not have valid bounds immediately after mount
+     */
+    private scheduleBoundsUpdates = (): void => {
+        // Immediate
+        this.updateContentViewBounds();
+        // After microtask
+        Promise.resolve().then(() => this.updateContentViewBounds());
+        // After next frame
+        requestAnimationFrame(() => this.updateContentViewBounds());
+        // After layout stabilizes (various delays for different scenarios)
+        setTimeout(() => this.updateContentViewBounds(), 10);
+        setTimeout(() => this.updateContentViewBounds(), 50);
+        setTimeout(() => this.updateContentViewBounds(), 100);
+        setTimeout(() => this.updateContentViewBounds(), 200);
+    }
 
     /**
      * Send settings to ContentView preload script
@@ -294,7 +389,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      *             Use navigateWithSettings() for navigation.
      */
     private sendSettingsToContentView = () => {
-        if (!window.contentView) return;
+        if (!window.contentViewPool) return;
         
         const zoomLevel = this.currentZoom;
         const showOverlay = this.state.showZoomOverlay;
@@ -302,22 +397,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const visualZoom = this.state.visualZoomEnabled;
         
         // Send all settings to preload
-        window.contentView.send('set-zoom-overlay-setting', showOverlay);
-        window.contentView.send('set-mobile-mode', mobileMode);
-        window.contentView.send('set-visual-zoom-mode', visualZoom);
+        window.contentViewPool.send('set-zoom-overlay-setting', showOverlay);
+        window.contentViewPool.send('set-mobile-mode', mobileMode);
+        window.contentViewPool.send('set-visual-zoom-mode', visualZoom);
         
         // Apply zoom based on mode
         if (visualZoom) {
             const factor = 1.0 + (zoomLevel * 0.1);
-            window.contentView.setZoomFactor(factor);
+            window.contentViewPool.setZoomFactor(factor);
         } else {
-            window.contentView.setCssZoom(zoomLevel);
+            window.contentViewPool.setCssZoom(zoomLevel);
         }
     }
 
     private sendZoomOverlaySettingToContentView = (show: boolean) => {
-        if (!window.contentView) return;
-        window.contentView.send('set-zoom-overlay-setting', show);
+        if (!window.contentViewPool) return;
+        window.contentViewPool.send('set-zoom-overlay-setting', show);
     }
 
     private toggleZoomOverlay = () => {
@@ -340,8 +435,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.setState({ mobileUserAgentEnabled: newValue });
         
         // Reload current page to apply new User-Agent
-        if (window.contentView) {
-            window.contentView.reload();
+        if (window.contentViewPool) {
+            window.contentViewPool.reload();
         }
     }
 
@@ -365,13 +460,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Recreate WebContentsView to apply new CSS layout and touch handling
         // This is necessary because the preload script reads the visual zoom setting
         // at initialization and sets up CSS/event handlers accordingly.
-        if (window.contentView) {
-            window.contentView.setVisualZoom(newValue);
-            await window.contentView.recreate();
-            
-            // If we have an article loaded, reload it in the new view
+        if (window.contentViewPool) {
+            window.contentViewPool.setVisualZoom(newValue);
+            // Pool doesn't support recreate() - reload current article instead
             if (this.props.item) {
-                // Small delay to ensure the view is fully initialized
                 setTimeout(() => {
                     this.reloadCurrentArticle();
                 }, 100);
@@ -384,26 +476,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Used after WebContentsView recreation (e.g., Visual Zoom toggle)
      */
     private reloadCurrentArticle = () => {
-        if (!window.contentView || !this.props.item) return;
+        if (!this.props.item) return;
+        
+        // Check if we have a view to navigate
+        if (!window.contentViewPool) return;
         
         const contentMode = this.state.contentMode;
         
         if (contentMode === SourceOpenTarget.Webpage) {
-            // Webpage mode: Navigate to URL with bundled settings
+            // Webpage mode: Navigate to URL
             const targetUrl = this.props.item.link;
-            this.contentViewCurrentUrl = targetUrl;
-            window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
+            this.navigateToContent(targetUrl);
         } else {
-            // Local (RSS) or FullContent mode: Load HTML directly with bundled settings
+            // Local (RSS) or FullContent mode: Load HTML directly
             const htmlDataUrl = this.articleView();
-            this.contentViewCurrentUrl = htmlDataUrl;
-            window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
+            this.navigateToContent(htmlDataUrl);
         }
         
         // Focus ContentView after short delay
         setTimeout(() => {
-            if (window.contentView) {
-                window.contentView.focus();
+            if (window.contentViewPool) {
+                window.contentViewPool.focus();
             }
         }, 100);
     }
@@ -411,108 +504,355 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     // ===== ContentView Methods (WebContentsView - now used for ALL display modes) =====
     
     /**
-     * Setup ContentView event listeners
+     * Setup Pool-specific event listeners
+     * Pool uses same IPC channels as legacy ContentView for input/context events
      */
-    private setupContentViewListeners = () => {
-        // Guard: Ensure contentView bridge is available
-        if (!window.contentView) {
-            console.warn('[ContentView] Cannot setup listeners - contentView bridge not available');
+    private setupPoolListeners = () => {
+        const ipc = (window as any).ipcRenderer;
+        if (!ipc) {
+            console.warn('[ContentViewPool] Cannot setup listeners - ipcRenderer not available');
             return;
         }
         
-        // Loading state
-        const unsubLoading = window.contentView.onLoading((loading) => {
-            if (!loading && this._isMounted) {
+        console.log('[ContentViewPool] Setting up Pool listeners');
+        
+        // Keyboard input forwarding from Pool views
+        // Pool sends 'content-view-input' just like legacy ContentView
+        const inputHandler = (_event: any, input: Electron.Input) => {
+            this.keyDownHandler(input);
+        };
+        ipc.on("content-view-input", inputHandler);
+        this.contentViewCleanup.push(() => ipc.removeListener("content-view-input", inputHandler));
+        
+        // Video fullscreen state changes
+        const onVideoFullscreen = (_: any, isFullscreen: boolean) => {
+            console.log('[Article] Video fullscreen:', isFullscreen);
+            setVideoFullscreen(isFullscreen);
+            if (this._isMounted) {
+                this.setState({ videoFullscreen: isFullscreen });
+            }
+        };
+        ipc.on('content-view-video-fullscreen', onVideoFullscreen);
+        this.contentViewCleanup.push(() => ipc.removeListener('content-view-video-fullscreen', onVideoFullscreen));
+        
+        // Pool-specific events
+        const onNavigationComplete = (_event: any, articleId: string) => {
+            console.log(`[ContentViewPool] Navigation complete: ${articleId}`);
+            // Release navigation lock when pool reports navigation complete
+            this.releaseNavigationLock();
+            if (this._isMounted) {
                 this.setState({ loaded: true });
             }
-        });
-        this.contentViewCleanup.push(unsubLoading);
+        };
+        ipc.on('cvp-navigation-complete', onNavigationComplete);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-navigation-complete', onNavigationComplete));
         
-        // Error handling
-        const unsubError = window.contentView.onError((error) => {
-            console.error('[ContentView] Load error:', error);
+        // Pool error events
+        const onPoolError = (_event: any, articleId: string, error: string) => {
+            console.error(`[ContentViewPool] Error for ${articleId}:`, error);
             if (this._isMounted) {
                 this.setState({ 
                     error: true, 
-                    errorDescription: error.errorDescription 
+                    errorDescription: error 
                 });
             }
-        });
-        this.contentViewCleanup.push(unsubError);
-        
-        // Context menu - ContentView uses native Electron menu (Menu.popup)
-        // We no longer need to open the React context menu for ContentView
-        // The native menu handles everything: text, links, images, navigation
-        const unsubContextMenu = window.contentView.onContextMenu((params) => {
-            // Native menu is shown by ContentViewManager, nothing to do here
-            // This handler is kept for potential future needs (e.g. analytics)
-        });
-        this.contentViewCleanup.push(unsubContextMenu);
-        
-        // JavaScript Dialog Interceptor - log alerts/confirms/prompts from article pages
-        // These are suppressed in content-preload.js but we log them here for debugging
-        const jsDialogHandler = (_event: any, data: { type: string, message: string, url: string }) => {
-            console.warn(`[Article] Website JavaScript ${data.type}():`, {
-                url: data.url,
-                message: data.message || '(empty message)'
-            });
         };
-        (window as any).ipcRenderer?.on("content-view-js-dialog", jsDialogHandler);
-        this.contentViewCleanup.push(() => {
-            (window as any).ipcRenderer?.removeListener("content-view-js-dialog", jsDialogHandler);
-        });
+        ipc.on('cvp-error', onPoolError);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-error', onPoolError));
         
-        // Keyboard input forwarding
-        const unsubInput = window.contentView.onInput((input) => {
-            this.keyDownHandler(input);
-        });
-        this.contentViewCleanup.push(unsubInput);
+        // Prefetch info request from Pool
+        const onPrefetchRequest = (_event: any, articleIndex: number) => {
+            console.log(`[ContentViewPool] Prefetch request for index ${articleIndex}`);
+            this.handlePrefetchRequest(articleIndex);
+        };
+        ipc.on('cvp-request-prefetch-info', onPrefetchRequest);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-request-prefetch-info', onPrefetchRequest));
         
-        // Navigation (for cookie persistence)
-        const unsubNavigated = window.contentView.onNavigated((url) => {
-            if (this.props.source.persistCookies && this.isWebpageMode) {
-                this.savePersistedCookiesDebounced();
-            }
-        });
-        this.contentViewCleanup.push(unsubNavigated);
+        // Bounds request from Pool - send current bounds immediately
+        const onBoundsRequest = () => {
+            console.log(`[ContentViewPool] Bounds request received`);
+            this.updateContentViewBounds();
+        };
+        ipc.on('cvp-request-bounds', onBoundsRequest);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-request-bounds', onBoundsRequest));
+    }
+    
+    /**
+     * Handle prefetch request from ContentViewPool
+     * Provides article info for a specific index
+     */
+    private handlePrefetchRequest = (articleIndex: number) => {
+        const { articleIds, items, sources, feedId, locale } = this.props;
         
-        // Visual Zoom loading spinner events
-        if ((window as any).ipcRenderer) {
-            const ipc = (window as any).ipcRenderer;
-            
-            // Show loading spinner when Visual Zoom navigation starts
-            const onVisualZoomLoading = () => {
-                if (this._isMounted) {
-                    this.setState({ isNavigatingWithVisualZoom: true });
-                }
-            };
-            ipc.on('content-view-visual-zoom-loading', onVisualZoomLoading);
-            this.contentViewCleanup.push(() => ipc.removeAllListeners('content-view-visual-zoom-loading'));
-            
-            // Hide loading spinner when Visual Zoom is ready
-            const onVisualZoomReady = () => {
-                if (this._isMounted) {
-                    this.setState({ isNavigatingWithVisualZoom: false });
-                }
-            };
-            ipc.on('content-view-visual-zoom-ready', onVisualZoomReady);
-            this.contentViewCleanup.push(() => ipc.removeAllListeners('content-view-visual-zoom-ready'));
-            
-            // Video fullscreen state changes
-            // When video enters fullscreen, ContentView expands to fill window
-            // We also notify the overlay system so P2P dialogs go to bell instead
-            const onVideoFullscreen = (_: any, isFullscreen: boolean) => {
-                console.log('[Article] Video fullscreen:', isFullscreen);
-                // Update global overlay state
-                setVideoFullscreen(isFullscreen);
-                // Track locally for any future use
-                if (this._isMounted) {
-                    this.setState({ videoFullscreen: isFullscreen });
-                }
-            };
-            ipc.on('content-view-video-fullscreen', onVideoFullscreen);
-            this.contentViewCleanup.push(() => ipc.removeAllListeners('content-view-video-fullscreen'));
+        if (!articleIds || !items || !sources) {
+            console.log(`[ContentViewPool] Cannot handle prefetch - missing props`);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
+            return;
         }
+        
+        if (articleIndex < 0 || articleIndex >= articleIds.length) {
+            console.log(`[ContentViewPool] Prefetch index ${articleIndex} out of bounds (0-${articleIds.length - 1})`);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
+            return;
+        }
+        
+        const itemId = articleIds[articleIndex];
+        const item = items[itemId];
+        
+        if (!item) {
+            console.log(`[ContentViewPool] Item ${itemId} not found in store`);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
+            return;
+        }
+        
+        const source = sources[item.source];
+        if (!source) {
+            console.log(`[ContentViewPool] Source ${item.source} not found for item ${itemId}`);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
+            return;
+        }
+        
+        // Determine URL based on source's openTarget
+        let url: string | null = null;
+        const openTarget = source.openTarget;
+        
+        // Build article info for FullContent mode (Main process will do extraction)
+        const articleInfo = {
+            articleId: String(itemId),
+            itemLink: item.link,
+            itemContent: item.content || '',
+            itemTitle: item.title || '',
+            itemDate: item.date.getTime(),
+            openTarget: openTarget,
+            textDir: source.textDir || 0,
+            fontSize: this.state.fontSize,
+            fontFamily: this.state.fontFamily || '',
+            locale: locale || 'en-US'
+        };
+        
+        if (openTarget === SourceOpenTarget.Webpage) {
+            // Webpage mode: Use the article link
+            url = item.link;
+        } else if (openTarget === SourceOpenTarget.FullContent) {
+            // FullContent mode: Send article info, Main process will fetch & extract
+            console.log(`[ContentViewPool] Prefetch for FullContent index ${articleIndex}: sending to Main for extraction`);
+            // url stays null - Main will generate it after extraction
+        } else if (openTarget === SourceOpenTarget.External) {
+            // External mode: Opens in browser, no prefetch needed
+            console.log(`[ContentViewPool] Prefetch skip for index ${articleIndex}: External mode`);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
+            return;
+        } else {
+            // Local/RSS mode: Generate the article HTML view (content is local, no network needed)
+            // Use a helper to generate the HTML for the target item
+            url = this.generateArticleHtml(item, source);
+        }
+        
+        // Use CURRENT zoom if same feed, otherwise use TARGET feed's stored default zoom
+        // This ensures:
+        // 1. Same-feed prefetched articles inherit the user's current zoom (even if not yet saved)
+        // 2. Different-feed articles use their own stored default zoom
+        const isSameFeed = feedId && item.source === feedId;
+        const targetZoom = isSameFeed ? this.currentZoom : (source.defaultZoom || 0);
+        const targetZoomFactor = 1.0 + (targetZoom * 0.1);
+        const settings = {
+            zoomFactor: targetZoomFactor,
+            visualZoom: this.state.visualZoomEnabled,
+            mobileMode: this.localMobileMode,
+            showZoomOverlay: this.state.showZoomOverlay
+        };
+        
+        console.log(`[ContentViewPool] Providing prefetch info for index ${articleIndex}: item=${itemId}, openTarget=${SourceOpenTarget[openTarget]}, isSameFeed=${isSameFeed}, targetZoom=${targetZoom}, url=${url?.substring(0, 50) || 'null (FullContent)'}...`);
+        window.contentViewPool?.providePrefetchInfo(
+            articleIndex,
+            String(itemId),
+            url,
+            feedId || null,
+            settings,
+            articleInfo
+        );
+    }
+    
+    /**
+     * Generate article HTML for prefetch (RSS/Local mode)
+     * Simplified version of articleView() that works with any item/source
+     */
+    private generateArticleHtml = (item: RSSItem, source: RSSSource): string => {
+        // Use item's content (not fullContent - that's only for FullContent mode which we skip)
+        const articleContent = item.content || '';
+        
+        // Content analysis for comic/image mode
+        const imgCount = (articleContent.match(/<img/gi) || []).length;
+        const pictureCount = (articleContent.match(/<picture/gi) || []).length;
+        const totalImages = imgCount + pictureCount;
+        
+        // Extract text without HTML tags
+        const textOnly = articleContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+        const textLength = textOnly.length;
+        
+        const isComicMode = totalImages > 0 && textLength < 200;
+        const isSingleImage = totalImages === 1 && textLength < 100;
+        
+        // Generate header HTML
+        const headerContent = renderToString(
+            <>
+                <p className="title">{item.title}</p>
+                <p className="date">
+                    {item.date.toLocaleString(
+                        this.props.locale,
+                        { hour12: !this.props.locale.startsWith("zh") }
+                    )}
+                </p>
+            </>
+        );
+        
+        const rtlClass = source.textDir === SourceTextDirection.RTL ? "rtl" 
+            : source.textDir === SourceTextDirection.Vertical ? "vertical" : "";
+        const comicClass = isComicMode ? "comic-mode" : "";
+        const singleImageClass = isSingleImage ? "single-image" : "";
+        
+        // Use current fontSize from state (same as articleView)
+        const fontSize = this.state.fontSize;
+        const fontFamily = this.state.fontFamily;
+        
+        const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
+    <title>Article</title>
+    <style>
+/* Scrollbar Styles */
+::-webkit-scrollbar { width: 16px; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: #0006; }
+::-webkit-scrollbar-thumb:active { background-color: #0008; }
+
+/* CSS Variables */
+:root { --gray: #484644; --primary: #0078d4; --primary-alt: #004578; }
+
+/* Base Styles */
+html, body { margin: 0; padding: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
+body { padding: 8px; overflow-x: hidden; overflow-y: auto; font-size: ${fontSize}px; box-sizing: border-box; width: 100%; }
+${fontFamily ? `body { font-family: "${fontFamily}"; }` : ''}
+body.rtl { direction: rtl; }
+body.vertical { writing-mode: vertical-rl; padding: 8px; padding-right: 96px; overflow: scroll hidden; }
+* { box-sizing: border-box; }
+
+/* Typography */
+h1, h2, h3, h4, h5, h6, b, strong { font-weight: 600; }
+a { color: var(--primary); text-decoration: none; }
+a:hover, a:active { color: var(--primary-alt); text-decoration: underline; }
+
+/* Main Container */
+#main { display: none; width: 100%; margin: 0; max-width: 100%; margin: 0 auto; }
+body.vertical #main { max-width: unset; max-height: 100%; margin: auto 0; }
+#main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Title and Date */
+#main > p.title { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; margin-block-end: 0; }
+#main > p.date { color: var(--gray); font-size: 0.875rem; margin-block-start: 0.5rem; }
+
+/* Article Content */
+#main > article { max-width: 1024px; margin: 8px auto 0; padding: 0 8px; }
+article { line-height: 1.6; }
+body.vertical article { line-height: 1.5; }
+body.vertical article p { text-indent: 2rem; }
+article * { max-width: 100%; }
+article img { height: auto; max-width: 100%; }
+body.vertical article img { max-height: 75%; }
+article figure { margin: 16px 0; text-align: center; }
+article figure figcaption { font-size: 0.875rem; color: var(--gray); -webkit-user-modify: read-only; }
+article iframe { width: 100%; }
+article code { font-family: Monaco, Consolas, monospace; font-size: 0.875rem; line-height: 1; word-break: break-word; }
+article pre { word-break: normal; overflow-wrap: normal; white-space: pre-wrap; max-width: 100%; overflow-x: auto; }
+article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding: 0 40px; }
+#main table { max-width: 100%; overflow-x: auto; }
+
+/* Dark Mode */
+@media (prefers-color-scheme: dark) {
+  :root { --gray: #a19f9d; --primary: #4ba0e1; --primary-alt: #65aee6; }
+  body { background-color: #2d2d30; color: #f8f8f8; }
+  #main > p.date { color: #a19f9d; }
+  a { color: #4ba0e1; }
+  a:hover, a:active { color: #65aee6; }
+  ::-webkit-scrollbar-thumb { background-color: #fff4; }
+  ::-webkit-scrollbar-thumb:hover { background-color: #fff6; }
+  ::-webkit-scrollbar-thumb:active { background-color: #fff8; }
+}
+
+/* Comic Mode Styles */
+.comic-mode #main { max-width: 100%; padding: 0; }
+.comic-mode article img, .comic-mode #main > img { max-width: 100%; width: 100%; height: auto; display: block; margin: 0 auto; }
+.comic-mode .title, .comic-mode .date { text-align: center; padding: 0 8px; }
+.comic-mode p { text-align: center; }
+
+/* Single Image Mode */
+.single-image #main { max-width: 100%; display: flex; flex-direction: column; align-items: center; padding: 0; }
+.single-image article img, .single-image #main > img { max-height: 90vh; width: auto; max-width: 100%; object-fit: contain; }
+    </style>
+</head>
+<body class="${rtlClass} ${comicClass} ${singleImageClass}">
+    <div id="main"></div>
+    <script>
+window.__articleData = ${JSON.stringify({ 
+    header: headerContent, 
+    article: articleContent, 
+    baseUrl: item.link 
+}).replace(/<\/script>/gi, '<\\/script>')};
+
+(function() {
+    const { header, article, baseUrl } = window.__articleData;
+    let domParser = new DOMParser();
+    let headerDom = domParser.parseFromString(header, 'text/html');
+    let main = document.getElementById("main");
+    main.innerHTML = headerDom.body.innerHTML + article;
+    
+    let baseEl = document.createElement('base');
+    baseEl.setAttribute('href', baseUrl.split("/").slice(0, 3).join("/"));
+    document.head.append(baseEl);
+    
+    for (let s of main.querySelectorAll("script")) { s.parentNode.removeChild(s); }
+    for (let e of main.querySelectorAll("*[src]")) { e.src = e.src; }
+    for (let e of main.querySelectorAll("*[href]")) { e.href = e.href; }
+    
+    if (document.body.classList.contains('comic-mode') || document.body.classList.contains('single-image')) {
+        main.querySelectorAll('p > img').forEach(img => {
+            const p = img.parentElement;
+            const textContent = p.textContent.trim();
+            const hasOnlyImage = p.children.length === 1 && textContent === '';
+            if (hasOnlyImage) { p.replaceWith(img); }
+        });
+    }
+    
+    if (document.body.classList.contains('comic-mode')) {
+        const firstImg = main.querySelector('img');
+        if (firstImg) {
+            firstImg.id = 'comic-image';
+            setTimeout(() => { firstImg.scrollIntoView({ behavior: 'instant', block: 'start' }); }, 100);
+        }
+    }
+    
+    main.classList.add("show");
+})();
+    </script>
+</body>
+</html>`;
+
+        // Convert to base64 data URL
+        return `data:text/html;base64,${btoa(unescape(encodeURIComponent(htmlContent)))}`;
+    }
+    
+    /**
+     * Setup ContentView event listeners (legacy - removed)
+     * All listeners are now handled via setupPoolListeners
+     */
+    private setupContentViewListeners = () => {
+        // Legacy method - all listeners now handled by setupPoolListeners
+        console.log('[ContentView] setupContentViewListeners called - delegating to setupPoolListeners');
+        this.setupPoolListeners();
     }
     
     /**
@@ -553,12 +893,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.lastContentViewBounds = null;
         this.contentViewCurrentUrl = null;
         
-        // Hide ContentView, clear content, and reset bounds (with null check)
-        if (window.contentView) {
-            window.contentView.setVisible(false);
-            window.contentView.clear(); // Load about:blank to clear old content
+        // Hide ContentView, clear content, and reset bounds via Pool
+        if (window.contentViewPool) {
+            window.contentViewPool.setVisible(false);
+            window.contentViewPool.clear(); // Load about:blank to clear old content
             // Set bounds to 0 to ensure it's completely out of the way
-            window.contentView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+            window.contentViewPool.setBounds({ x: 0, y: 0, width: 0, height: 0 });
         }
         
         // Clear blur screenshot (only if mounted)
@@ -572,8 +912,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Update ContentView bounds based on placeholder position
      */
     private updateContentViewBounds = () => {
-        if (!this.contentViewPlaceholderRef) return;
-        if (!window.contentView) return;
+        if (!this.contentViewPlaceholderRef) {
+            console.warn('[Article] updateContentViewBounds: No placeholder ref!');
+            return;
+        }
         
         // Don't update bounds if ContentView is hidden for overlay
         if (this.contentViewHiddenForMenu) return;
@@ -586,6 +928,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             height: Math.round(rect.height),
         };
         
+        console.log('[Article] updateContentViewBounds:', bounds);
+        
         // Only update if bounds actually changed (avoid unnecessary IPC)
         if (this.lastContentViewBounds &&
             this.lastContentViewBounds.x === bounds.x &&
@@ -596,7 +940,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         
         this.lastContentViewBounds = bounds;
-        window.contentView.setBounds(bounds);
+        
+        // Update bounds for Pool
+        if (window.contentViewPool) {
+            window.contentViewPool.setBounds(bounds);
+        }
     }
     
     private lastContentViewBounds: { x: number, y: number, width: number, height: number } | null = null;
@@ -607,20 +955,22 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Initialize ContentView for ALL content types
      * - Webpage mode: navigate to URL
      * - RSS/Full content: load HTML directly via data URL
+     * 
+     * Uses Pool for all navigation (prefetching supported)
      */
     private initializeContentView = async () => {
         if (!this.contentViewPlaceholderRef) return;
         
-        // Check if contentView bridge is available
-        if (!window.contentView) {
-            console.error('[ContentView] contentView bridge not available!');
+        // Check if Pool bridge is available
+        if (!window.contentViewPool) {
+            console.error('[ContentView] contentViewPool bridge not available!');
             return;
         }
         
         try {
             // Setup listeners if not already done
             if (this.contentViewCleanup.length === 0) {
-                this.setupContentViewListeners();
+                this.setupPoolListeners();
             }
             
             // Update bounds
@@ -628,7 +978,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             
             // Setup ResizeObserver for dynamic bounds updates
             if (!this.resizeObserver) {
-                this.resizeObserver = new ResizeObserver(() => {
+                this.resizeObserver = new ResizeObserver((entries) => {
+                    for (const entry of entries) {
+                        const { width, height } = entry.contentRect;
+                        console.log(`[Article] ResizeObserver: placeholder size changed to ${Math.round(width)}x${Math.round(height)}`);
+                    }
                     this.updateContentViewBounds();
                 });
                 this.resizeObserver.observe(this.contentViewPlaceholderRef);
@@ -638,6 +992,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Use multiple delayed updates to handle maximize/fullscreen animations
             if (!this.windowResizeListener) {
                 this.windowResizeListener = () => {
+                    console.log(`[Article] Window resize event fired, innerSize: ${window.innerWidth}x${window.innerHeight}`);
                     // Immediate update
                     this.updateContentViewBounds();
                     // Delayed updates to catch post-animation layout changes
@@ -680,40 +1035,23 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 window.addEventListener(OVERLAY_VISIBILITY_EVENT, this.overlayVisibilityListener as EventListener);
             }
             
-            // Load content with bundled settings (all settings applied BEFORE navigation)
-            if (this.isWebpageMode) {
-                // Webpage mode: Navigate to URL with bundled settings
-                const targetUrl = this.props.item.link;
-                if (this.contentViewCurrentUrl !== targetUrl) {
-                    this.contentViewCurrentUrl = targetUrl;
-                    await window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
-                    // Mark ContentView as initialized (Device Emulation is now active)
-                    this.contentViewInitialized = true;
-                } else {
-                    // URL unchanged, skip navigation
-                }
-            } else {
-                // Local (RSS) or FullContent mode: Load HTML directly with bundled settings
-                const htmlDataUrl = this.articleView();
-                // Navigate with settings bundled - all settings applied BEFORE navigation starts
-                await window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
-                this.contentViewCurrentUrl = htmlDataUrl;
-                // Mark ContentView as initialized (Device Emulation is now active)
-                this.contentViewInitialized = true;
-            }
+            // Wait for layout to stabilize before navigating
+            requestAnimationFrame(() => {
+                // Double-rAF ensures layout is complete
+                requestAnimationFrame(() => {
+                    if (this.isWebpageMode) {
+                        this.navigateToContent(this.props.item.link);
+                    } else {
+                        this.navigateToContent(this.articleView());
+                    }
+                });
+            });
             
-            // Settings are now bundled with navigation - no need for separate send
-            // The preload reads settings via synchronous IPC on load
-            
-            // Show ContentView (if Visual Zoom is enabled, main process handles showing after emulation)
-            // We still call setVisible(true) here - main process will handle the timing
-            if (!this.state.visualZoomEnabled) {
-                window.contentView.setVisible(true);
-            }
-            // For Visual Zoom: ContentViewManager shows the view after emulation is applied (dom-ready)
+            // Show ContentView
+            window.contentViewPool.setVisible(true);
             
             // Focus
-            window.contentView.focus();
+            window.contentViewPool.focus();
             
             this.setState({ contentVisible: true, loaded: true });
         } catch (e) {
@@ -724,10 +1062,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     // Input Mode: Sends status to ContentView to disable keyboard navigation
     private setInputMode = (enabled: boolean) => {
         this.setState({ inputModeEnabled: enabled });
-        // Send to ContentView
-        if (window.contentView) {
+        // Send to ContentView via Pool
+        if (window.contentViewPool) {
             try {
-                window.contentView.send('set-input-mode', enabled);
+                window.contentViewPool.send('set-input-mode', enabled);
             } catch (e) {
                 // ContentView not ready - ignore
             }
@@ -745,9 +1083,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Set global Mobile Mode status (for new ContentViews on article change)
         this.setGlobalMobileMode(newMobileMode);
         
-        // Use ContentView bridge - this handles User-Agent, Device Emulation, and reload
-        if (window.contentView) {
-            window.contentView.setMobileMode(newMobileMode);
+        // Use ContentView Pool bridge - this handles User-Agent, Device Emulation, and reload
+        if (window.contentViewPool) {
+            window.contentViewPool.setMobileMode(newMobileMode);
         }
     }
 
@@ -762,7 +1100,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
 
     // Note: enableMobileEmulation and disableMobileEmulation removed
-    // Mobile mode is now handled via window.contentView.setMobileMode()
+    // Mobile mode is now handled via window.contentViewPool.setMobileMode()
 
     // Sets global Mobile Mode status in Main process
     // Main process then automatically applies emulation to new ContentViews
@@ -836,14 +1174,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Saves current cookies for the article (if persistCookies is enabled)
      */
     private savePersistedCookies = async () => {
+        console.log(`[CookiePersist] savePersistedCookies called, persistCookies=${this.props.source.persistCookies}, url=${this.props.item?.link}`)
         if (!this.props.source.persistCookies) {
+            console.log(`[CookiePersist] Skipping - persistCookies not enabled for this source`)
             return
         }
         
         const url = this.props.item.link
         
         try {
-            await window.utils.savePersistedCookies(url)
+            const result = await window.utils.savePersistedCookies(url)
+            console.log(`[CookiePersist] Saved cookies for ${url}:`, result)
             this.lastCookieSaveTime = Date.now()
         } catch (e) {
             console.error("[CookiePersist] Error saving cookies:", e)
@@ -1012,8 +1353,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             onClick: () => {
                                 if (this.isFullContentMode && this.state.fullContent) {
                                     window.utils.writeClipboard(this.state.fullContent)
-                                } else if (window.contentView) {
-                                    window.contentView.executeJavaScript(`
+                                } else if (window.contentViewPool) {
+                                    window.contentViewPool.executeJavaScript(`
                                         (function() {
                                             const html = document.documentElement.outerHTML;
                                             return html;
@@ -1034,8 +1375,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             iconProps: { iconName: "CodeEdit" },
                             disabled: this.isLocalMode,  // Only available for Webpage/FullContent
                             onClick: () => {
-                                if (window.contentView) {
-                                    window.contentView.executeJavaScript(`
+                                if (window.contentViewPool) {
+                                    window.contentViewPool.executeJavaScript(`
                                         (function() {
                                             let contentEl = document.getElementById('fr-zoom-container') || document.documentElement;
                                             let clone = contentEl.cloneNode(true);
@@ -1158,8 +1499,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                             text: "Artikel Developer Tools",
                             iconProps: { iconName: "FileHTML" },
                             onClick: () => {
-                                if (window.contentView) {
-                                    window.contentView.openDevTools()
+                                if (window.contentViewPool) {
+                                    window.contentViewPool.openDevTools()
                                 }
                             },
                         },
@@ -1258,7 +1599,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 case "ArrowRight":
                     // Ignore key repeat (held key) for article navigation
                     if (!input.isAutoRepeat) {
+                        // Navigation Lock: DISABLED FOR TESTING
+                        // The central debounce in showOffsetItem should handle duplicates
+                        // if (this.isNavigating) {
+                        //     console.log(`[Article] Navigation locked - ignoring ${input.key}`)
+                        //     return
+                        // }
                         this.markKeyProcessed(keyWithMods)
+                        // this.setNavigationLock(true)
+                        
+                        // WORKAROUND: Focus the article card before navigation
+                        // This releases focus from the current WebContentsView, allowing
+                        // the new view to receive focus cleanly after navigation
+                        const currentCard = document.querySelector(
+                            `#refocus div[data-iid="${this.props.item._id}"]`
+                        ) as HTMLElement
+                        if (currentCard) {
+                            currentCard.focus()
+                            console.log(`[Article] Pre-navigation: focused card for article ${this.props.item._id}`)
+                        }
+                        
+                        console.log(`[Article] Arrow key navigation: ${input.key}, current index: ${this.props.articleIndex}`)
                         this.props.offsetItem(input.key === "ArrowLeft" ? -1 : 1)
                     }
                     break
@@ -1274,7 +1635,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     if (!input.isAutoRepeat) {
                         this.markKeyProcessed(keyWithMods)
                         const stepPlus = input.control ? 0.1 : 1
-                        this.applyZoom((this.state.zoom || 0) + stepPlus)
+                        // Use this.currentZoom (always up-to-date) instead of this.state.zoom (async)
+                        this.applyZoom(this.currentZoom + stepPlus)
                     }
                     break
                 case "-":
@@ -1283,7 +1645,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     if (!input.isAutoRepeat) {
                         this.markKeyProcessed(keyWithMods)
                         const stepMinus = input.control ? 0.1 : 1
-                        this.applyZoom((this.state.zoom || 0) - stepMinus)
+                        // Use this.currentZoom (always up-to-date) instead of this.state.zoom (async)
+                        this.applyZoom(this.currentZoom - stepMinus)
                     }
                     break
                 case "#":
@@ -1345,10 +1708,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     
     contentReload = () => {
-        // Use ContentView reload
-        if (window.contentView) {
+        // Use ContentView Pool reload
+        if (window.contentViewPool) {
             this.setState({ loaded: false, error: false })
-            window.contentView.reload()
+            window.contentViewPool.reload()
         } else if (this.isFullContentMode) {
             this.loadFull()
         }
@@ -1365,6 +1728,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             }).catch((err: any) => {
                 console.error("[componentDidMount] Failed to get app path:", err)
             })
+        }
+        
+        // Content View Pool is now always used - no feature flag check needed
+        if (window.contentViewPool) {
+            console.log("[Article] Using Content View Pool")
+            // Set initial mobile mode to pool
+            window.contentViewPool.setMobileMode(this.localMobileMode);
+        } else {
+            console.warn("[Article] Content View Pool not available!")
         }
         
         // Set global Mobile Mode status initially (in case already enabled)
@@ -1466,6 +1838,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     componentDidUpdate = (prevProps: ArticleProps, prevState: ArticleState) => {
         if (prevProps.item._id != this.props.item._id) {
+            // Article changed - DO NOT release navigation lock here!
+            // The lock is released by cvp-navigation-complete IPC when the view is actually ready.
+            // Releasing here would allow another arrow key press before the navigation completes.
+            
             // Reset error state on article change
             if (this.state.error) {
                 this.setState({ error: false, errorDescription: "" });
@@ -1513,7 +1889,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Close DevTools before article change to prevent crash
             // closeDevTools is safe to call even if DevTools is not opened
             try {
-                window.contentView?.closeDevTools()
+                window.contentViewPool?.closeDevTools()
             } catch {}
             
             // Load cookies for new article (if persistCookies is enabled)
@@ -1531,36 +1907,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     this.setState({ isLoadingFull: true })
                     this.loadFull()
                 } else if (newContentMode === SourceOpenTarget.Webpage) {
-                    // For webpage mode - ContentView navigates to URL with bundled settings
-                    if (window.contentView) {
-                        const targetUrl = this.props.item.link;
-                        if (this.contentViewCurrentUrl !== targetUrl) {
-                            // JS-Navigation test showed: Emulation is reset even with window.location.href
-                            // So we use navigateWithSettings with HIDE-SHOW strategy:
-                            // Main process hides view, navigates, applies emulation at dom-ready, then shows
-                            this.contentViewCurrentUrl = targetUrl;
-                            window.contentView.navigateWithSettings(targetUrl, this.getNavigationSettings());
+                    // For webpage mode - Navigate to URL (Pool)
+                    const targetUrl = this.props.item.link;
+                    if (this.contentViewCurrentUrl !== targetUrl) {
+                        this.navigateToContent(targetUrl);
+                    }
+                    // Focus ContentView for keyboard input (with delay to ensure it's ready)
+                    setTimeout(() => {
+                        if (window.contentViewPool) {
+                            window.contentViewPool.focus();
                         }
-                        // Focus ContentView for keyboard input (with delay to ensure it's ready)
-                        setTimeout(() => {
-                            if (window.contentView) {
-                                window.contentView.focus();
-                            }
-                        }, 100);
-                    }
+                    }, 100);
                 } else {
-                    // For Local (RSS) mode - ContentView loads HTML data URL with bundled settings
-                    if (window.contentView) {
-                        const htmlDataUrl = this.articleView();
-                        this.contentViewCurrentUrl = htmlDataUrl;
-                        window.contentView.navigateWithSettings(htmlDataUrl, this.getNavigationSettings());
-                        // Focus ContentView
-                        setTimeout(() => {
-                            if (window.contentView) {
-                                window.contentView.focus();
-                            }
-                        }, 100);
-                    }
+                    // For Local (RSS) mode - Load HTML (Pool)
+                    const htmlDataUrl = this.articleView();
+                    this.navigateToContent(htmlDataUrl);
+                    // Focus ContentView
+                    setTimeout(() => {
+                        if (window.contentViewPool) {
+                            window.contentViewPool.focus();
+                        }
+                    }, 100);
                     // CSS zoom for non-Visual-Zoom mode is handled by preload via sync IPC
                     // No need for separate applyZoom call anymore!
                 }
@@ -1613,30 +1980,35 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * @param shouldHideCheck - Optional callback to verify we should still hide (for async timing)
      */
     private hideContentViewWithScreenshot = async (reason: string, shouldHideCheck?: () => boolean): Promise<void> => {
-        if (!window.contentView) return
-        if (this.contentViewHiddenForMenu) return  // Already hidden
+        if (!window.contentViewPool) return;
+        if (this.contentViewHiddenForMenu) return;  // Already hidden
+        
+        // Check if we should proceed (for async timing safety)
+        if (shouldHideCheck && !shouldHideCheck()) return;
         
         try {
-            const screenshot = await window.contentView.captureScreen()
+            // Capture screenshot BEFORE hiding the view
+            const screenshot = await window.contentViewPool.captureScreen();
+            
+            // Double-check we should still hide (timing race protection)
+            if (shouldHideCheck && !shouldHideCheck()) return;
+            if (this.contentViewHiddenForMenu) return;  // Something else already hid it
+            
+            // Set screenshot in state (this shows the blur placeholder)
             if (screenshot && this._isMounted) {
-                // Use setState callback to hide ContentView after React renders the placeholder
-                this.setState({ menuBlurScreenshot: screenshot }, () => {
-                    // Re-check conditions after async setState
-                    if (this._isMounted && window.contentView && (!shouldHideCheck || shouldHideCheck())) {
-                        window.contentView.setVisible(false, true) // preserveContent for blur-div
-                        this.contentViewHiddenForMenu = true
-                    }
-                })
-                return
+                this.setState({ menuBlurScreenshot: screenshot });
             }
-        } catch (e) {
-            console.error('[Article] Error capturing screenshot:', e)
-        }
-        
-        // Fallback: hide without screenshot (error case or no screenshot)
-        if (!shouldHideCheck || shouldHideCheck()) {
-            window.contentView.setVisible(false, true) // preserveContent for blur-div
-            this.contentViewHiddenForMenu = true
+            
+            // Now hide the ContentView
+            window.contentViewPool.setVisible(false);
+            this.contentViewHiddenForMenu = true;
+            
+            console.log(`[Article] ContentView hidden with screenshot for: ${reason}`);
+        } catch (error) {
+            console.error(`[Article] Failed to capture screenshot for ${reason}:`, error);
+            // Fall back to hiding without screenshot
+            window.contentViewPool.setVisible(false);
+            this.contentViewHiddenForMenu = true;
         }
     }
     
@@ -1646,7 +2018,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Replaces fragmented handlers: handleOverlayVisibilityChange, handleLocalDialogVisibilityChange, etc.
      */
     private handleOverlayVisibilityEvent = async (source: string, visible: boolean) => {
-        if (!window.contentView) return
+        if (!window.contentViewPool) return;
         
         const anyOpen = this.overlayStateManager.update(source as any, visible)
         
@@ -1727,8 +2099,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      * Restore ContentView after overlay interaction
      */
     private restoreContentView = () => {
-        if (!window.contentView) return
-        if (!this.contentViewHiddenForMenu) return
+        if (!window.contentViewPool) return;
+        if (!this.contentViewHiddenForMenu) return;
         
         // Clear hover timer
         if (this.blurHoverTimer) {
@@ -1736,12 +2108,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             this.blurHoverTimer = null
         }
         
-        // Show ContentView FIRST, then remove blur screenshot
-        // This prevents a flash where neither is visible
-        window.contentView.setVisible(true)
-        this.contentViewHiddenForMenu = false
+        // Show Pool
+        window.contentViewPool.setVisible(true);
+        this.contentViewHiddenForMenu = false;
         
-        // Small delay to ensure ContentView is rendered before removing blur
+        // Small delay to ensure view is rendered before removing blur
         setTimeout(() => {
             if (this._isMounted) {
                 this.setState({ menuBlurScreenshot: null })
@@ -1755,6 +2126,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      */
     private handleContentViewMouseLeave = async () => {
         if (!this.state.visualZoomEnabled || !this.usesContentView) return
+        if (!window.contentViewPool) return
         
         await this.hideContentViewWithScreenshot('Mouse left ContentView area')
     }
@@ -1765,7 +2137,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
      */
     private handleContentViewMouseEnter = () => {
         if (!this.state.visualZoomEnabled || !this.usesContentView) return
-        if (!window.contentView) return
+        if (!window.contentViewPool) return
         if (!this.contentViewHiddenForMenu) return  // Not hidden, nothing to do
         
         // Check if any Redux overlay is still active (menu, settings, etc.)
@@ -1779,7 +2151,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             return
         }
         
-        window.contentView.setVisible(true)
+        window.contentViewPool.setVisible(true)
         this.contentViewHiddenForMenu = false
         
         // Clear screenshot after a short delay
@@ -1821,27 +2193,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     
     // Focus ContentView after full content is loaded
     private focusContentViewAfterLoad = () => {
-        if (window.contentView) {
+        if (window.contentViewPool) {
             // Check if we're waiting to focus ContentView after mode switch
             if (this.pendingContentViewFocus) {
                 this.pendingContentViewFocus = false;
                 // Multiple focus attempts to ensure it sticks
-                window.contentView.focus();
+                window.contentViewPool.focus();
                 setTimeout(() => {
-                    if (window.contentView && this._isMounted) {
-                        window.contentView.focus();
+                    if (window.contentViewPool && this._isMounted) {
+                        window.contentViewPool.focus();
                     }
                 }, 50);
                 setTimeout(() => {
-                    if (window.contentView && this._isMounted) {
-                        window.contentView.focus();
+                    if (window.contentViewPool && this._isMounted) {
+                        window.contentViewPool.focus();
                     }
                 }, 200);
             } else {
                 // Normal focus with small delay
                 setTimeout(() => {
-                    if (window.contentView && this._isMounted) {
-                        window.contentView.focus()
+                    if (window.contentViewPool && this._isMounted) {
+                        window.contentViewPool.focus()
                     }
                 }, 100)
             }
@@ -1855,8 +2227,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         this.cleanupContentView()
         
         // Restore ContentView visibility if hidden for menu
-        if (this.contentViewHiddenForMenu && window.contentView) {
-            window.contentView.setVisible(true)
+        if (this.contentViewHiddenForMenu && window.contentViewPool) {
+            window.contentViewPool.setVisible(true)
             this.contentViewHiddenForMenu = false
         }
         
@@ -1878,7 +2250,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Close DevTools before unmount to prevent crash
         // closeDevTools is safe to call even if DevTools is not opened
         try {
-            window.contentView?.closeDevTools()
+            window.contentViewPool?.closeDevTools()
         } catch {}
         
         let refocus = document.querySelector(
@@ -1943,12 +2315,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, async () => {
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
                     SourceOpenTarget.Local
                 )
+                // Nuke the view before re-initializing (clean slate for mode switch)
+                if (window.contentViewPool) {
+                    await window.contentViewPool.nuke();
+                }
                 // Re-initialize ContentView with RSS content
                 this.initializeContentView();
                 
@@ -1966,12 +2342,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.Webpage, contentVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.Webpage, contentVisible: false }, async () => {
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
                     SourceOpenTarget.Webpage
                 )
+                // Nuke the view before re-initializing (clean slate for mode switch)
+                if (window.contentViewPool) {
+                    await window.contentViewPool.nuke();
+                }
                 // Re-initialize ContentView with webpage URL
                 this.initializeContentView();
                 
@@ -1996,12 +2376,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.Local, contentVisible: false }, async () => {
                 // Switch back to Local (RSS) mode and persist
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
                     SourceOpenTarget.Local
                 )
+                // Nuke the view before re-initializing (clean slate for mode switch)
+                if (window.contentViewPool) {
+                    await window.contentViewPool.nuke();
+                }
                 // Re-initialize ContentView with RSS content
                 this.initializeContentView();
                 
@@ -2019,12 +2403,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Capture source BEFORE setState to avoid stale reference
             const sourceSnapshot = this.props.source;
             
-            this.setState({ contentMode: SourceOpenTarget.FullContent, contentVisible: false }, () => {
+            this.setState({ contentMode: SourceOpenTarget.FullContent, contentVisible: false }, async () => {
                 // Update source to persist openTarget
                 this.props.updateSourceOpenTarget(
                     sourceSnapshot,
                     SourceOpenTarget.FullContent
                 )
+                // Nuke the view before loading full content (clean slate for mode switch)
+                if (window.contentViewPool) {
+                    await window.contentViewPool.nuke();
+                }
                 // Load and extract full content
                 this.loadFull()
                 
@@ -2527,21 +2915,48 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
     <title>Article</title>
     <style>
+/* ====== Responsive Article Layout ====== */
+
 /* Scrollbar Styles */
 ::-webkit-scrollbar { width: 16px; }
-::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background-color: #0006; }
 ::-webkit-scrollbar-thumb:active { background-color: #0008; }
 
 /* CSS Variables */
-:root { --gray: #484644; --primary: #0078d4; --primary-alt: #004578; }
+:root { 
+    --gray: #484644; 
+    --primary: #0078d4; 
+    --primary-alt: #004578;
+    --bg-color: #fafafa;
+    --text-color: #1a1a1a;
+    --content-max-width: 1200px;
+}
 
-/* Base Styles */
-html, body { margin: 0; padding: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
-body { padding: 8px; overflow-x: hidden; overflow-y: auto; font-size: ${this.state.fontSize}px; box-sizing: border-box; width: 100%; }
-${this.state.fontFamily ? `body { font-family: "${this.state.fontFamily}"; }` : ''}
+/* Base Styles - Block layout for proper overflow handling */
+html, body { 
+    margin: 0; 
+    padding: 0; 
+    font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-color);
+    color: var(--text-color);
+}
+body { 
+    padding: 1rem; 
+    overflow-x: hidden; 
+    overflow-y: auto; 
+    font-size: ${this.state.fontSize}px; 
+    box-sizing: border-box;
+    /* No flexbox on body - causes centering issues with large content */
+}
+${this.state.fontFamily ? `body { font-family: "${this.state.fontFamily}", system-ui, sans-serif; }` : ''}
 body.rtl { direction: rtl; }
-body.vertical { writing-mode: vertical-rl; padding: 8px; padding-right: 96px; overflow: scroll hidden; }
+body.vertical { 
+    writing-mode: vertical-rl; 
+    padding: 1rem; 
+    padding-right: 96px; 
+    overflow: scroll hidden;
+}
 * { box-sizing: border-box; }
 
 /* Typography */
@@ -2549,80 +2964,208 @@ h1, h2, h3, h4, h5, h6, b, strong { font-weight: 600; }
 a { color: var(--primary); text-decoration: none; }
 a:hover, a:active { color: var(--primary-alt); text-decoration: underline; }
 
-/* Main Container */
-#main { display: none; width: 100%; margin: 0; max-width: 100%; margin: 0 auto; }
-body.vertical #main { max-width: unset; max-height: 100%; margin: auto 0; }
-#main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
-/* Title and Date */
-#main > p.title { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; margin-block-end: 0; }
-#main > p.date { color: var(--gray); font-size: 0.875rem; margin-block-start: 0.5rem; }
-
-/* Article Content */
-#main > article { max-width: 1024px; margin: 8px auto 0; padding: 0 8px; }
-article { line-height: 1.6; }
-body.vertical article { line-height: 1.5; }
-body.vertical article p { text-indent: 2rem; }
-article * { max-width: 100%; }
-article img { height: auto; max-width: 100%; }
-body.vertical article img { max-height: 75%; }
-article figure { margin: 16px 0; text-align: center; }
-article figure figcaption { font-size: 0.875rem; color: var(--gray); -webkit-user-modify: read-only; }
-article iframe { width: 100%; }
-article code { font-family: Monaco, Consolas, monospace; font-size: 0.875rem; line-height: 1; word-break: break-word; }
-article pre { word-break: normal; overflow-wrap: normal; white-space: pre-wrap; max-width: 100%; overflow-x: auto; }
-article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding: 0 40px; }
-#main table { max-width: 100%; overflow-x: auto; }
-
-/* Dark Mode */
-@media (prefers-color-scheme: dark) {
-  :root { --gray: #a19f9d; --primary: #4ba0e1; --primary-alt: #65aee6; }
-  body { background-color: #2d2d30; color: #f8f8f8; }
-  #main > p.date { color: #a19f9d; }
-  a { color: #4ba0e1; }
-  a:hover, a:active { color: #65aee6; }
-  ::-webkit-scrollbar-thumb { background-color: #fff4; }
-  ::-webkit-scrollbar-thumb:hover { background-color: #fff6; }
-  ::-webkit-scrollbar-thumb:active { background-color: #fff8; }
+/* Main Container - Centered with margin, max-width constraint */
+#main { 
+    display: none; 
+    width: 100%; 
+    max-width: var(--content-max-width);
+    margin: 0 auto; /* Center with margin instead of flexbox */
+}
+body.vertical #main { 
+    max-width: unset; 
+    max-height: 100%; 
+}
+#main.show { 
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    animation: fadeIn 0.367s cubic-bezier(0.1, 0.9, 0.2, 1) both;
+}
+@keyframes fadeIn { 
+    from { opacity: 0; transform: translateY(10px); } 
+    to { opacity: 1; transform: translateY(0); } 
 }
 
-/* Comic Mode Styles - for image-dominated content */
+/* Title and Date - Header section */
+#main > p.title { 
+    font-size: 1.25rem; 
+    line-height: 1.75rem; 
+    font-weight: 600; 
+    margin: 0;
+    padding: 0 0.5rem;
+}
+#main > p.date { 
+    color: var(--gray); 
+    font-size: 0.875rem; 
+    margin: 0;
+    padding: 0 0.5rem;
+}
+
+/* Article Content - Gallery-style layout for images */
+#main > article { 
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    padding: 0 0.5rem;
+    line-height: 1.6;
+}
+body.vertical article { line-height: 1.5; }
+body.vertical article p { text-indent: 2rem; }
+
+/* All elements respect container width */
+article * { max-width: 100%; }
+#main > * { max-width: 100%; }
+
+/* Images - Responsive gallery style */
+/* Use !important to override inline width/height HTML attributes */
+/* Target both images in article AND directly in #main */
+article img,
+#main > img { 
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important; 
+    object-fit: contain;
+    border-radius: 4px;
+    background: #000;
+}
+body.vertical article img { max-height: 75%; }
+
+/* Figures with captions */
+article figure { 
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+article figure figcaption { 
+    font-size: 0.875rem; 
+    color: var(--gray); 
+    text-align: center;
+    -webkit-user-modify: read-only; 
+}
+
+/* Embedded content */
+article iframe { width: 100%; border-radius: 4px; }
+article video { width: 100%; height: auto; border-radius: 4px; }
+
+/* Code blocks */
+article code { 
+    font-family: Monaco, Consolas, "Cascadia Code", monospace; 
+    font-size: 0.875rem; 
+    line-height: 1.4; 
+    word-break: break-word;
+    background: rgba(0,0,0,0.05);
+    padding: 0.1em 0.3em;
+    border-radius: 3px;
+}
+article pre { 
+    word-break: normal; 
+    overflow-wrap: normal; 
+    white-space: pre-wrap; 
+    max-width: 100%; 
+    overflow-x: auto;
+    background: rgba(0,0,0,0.05);
+    padding: 1rem;
+    border-radius: 4px;
+}
+article pre code {
+    background: none;
+    padding: 0;
+}
+
+/* Blockquotes */
+article blockquote { 
+    border-left: 3px solid var(--primary); 
+    margin: 0; 
+    padding: 0.5rem 1rem;
+    background: rgba(0,0,0,0.02);
+    border-radius: 0 4px 4px 0;
+}
+
+/* Tables */
+#main table { 
+    max-width: 100%; 
+    overflow-x: auto;
+    border-collapse: collapse;
+}
+#main table td, #main table th {
+    padding: 0.5rem;
+    border: 1px solid var(--gray);
+}
+
+/* Paragraphs in article */
+article p {
+    margin: 0;
+}
+
+/* ====== Dark Mode ====== */
+@media (prefers-color-scheme: dark) {
+    :root { 
+        --gray: #a19f9d; 
+        --primary: #4ba0e1; 
+        --primary-alt: #65aee6;
+        --bg-color: #1e1e1e;
+        --text-color: #e0e0e0;
+    }
+    article code {
+        background: rgba(255,255,255,0.1);
+    }
+    article pre {
+        background: rgba(255,255,255,0.05);
+    }
+    article blockquote {
+        background: rgba(255,255,255,0.03);
+    }
+    ::-webkit-scrollbar-thumb { background-color: #fff4; }
+    ::-webkit-scrollbar-thumb:hover { background-color: #fff6; }
+    ::-webkit-scrollbar-thumb:active { background-color: #fff8; }
+}
+
+/* ====== Comic Mode - Image-dominated content ====== */
 .comic-mode #main {
     max-width: 100%;
+    padding: 0;
+    gap: 0;
+}
+.comic-mode article {
+    gap: 0.5rem;
     padding: 0;
 }
 .comic-mode article img,
 .comic-mode #main > img {
-    max-width: 100%;
-    width: 100%;
-    height: auto;
-    display: block;
-    margin: 0 auto;
+    border-radius: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
 }
 .comic-mode .title,
 .comic-mode .date {
     text-align: center;
-    padding: 0 8px;
 }
 .comic-mode p {
     text-align: center;
+    padding: 0 1rem;
 }
 
-/* Single Image Mode - single large image */
+/* ====== Single Image Mode ====== */
 .single-image #main {
     max-width: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 0;
+    justify-content: center;
+    min-height: calc(100vh - 2rem);
+}
+.single-image article {
+    align-items: center;
 }
 .single-image article img,
 .single-image #main > img {
-    max-height: 90vh;
-    width: auto;
-    max-width: 100%;
-    object-fit: contain;
+    max-height: 85vh;
+    width: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
 }
     </style>
 </head>
@@ -2654,6 +3197,12 @@ window.__articleData = ${JSON.stringify({
     // Remove scripts
     for (let s of main.querySelectorAll("script")) {
         s.parentNode.removeChild(s);
+    }
+    
+    // Remove width/height attributes from images - they prevent CSS from controlling size
+    for (let img of main.querySelectorAll("img")) {
+        img.removeAttribute('width');
+        img.removeAttribute('height');
     }
     
     // DEBUG: Find elements that might cause horizontal overflow
@@ -2914,7 +3463,7 @@ window.__articleData = ${JSON.stringify({
                                 backgroundSize: "100% 100%",
                                 backgroundPosition: "top left",
                                 backgroundRepeat: "no-repeat",
-                                filter: "blur(4px) brightness(0.9)",
+                                filter: "blur(1px) brightness(1.0)",
                                 zIndex: 10,
                                 cursor: "pointer",
                             }}

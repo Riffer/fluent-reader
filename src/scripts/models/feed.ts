@@ -412,26 +412,42 @@ export function feedReducer(
                                     !existingIds.has(i._id) // Don't add if already exists
                             )
                             if (newItems.length > 0) {
-                                // Merge new items with existing items and sort by date
-                                let allIds = [...feed.iids, ...newItems.map(i => i._id)]
                                 // Create a map for quick lookup of new items
                                 let newItemMap = new Map(newItems.map(i => [i._id, i]))
                                 
-                                // Get all items with their data from action.itemState or newItemMap
-                                let allItems = allIds
-                                    .map(id => action.itemState[id] || newItemMap.get(id))
-                                    .filter((item): item is RSSItem => item !== undefined)
-                                    .sort((a, b) => b.date.getTime() - a.date.getTime())
+                                // Get items that can be sorted (have data in itemState or newItemMap)
+                                // Keep existing iids that aren't in itemState (pagination)
+                                let itemsWithData: RSSItem[] = []
+                                let iidsWithoutData: number[] = []
                                 
-                                // Check for items that got lost
-                                const lostItems = allIds.length - allItems.length
-                                if (lostItems > 0) {
-                                    console.warn(`[feedReducer] Feed "${feed._id}": ${lostItems} items lost during merge (not in itemState or newItemMap)`)
+                                for (let id of feed.iids) {
+                                    const item = action.itemState[id]
+                                    if (item) {
+                                        itemsWithData.push(item)
+                                    } else {
+                                        // Keep this ID but we can't sort it
+                                        iidsWithoutData.push(id)
+                                    }
                                 }
+                                
+                                // Add all new items
+                                for (let item of newItems) {
+                                    itemsWithData.push(item)
+                                }
+                                
+                                // Sort items that have data
+                                itemsWithData.sort((a, b) => b.date.getTime() - a.date.getTime())
+                                
+                                // Final iids: sorted items with data, then items without data (at the end)
+                                // Items without data are older (from pagination) so they go at the end
+                                const sortedIids = [
+                                    ...itemsWithData.map(i => i._id),
+                                    ...iidsWithoutData
+                                ]
                                 
                                 nextState[feed._id] = {
                                     ...feed,
-                                    iids: allItems.map(i => i._id),
+                                    iids: sortedIids,
                                 }
                             }
                         } else {

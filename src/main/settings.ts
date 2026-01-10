@@ -256,6 +256,11 @@ ipcMain.handle("set-visual-zoom", (_, flag: boolean) => {
     store.set(VISUAL_ZOOM_STORE_KEY, flag)
 })
 
+// Export function for ContentViewPool to check Visual Zoom setting
+export function isVisualZoomEnabled(): boolean {
+    return store.get(VISUAL_ZOOM_STORE_KEY, false) as boolean
+}
+
 // Mobile User-Agent (global setting - sends mobile UA to server)
 const MOBILE_USER_AGENT_STORE_KEY = "mobileUserAgentEnabled"
 ipcMain.on("get-mobile-user-agent", event => {

@@ -1,2 +1,2 @@
-
-* heise: in der Visual Zoom Variante scheint das Scrolling per Cursor Up/Down nicht normal zu funktioniern (der Scroll läuft extrem kleinteilig)
+* beim Zoom wird zwischen 100% und dem endgültigen Zoom gejumpt
+* der Input-Mode arbeitet nicht (wird eingeschaltet )

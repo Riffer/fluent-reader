@@ -5,16 +5,17 @@ import dbBridge from "./bridges/db"
 import { createArticleExtractorBridge } from "./bridges/article-extractor"
 import { p2pBridge } from "./bridges/p2p"
 import { p2pLanBridge } from "./bridges/p2p-lan"
-import { contentViewBridge } from "./bridges/content-view"
+import { contentViewPoolBridge } from "./bridges/content-view-pool"
 
 contextBridge.exposeInMainWorld("settings", settingsBridge)
 contextBridge.exposeInMainWorld("db", dbBridge)
 contextBridge.exposeInMainWorld("utils", utilsBridge)
 contextBridge.exposeInMainWorld("p2p", p2pBridge)
 contextBridge.exposeInMainWorld("p2pLan", p2pLanBridge)
-contextBridge.exposeInMainWorld("contentView", contentViewBridge)
+// Pool is now the only ContentView implementation
+contextBridge.exposeInMainWorld("contentViewPool", contentViewPoolBridge)
 
-// ipcRenderer for ContentView zoom communication (restricted to required channels)
+// ipcRenderer for ContentView Pool communication (restricted to required channels)
 const limitedIpcRenderer = {
     // From Renderer to Main process
     send: (channel: string, ...args: any[]) => {
@@ -23,16 +24,20 @@ const limitedIpcRenderer = {
             "content-view-set-css-zoom", 
             "set-zoom-overlay-setting", 
             "set-global-mobile-mode",
-            // Content View channels
-            "content-view-set-bounds",
-            "content-view-set-visible",
-            "content-view-clear",
-            "content-view-send",
-            "content-view-set-visual-zoom",
-            "content-view-set-user-agent",
-            "content-view-set-mobile-mode",
-            "content-view-focus",
-            "content-view-set-zoom-factor",
+            // Content View Pool channels
+            "cvp-prefetch",
+            "cvp-prefetch-info",
+            "cvp-set-bounds",
+            "cvp-set-visibility",
+            "cvp-set-reading-direction",
+            "cvp-set-zoom-factor",
+            "cvp-set-css-zoom",
+            "cvp-set-visual-zoom",
+            "cvp-send",
+            "cvp-clear",
+            "cvp-focus",
+            "cvp-set-mobile-mode",
+            "cvp-set-user-agent",
         ]
         if (allowedSendChannels.includes(channel)) {
             ipcRenderer.send(channel, ...args)
@@ -45,21 +50,23 @@ const limitedIpcRenderer = {
             "content-view-zoom-changed", 
             "set-zoom-overlay-setting", 
             "power-resume",
-            // Content View channels
+            // Content View Pool channels (forwarded from active view)
             "content-view-loading",
-            "content-view-loaded",
             "content-view-error",
             "content-view-navigated",
-            "content-view-title",
             "content-view-context-menu",
             "content-view-input",
-            "content-view-js-dialog",  // JavaScript alert/confirm/prompt from articles
-            "content-view-video-fullscreen",  // Video fullscreen state changes
+            "content-view-js-dialog",
+            "content-view-video-fullscreen",
             // Window state events (for ContentView bounds updates)
             "maximized",
             "unmaximized",
             "enter-fullscreen",
             "leave-fullscreen",
+            // Content View Pool channels
+            "cvp-navigation-complete",
+            "cvp-request-prefetch-info",
+            "cvp-error",
         ]
         if (allowedOnChannels.includes(channel)) {
             ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
@@ -80,19 +87,32 @@ const limitedIpcRenderer = {
             "toggle-app-devtools", 
             "enable-device-emulation", 
             "disable-device-emulation",
-            // Content View channels
-            "content-view-navigate",
-            "content-view-execute-js",
-            "content-view-get-id",
-            "content-view-open-devtools",
-            "content-view-reload",
-            "content-view-go-back",
-            "content-view-go-forward",
-            "content-view-load-html",
-            "content-view-can-go-back",
-            "content-view-can-go-forward",
-            "content-view-get-url",
-            "content-view-stop",
+            // Content View Pool channels
+            "cvp-navigate",
+            "cvp-navigate-with-settings",
+            "cvp-get-status",
+            "cvp-execute-js",
+            "cvp-get-id",
+            "cvp-open-devtools",
+            "cvp-is-devtools-opened",
+            "cvp-close-devtools",
+            "cvp-reload",
+            "cvp-get-url",
+            "cvp-get-css-zoom-level-async",
+            "cvp-go-back",
+            "cvp-go-forward",
+            "cvp-can-go-back",
+            "cvp-can-go-forward",
+            "cvp-get-zoom-factor",
+            "cvp-load-html",
+            "cvp-navigate-via-js",
+            "cvp-stop",
+            "cvp-capture-screen",
+            "cvp-recreate",
+            "cvp-nuke",
+            // Cookie persistence for Pool
+            "cvp-get-cookies-for-host",
+            "cvp-get-all-cookies",
         ]
         if (allowedInvokeChannels.includes(channel)) {
             return ipcRenderer.invoke(channel, ...args)
