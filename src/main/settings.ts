@@ -239,6 +239,14 @@ ipcMain.handle("set-auto-cookie-consent", (_, flag: boolean) => {
     store.set(AUTO_COOKIE_CONSENT_STORE_KEY, flag)
 })
 
+const REDDIT_GALLERY_EXPAND_STORE_KEY = "redditGalleryExpandEnabled"
+ipcMain.on("get-reddit-gallery-expand", event => {
+    event.returnValue = store.get(REDDIT_GALLERY_EXPAND_STORE_KEY, false)
+})
+ipcMain.handle("set-reddit-gallery-expand", (_, flag: boolean) => {
+    store.set(REDDIT_GALLERY_EXPAND_STORE_KEY, flag)
+})
+
 const P2P_COLLECT_LINKS_STORE_KEY = "p2pCollectLinks"
 ipcMain.on("get-p2p-collect-links", event => {
     event.returnValue = store.get(P2P_COLLECT_LINKS_STORE_KEY, false)

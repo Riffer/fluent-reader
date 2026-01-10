@@ -682,6 +682,14 @@ try {
     console.warn('[ContentPreload] Could not load Auto Cookie-Consent setting:', e);
   }
 
+  // Reddit Gallery Expand setting - load synchronously at start
+  let redditGalleryExpandEnabled = false;
+  try {
+    redditGalleryExpandEnabled = ipcRenderer.sendSync('get-reddit-gallery-expand');
+  } catch (e) {
+    console.warn('[ContentPreload] Could not load Reddit Gallery Expand setting:', e);
+  }
+
   // Ctrl+Wheel Zoom (Touchpad) - zooms from cursor position
   window.addEventListener('wheel', (e) => {
     try {
@@ -1468,6 +1476,159 @@ try {
     return cookieConsentPatterns.some(p => p.patterns.some(pat => pat.test(url)));
   }
 
+  // ============================================
+  // Reddit Gallery Expand - Show all images in carousel
+  // ============================================
+  
+  const galleryExpandPatterns = [
+    {
+      // Reddit: Expand gallery-carousel to show all images vertically
+      patterns: [/reddit\.com/],
+      expand: () => {
+        let expanded = false;
+        
+        // Find all gallery-carousel elements
+        document.querySelectorAll('gallery-carousel').forEach(carousel => {
+          // Remove height restrictions on carousel
+          carousel.style.maxHeight = 'none';
+          carousel.style.height = 'auto';
+          carousel.style.setProperty('--gallery-initial-height', 'auto');
+          carousel.classList.remove('nd:h-[var(--gallery-initial-height)]');
+          carousel.style.overflow = 'visible';
+          
+          // Find the UL container and convert to vertical layout
+          const ul = carousel.querySelector('ul');
+          if (ul) {
+            ul.style.transform = 'none';
+            ul.style.display = 'flex';
+            ul.style.flexDirection = 'column';
+            ul.style.gap = '10px';
+            ul.style.transition = 'none';
+          }
+          
+          // Make all list items visible and full-width
+          carousel.querySelectorAll('li[slot^="page-"]').forEach(li => {
+            li.style.visibility = 'visible';
+            li.style.width = '100%';
+            li.style.height = 'auto';
+            li.style.position = 'relative';
+            li.style.flex = 'none';
+            
+            // Activate lazy-loaded images
+            li.querySelectorAll('img[data-lazy-src]').forEach(img => {
+              if (!img.src || img.src === '') {
+                img.src = img.dataset.lazySrc;
+              }
+              if (img.dataset.lazySrcset && !img.srcset) {
+                img.srcset = img.dataset.lazySrcset;
+              }
+            });
+            
+            // Remove blur/background images (decorative)
+            li.querySelectorAll('img.post-background-image-filter').forEach(bg => {
+              bg.style.display = 'none';
+            });
+            
+            // Make main images properly sized
+            li.querySelectorAll('figure img.media-lightbox-img').forEach(img => {
+              img.style.maxHeight = 'none';
+              img.style.height = 'auto';
+              img.style.width = '100%';
+              img.style.objectFit = 'contain';
+            });
+          });
+          
+          // Hide carousel navigation controls
+          carousel.querySelectorAll('[class*="carousel-nav"], [class*="gallery-nav"], button[aria-label*="next"], button[aria-label*="prev"]').forEach(nav => {
+            nav.style.display = 'none';
+          });
+          
+          expanded = true;
+        });
+        
+        // Also handle the async-loader container
+        document.querySelectorAll('shreddit-async-loader[bundlename="gallery_carousel"]').forEach(loader => {
+          loader.style.height = 'auto';
+          loader.style.overflow = 'visible';
+        });
+        
+        return expanded;
+      }
+    }
+  ];
+
+  let galleryExpandComplete = false;
+
+  function applyGalleryExpand() {
+    const url = window.location.href;
+    let handled = false;
+    
+    galleryExpandPatterns.forEach(pattern => {
+      if (pattern.patterns.some(p => p.test(url))) {
+        try {
+          if (pattern.expand()) {
+            handled = true;
+          }
+        } catch (e) {
+          console.error('[ContentPreload] Gallery-Expand failed:', e);
+        }
+      }
+    });
+    
+    if (handled) {
+      galleryExpandComplete = true;
+    }
+    
+    return galleryExpandComplete;
+  }
+
+  function hasGalleryExpandPatterns() {
+    const url = window.location.href;
+    return galleryExpandPatterns.some(p => p.patterns.some(pat => pat.test(url)));
+  }
+
+  let galleryExpandObserver = null;
+  let galleryExpandStarted = false;
+
+  function startGalleryExpand() {
+    if (galleryExpandStarted || !hasGalleryExpandPatterns()) return;
+    galleryExpandStarted = true;
+    
+    // Initial expansion
+    applyGalleryExpand();
+    
+    // MutationObserver for dynamically loaded galleries
+    let debounceTimer = null;
+    
+    galleryExpandObserver = new MutationObserver((mutations) => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        const done = applyGalleryExpand();
+        
+        if (done && galleryExpandObserver) {
+          galleryExpandObserver.disconnect();
+          galleryExpandObserver = null;
+          showOverlayMessage('Gallery expanded', 1500);
+        }
+      }, 100);
+    });
+
+    if (document.body) {
+      galleryExpandObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+    }
+
+    // Fallback: Stop observer after 30 seconds
+    setTimeout(() => {
+      if (galleryExpandObserver) {
+        galleryExpandObserver.disconnect();
+        galleryExpandObserver = null;
+      }
+    }, 30000);
+  }
+
   let cookieConsentObserver = null;
   let cookieConsentStarted = false;
 
@@ -1573,6 +1734,15 @@ try {
       document.addEventListener('DOMContentLoaded', startCookieConsent);
     } else {
       startCookieConsent();
+    }
+  }
+
+  // Start Reddit Gallery Expand automatically when enabled
+  if (redditGalleryExpandEnabled && hasGalleryExpandPatterns()) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startGalleryExpand);
+    } else {
+      startGalleryExpand();
     }
   }
 
