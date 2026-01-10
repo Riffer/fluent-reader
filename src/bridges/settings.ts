@@ -152,6 +152,20 @@ const settingsBridge = {
         ipcRenderer.invoke("set-auto-cookie-consent", flag)
     },
 
+    getRedditGalleryExpand: (): boolean => {
+        return ipcRenderer.sendSync("get-reddit-gallery-expand")
+    },
+    setRedditGalleryExpand: (flag: boolean) => {
+        ipcRenderer.invoke("set-reddit-gallery-expand", flag)
+    },
+
+    getRedditSingleImageExpand: (): boolean => {
+        return ipcRenderer.sendSync("get-reddit-single-image-expand")
+    },
+    setRedditSingleImageExpand: (flag: boolean) => {
+        ipcRenderer.invoke("set-reddit-single-image-expand", flag)
+    },
+
     getP2PCollectLinks: (): boolean => {
         return ipcRenderer.sendSync("get-p2p-collect-links")
     },
