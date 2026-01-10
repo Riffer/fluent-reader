@@ -1349,6 +1349,154 @@ function matchesPattern(url: string, pattern: string): boolean {
 - [Tampermonkey Documentation](https://www.tampermonkey.net/documentation.php)
 - [I don't care about cookies](https://www.i-dont-care-about-cookies.eu/) - Filterliste
 
+### Migrations-Bewertung: Existierende Site-Anpassungen → Userscripts
+
+Die folgenden Features in `src/renderer/content-preload.js` sind Kandidaten für eine spätere Migration ins Userscript-System:
+
+#### 1. NSFW-Cleanup (Reddit)
+
+| Aspekt | Aktueller Stand | Userscript-Kompatibilität |
+|--------|-----------------|---------------------------|
+| **DOM-Manipulation** | Reines JS: `querySelector`, `remove()`, Style-Änderungen | ✅ 100% kompatibel |
+| **Shadow DOM** | `element.shadowRoot.querySelector()` | ✅ Standard Web API |
+| **Domain-Check** | `/reddit\.com/.test(url)` | ✅ `@match *://*.reddit.com/*` |
+| **Observer** | `MutationObserver` für dynamische Elemente | ✅ Standard Web API |
+| **Timing** | `document-idle` + Observer | ✅ `@run-at document-idle` |
+
+**Besonderheiten:**
+- Shadow DOM-Manipulation (Reddit Web Components)
+- MutationObserver mit automatischem Disconnect nach Cleanup
+- Debouncing zur Performance-Optimierung
+
+**Anpassungsbedarf:**
+- `ipcRenderer.sendSync('get-nsfw-cleanup')` → `GM_getValue('nsfwCleanup', true)`
+- `showOverlayMessage()` → Optional entfernen oder `GM_notification()`
+
+**Als Userscript (~30 Zeilen Kern-Code):**
+```javascript
+// ==UserScript==
+// @name         Reddit NSFW Cleanup
+// @match        *://*.reddit.com/*
+// @run-at       document-idle
+// ==/UserScript==
+function cleanup() {
+  document.querySelectorAll('xpromo-nsfw-blocking-container').forEach(c => {
+    if (c.shadowRoot) c.shadowRoot.querySelector('.prompt')?.style.display = 'none';
+  });
+  document.querySelectorAll('shreddit-blurred-container').forEach(el => {
+    el.removeAttribute('blurred');
+    if (el.shadowRoot) {
+      el.shadowRoot.querySelector('.overlay')?.style.display = 'none';
+      el.shadowRoot.querySelectorAll('.blurred').forEach(b => b.style.filter = 'none');
+    }
+  });
+}
+cleanup();
+new MutationObserver(cleanup).observe(document.body, {childList:true, subtree:true});
+```
+
+**Migrations-Aufwand:** ⭐⭐ Gering (15-20 Min)
+
+---
+
+#### 2. Auto Cookie-Consent (Reddit)
+
+| Aspekt | Aktueller Stand | Userscript-Kompatibilität |
+|--------|-----------------|---------------------------|
+| **DOM-Manipulation** | `querySelector`, `click()`, `remove()` | ✅ 100% kompatibel |
+| **Domain-Check** | Pattern-Array mit RegExp | ✅ `@match` Patterns |
+| **Button-Klick** | `rejectButton.click()` | ✅ Standard Web API |
+| **Timing** | `document-idle` + Observer | ✅ `@run-at document-idle` |
+
+**Struktur bereits modular:**
+```javascript
+const cookieConsentPatterns = [
+  { patterns: [/reddit\.com/], consent: () => { /* ... */ } },
+  // Weitere Sites können einfach hinzugefügt werden
+];
+```
+
+**Anpassungsbedarf:**
+- `ipcRenderer.sendSync('get-auto-cookie-consent')` → `GM_getValue()`
+- Pattern-Array → Separate Userscripts pro Domain (oder Multi-Match)
+
+**Als Userscript (~20 Zeilen):**
+```javascript
+// ==UserScript==
+// @name         Reddit Cookie Auto-Reject
+// @match        *://*.reddit.com/*
+// @run-at       document-idle
+// ==/UserScript==
+function rejectCookies() {
+  const dialog = document.querySelector('#data-protection-consent-dialog');
+  const reject = dialog?.querySelector('[data-testid="reject-nonessential-cookies-button"]');
+  if (reject) { reject.click(); return true; }
+  document.querySelectorAll('shreddit-cookie-banner').forEach(el => el.remove());
+}
+rejectCookies();
+new MutationObserver(rejectCookies).observe(document.body, {childList:true, subtree:true});
+```
+
+**Migrations-Aufwand:** ⭐ Sehr gering (10 Min)
+
+---
+
+#### 3. Reddit Gallery/Image Expand (NEU, Januar 2026)
+
+| Aspekt | Aktueller Stand | Userscript-Kompatibilität |
+|--------|-----------------|---------------------------|
+| **DOM-Manipulation** | `querySelector`, `click()` | ✅ 100% kompatibel |
+| **Domain-Check** | `/reddit\.com/.test(url)` | ✅ `@match *://*.reddit.com/*` |
+| **Timing** | Nach View-Aktivierung | ⚠️ Siehe unten |
+
+**Besonderheit:** Content-View-Pool Integration
+- Aktuelle Implementierung reagiert auf `cvp-set-active-state` IPC
+- Userscript müsste alternatives Timing nutzen: `IntersectionObserver` oder `visibilitychange`
+
+**Als Userscript (~15 Zeilen):**
+```javascript
+// ==UserScript==
+// @name         Reddit Gallery Auto-Expand
+// @match        *://*.reddit.com/*
+// @run-at       document-idle
+// ==/UserScript==
+setTimeout(() => {
+  // Gallery (multiple images)
+  document.querySelectorAll('gallery-carousel').forEach(c => 
+    (c.querySelector('img.media-lightbox-img') || c).click()
+  );
+  // Single image
+  document.querySelectorAll('shreddit-media-lightbox-listener').forEach(l => {
+    if (!l.closest('gallery-carousel')) (l.querySelector('img') || l).click();
+  });
+}, 2000);
+```
+
+**Migrations-Aufwand:** ⭐ Sehr gering (10 Min)
+
+---
+
+#### Zusammenfassung: Migrations-Readiness
+
+| Feature | Kern-Code portierbar | Fluent-Reader-spezifisch | Aufwand |
+|---------|---------------------|--------------------------|---------|
+| NSFW-Cleanup | ✅ 95% | IPC, Overlay-Message | ⭐⭐ |
+| Cookie-Consent | ✅ 98% | IPC | ⭐ |
+| Gallery Expand | ✅ 90% | IPC, Active-State | ⭐ |
+
+**Empfehlung für zukünftige Site-Anpassungen:**
+```javascript
+// 1. Reiner DOM-Logik Block (portierbar)
+function siteSpecificAction() {
+  // Nur querySelector, click, DOM-Manipulation
+}
+
+// 2. Fluent-Reader Integration (wird später zum Userscript-Runner)
+if (settingEnabled && matchesPattern(url)) {
+  onViewActive(() => siteSpecificAction());
+}
+```
+
 ---
 
 ## Comic-Modus Verbesserungen
