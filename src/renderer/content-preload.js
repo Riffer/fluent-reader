@@ -1477,82 +1477,31 @@ try {
   }
 
   // ============================================
-  // Reddit Gallery Expand - Show all images in carousel
+  // Reddit Gallery Expand - Click to expand carousel
   // ============================================
   
   const galleryExpandPatterns = [
     {
-      // Reddit: Expand gallery-carousel to show all images vertically
+      // Reddit: Click on gallery-carousel to trigger native expand
       patterns: [/reddit\.com/],
       expand: () => {
-        let expanded = false;
+        let clicked = false;
         
-        // Find all gallery-carousel elements
+        // Find gallery-carousel and click on it to trigger Reddit's native expand
         document.querySelectorAll('gallery-carousel').forEach(carousel => {
-          // Remove height restrictions on carousel
-          carousel.style.maxHeight = 'none';
-          carousel.style.height = 'auto';
-          carousel.style.setProperty('--gallery-initial-height', 'auto');
-          carousel.classList.remove('nd:h-[var(--gallery-initial-height)]');
-          carousel.style.overflow = 'visible';
+          // Look for clickable image or figure inside
+          const clickTarget = carousel.querySelector('figure img.media-lightbox-img') ||
+                              carousel.querySelector('img.media-lightbox-img') ||
+                              carousel.querySelector('figure') ||
+                              carousel;
           
-          // Find the UL container and convert to vertical layout
-          const ul = carousel.querySelector('ul');
-          if (ul) {
-            ul.style.transform = 'none';
-            ul.style.display = 'flex';
-            ul.style.flexDirection = 'column';
-            ul.style.gap = '10px';
-            ul.style.transition = 'none';
+          if (clickTarget) {
+            clickTarget.click();
+            clicked = true;
           }
-          
-          // Make all list items visible and full-width
-          carousel.querySelectorAll('li[slot^="page-"]').forEach(li => {
-            li.style.visibility = 'visible';
-            li.style.width = '100%';
-            li.style.height = 'auto';
-            li.style.position = 'relative';
-            li.style.flex = 'none';
-            
-            // Activate lazy-loaded images
-            li.querySelectorAll('img[data-lazy-src]').forEach(img => {
-              if (!img.src || img.src === '') {
-                img.src = img.dataset.lazySrc;
-              }
-              if (img.dataset.lazySrcset && !img.srcset) {
-                img.srcset = img.dataset.lazySrcset;
-              }
-            });
-            
-            // Remove blur/background images (decorative)
-            li.querySelectorAll('img.post-background-image-filter').forEach(bg => {
-              bg.style.display = 'none';
-            });
-            
-            // Make main images properly sized
-            li.querySelectorAll('figure img.media-lightbox-img').forEach(img => {
-              img.style.maxHeight = 'none';
-              img.style.height = 'auto';
-              img.style.width = '100%';
-              img.style.objectFit = 'contain';
-            });
-          });
-          
-          // Hide carousel navigation controls
-          carousel.querySelectorAll('[class*="carousel-nav"], [class*="gallery-nav"], button[aria-label*="next"], button[aria-label*="prev"]').forEach(nav => {
-            nav.style.display = 'none';
-          });
-          
-          expanded = true;
         });
         
-        // Also handle the async-loader container
-        document.querySelectorAll('shreddit-async-loader[bundlename="gallery_carousel"]').forEach(loader => {
-          loader.style.height = 'auto';
-          loader.style.overflow = 'visible';
-        });
-        
-        return expanded;
+        return clicked;
       }
     }
   ];
@@ -1594,39 +1543,12 @@ try {
     if (galleryExpandStarted || !hasGalleryExpandPatterns()) return;
     galleryExpandStarted = true;
     
-    // Initial expansion
-    applyGalleryExpand();
-    
-    // MutationObserver for dynamically loaded galleries
-    let debounceTimer = null;
-    
-    galleryExpandObserver = new MutationObserver((mutations) => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        const done = applyGalleryExpand();
-        
-        if (done && galleryExpandObserver) {
-          galleryExpandObserver.disconnect();
-          galleryExpandObserver = null;
-          showOverlayMessage('Gallery expanded', 1500);
-        }
-      }, 100);
-    });
-
-    if (document.body) {
-      galleryExpandObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
-    }
-
-    // Fallback: Stop observer after 30 seconds
+    // Delay to ensure page is fully loaded (after NSFW-Cleanup)
+    // Use longer delay since this should run after other cleanups
     setTimeout(() => {
-      if (galleryExpandObserver) {
-        galleryExpandObserver.disconnect();
-        galleryExpandObserver = null;
-      }
-    }, 30000);
+      applyGalleryExpand();
+      showOverlayMessage('Gallery clicked', 1500);
+    }, 2000);  // 2 seconds delay to ensure page is ready
   }
 
   let cookieConsentObserver = null;
