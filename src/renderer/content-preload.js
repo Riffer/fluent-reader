@@ -1507,8 +1507,11 @@ try {
   ];
 
   let galleryExpandComplete = false;
+  let galleryExpandPending = false;  // True if we should click when view becomes active
 
   function applyGalleryExpand() {
+    if (galleryExpandComplete) return true;
+    
     const url = window.location.href;
     let handled = false;
     
@@ -1526,6 +1529,8 @@ try {
     
     if (handled) {
       galleryExpandComplete = true;
+      galleryExpandPending = false;
+      showOverlayMessage('Gallery clicked', 1500);
     }
     
     return galleryExpandComplete;
@@ -1536,19 +1541,36 @@ try {
     return galleryExpandPatterns.some(p => p.patterns.some(pat => pat.test(url)));
   }
 
-  let galleryExpandObserver = null;
-  let galleryExpandStarted = false;
+  // Called when view becomes active (visible)
+  function onViewBecameActive() {
+    if (galleryExpandPending && redditGalleryExpandEnabled) {
+      // Delay slightly to ensure page is fully rendered
+      setTimeout(() => {
+        applyGalleryExpand();
+      }, 500);
+    }
+  }
+
+  // Register for active state changes
+  ipcRenderer.on('cvp-set-active-state', (event, active) => {
+    if (active) {
+      onViewBecameActive();
+    }
+  });
 
   function startGalleryExpand() {
-    if (galleryExpandStarted || !hasGalleryExpandPatterns()) return;
-    galleryExpandStarted = true;
+    if (!hasGalleryExpandPatterns()) return;
     
-    // Delay to ensure page is fully loaded (after NSFW-Cleanup)
-    // Use longer delay since this should run after other cleanups
-    setTimeout(() => {
-      applyGalleryExpand();
-      showOverlayMessage('Gallery clicked', 1500);
-    }, 2000);  // 2 seconds delay to ensure page is ready
+    // Mark that we want to expand when view becomes active
+    galleryExpandPending = true;
+    
+    // If already active, apply immediately after short delay
+    if (isActiveView) {
+      setTimeout(() => {
+        applyGalleryExpand();
+      }, 2000);  // 2 seconds for initial active view
+    }
+    // Otherwise, onViewBecameActive will handle it when view is shown
   }
 
   let cookieConsentObserver = null;
