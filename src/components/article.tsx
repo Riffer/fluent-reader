@@ -94,6 +94,7 @@ type ArticleState = {
     nsfwCleanupEnabled: boolean
     autoCookieConsentEnabled: boolean
     redditGalleryExpandEnabled: boolean  // Reddit Gallery: Auto-expand carousel to show all images
+    redditSingleImageExpandEnabled: boolean  // Reddit Single Image: Auto-expand single images
     inputModeEnabled: boolean  // Input mode: Shortcuts disabled for login etc.
     showP2PShareDialog: boolean
     visualZoomEnabled: boolean  // Visual Zoom (Pinch-to-Zoom) ohne Mobile-Modus
@@ -234,6 +235,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             nsfwCleanupEnabled: window.settings.getNsfwCleanup(),
             autoCookieConsentEnabled: window.settings.getAutoCookieConsent(),
             redditGalleryExpandEnabled: window.settings.getRedditGalleryExpand(),
+            redditSingleImageExpandEnabled: window.settings.getRedditSingleImageExpand(),
             inputModeEnabled: false,
             showP2PShareDialog: false,
             visualZoomEnabled: window.settings.getVisualZoom(),
@@ -1161,6 +1163,14 @@ window.__articleData = ${JSON.stringify({
         this.contentReload();
     }
 
+    private toggleRedditSingleImageExpand = () => {
+        const newValue = !this.state.redditSingleImageExpandEnabled;
+        window.settings.setRedditSingleImageExpand(newValue);
+        this.setState({ redditSingleImageExpandEnabled: newValue });
+        // Reload ContentView so the setting takes effect
+        this.contentReload();
+    }
+
     // ===== Cookie Persistence =====
     
     /**
@@ -1474,6 +1484,14 @@ window.__articleData = ${JSON.stringify({
                             canCheck: true,
                             checked: this.state.redditGalleryExpandEnabled,
                             onClick: this.toggleRedditGalleryExpand,
+                        },
+                        {
+                            key: "toggleRedditSingleImageExpand",
+                            text: "Reddit Einzelbild Expand",
+                            iconProps: { iconName: this.state.redditSingleImageExpandEnabled ? "CheckMark" : "" },
+                            canCheck: true,
+                            checked: this.state.redditSingleImageExpandEnabled,
+                            onClick: this.toggleRedditSingleImageExpand,
                         },
                         {
                             key: "togglePersistCookies",

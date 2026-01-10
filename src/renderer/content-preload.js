@@ -690,6 +690,14 @@ try {
     console.warn('[ContentPreload] Could not load Reddit Gallery Expand setting:', e);
   }
 
+  // Reddit Single Image Expand setting - load synchronously at start
+  let redditSingleImageExpandEnabled = false;
+  try {
+    redditSingleImageExpandEnabled = ipcRenderer.sendSync('get-reddit-single-image-expand');
+  } catch (e) {
+    console.warn('[ContentPreload] Could not load Reddit Single Image Expand setting:', e);
+  }
+
   // Ctrl+Wheel Zoom (Touchpad) - zooms from cursor position
   window.addEventListener('wheel', (e) => {
     try {
@@ -1477,92 +1485,94 @@ try {
   }
 
   // ============================================
-  // Reddit Gallery Expand - Click to expand carousel or single image
+  // Reddit Gallery Expand - Click to expand carousel (multiple images)
   // ============================================
   
-  const galleryExpandPatterns = [
-    {
-      // Reddit: Click on gallery-carousel or single image to trigger native lightbox
-      patterns: [/reddit\.com/],
-      expand: () => {
-        let clicked = false;
-        
-        // 1. Gallery carousel (multiple images)
-        document.querySelectorAll('gallery-carousel').forEach(carousel => {
-          const clickTarget = carousel.querySelector('figure img.media-lightbox-img') ||
-                              carousel.querySelector('img.media-lightbox-img') ||
-                              carousel.querySelector('figure') ||
-                              carousel;
-          
-          if (clickTarget) {
-            clickTarget.click();
-            clicked = true;
-          }
-        });
-        
-        // 2. Single image with lightbox listener
-        if (!clicked) {
-          document.querySelectorAll('shreddit-media-lightbox-listener').forEach(listener => {
-            // Skip if inside gallery-carousel (already handled above)
-            if (listener.closest('gallery-carousel')) return;
-            
-            const clickTarget = listener.querySelector('img.media-lightbox-img') ||
-                                listener.querySelector('img') ||
-                                listener;
-            
-            if (clickTarget) {
-              clickTarget.click();
-              clicked = true;
-            }
-          });
-        }
-        
-        return clicked;
-      }
-    }
-  ];
-
-  let galleryExpandComplete = false;
-  let galleryExpandPending = false;  // True if we should click when view becomes active
-
-  function applyGalleryExpand() {
-    if (galleryExpandComplete) return true;
+  function expandRedditGallery() {
+    let clicked = false;
     
-    const url = window.location.href;
-    let handled = false;
-    
-    galleryExpandPatterns.forEach(pattern => {
-      if (pattern.patterns.some(p => p.test(url))) {
-        try {
-          if (pattern.expand()) {
-            handled = true;
-          }
-        } catch (e) {
-          console.error('[ContentPreload] Gallery-Expand failed:', e);
-        }
+    document.querySelectorAll('gallery-carousel').forEach(carousel => {
+      const clickTarget = carousel.querySelector('figure img.media-lightbox-img') ||
+                          carousel.querySelector('img.media-lightbox-img') ||
+                          carousel.querySelector('figure') ||
+                          carousel;
+      
+      if (clickTarget) {
+        clickTarget.click();
+        clicked = true;
       }
     });
     
-    if (handled) {
-      galleryExpandComplete = true;
-      galleryExpandPending = false;
-      showOverlayMessage('Gallery clicked', 1500);
-    }
-    
-    return galleryExpandComplete;
+    return clicked;
   }
 
-  function hasGalleryExpandPatterns() {
+  // ============================================
+  // Reddit Single Image Expand - Click to expand single images
+  // ============================================
+  
+  function expandRedditSingleImage() {
+    let clicked = false;
+    
+    document.querySelectorAll('shreddit-media-lightbox-listener').forEach(listener => {
+      // Skip if inside gallery-carousel (handled by Gallery Expand)
+      if (listener.closest('gallery-carousel')) return;
+      
+      const clickTarget = listener.querySelector('img.media-lightbox-img') ||
+                          listener.querySelector('img') ||
+                          listener;
+      
+      if (clickTarget) {
+        clickTarget.click();
+        clicked = true;
+      }
+    });
+    
+    return clicked;
+  }
+
+  // ============================================
+  // Combined expand state tracking
+  // ============================================
+  
+  let galleryExpandComplete = false;
+  let singleImageExpandComplete = false;
+  let galleryExpandPending = false;
+  let singleImageExpandPending = false;
+
+  function applyRedditExpands() {
     const url = window.location.href;
-    return galleryExpandPatterns.some(p => p.patterns.some(pat => pat.test(url)));
+    if (!/reddit\.com/.test(url)) return;
+    
+    // Gallery carousel expand
+    if (redditGalleryExpandEnabled && galleryExpandPending && !galleryExpandComplete) {
+      if (expandRedditGallery()) {
+        galleryExpandComplete = true;
+        galleryExpandPending = false;
+        showOverlayMessage('Gallery expanded', 1500);
+      }
+    }
+    
+    // Single image expand (only if gallery didn't click)
+    if (redditSingleImageExpandEnabled && singleImageExpandPending && !singleImageExpandComplete) {
+      if (expandRedditSingleImage()) {
+        singleImageExpandComplete = true;
+        singleImageExpandPending = false;
+        showOverlayMessage('Image expanded', 1500);
+      }
+    }
+  }
+
+  function hasRedditExpandPatterns() {
+    const url = window.location.href;
+    return /reddit\.com/.test(url);
   }
 
   // Called when view becomes active (visible)
   function onViewBecameActive() {
-    if (galleryExpandPending && redditGalleryExpandEnabled) {
+    if ((galleryExpandPending || singleImageExpandPending) && hasRedditExpandPatterns()) {
       // Delay slightly to ensure page is fully rendered
       setTimeout(() => {
-        applyGalleryExpand();
+        applyRedditExpands();
       }, 500);
     }
   }
@@ -1574,16 +1584,21 @@ try {
     }
   });
 
-  function startGalleryExpand() {
-    if (!hasGalleryExpandPatterns()) return;
+  function startRedditExpands() {
+    if (!hasRedditExpandPatterns()) return;
     
-    // Mark that we want to expand when view becomes active
-    galleryExpandPending = true;
+    // Mark what we want to expand based on settings
+    if (redditGalleryExpandEnabled) {
+      galleryExpandPending = true;
+    }
+    if (redditSingleImageExpandEnabled) {
+      singleImageExpandPending = true;
+    }
     
     // If already active, apply immediately after short delay
-    if (isActiveView) {
+    if (isActiveView && (galleryExpandPending || singleImageExpandPending)) {
       setTimeout(() => {
-        applyGalleryExpand();
+        applyRedditExpands();
       }, 2000);  // 2 seconds for initial active view
     }
     // Otherwise, onViewBecameActive will handle it when view is shown
@@ -1697,12 +1712,12 @@ try {
     }
   }
 
-  // Start Reddit Gallery Expand automatically when enabled
-  if (redditGalleryExpandEnabled && hasGalleryExpandPatterns()) {
+  // Start Reddit Expands automatically when either setting is enabled
+  if ((redditGalleryExpandEnabled || redditSingleImageExpandEnabled) && hasRedditExpandPatterns()) {
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', startGalleryExpand);
+      document.addEventListener('DOMContentLoaded', startRedditExpands);
     } else {
-      startGalleryExpand();
+      startRedditExpands();
     }
   }
 
