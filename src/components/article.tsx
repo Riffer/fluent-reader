@@ -648,9 +648,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             url = this.generateArticleHtml(item, source);
         }
         
-        // Use TARGET feed's default zoom, not current view's zoom
-        // This ensures prefetched articles from different feeds have correct initial zoom
-        const targetZoom = source.defaultZoom || 0;
+        // Use CURRENT zoom if same feed, otherwise use TARGET feed's stored default zoom
+        // This ensures:
+        // 1. Same-feed prefetched articles inherit the user's current zoom (even if not yet saved)
+        // 2. Different-feed articles use their own stored default zoom
+        const isSameFeed = feedId && item.source === feedId;
+        const targetZoom = isSameFeed ? this.currentZoom : (source.defaultZoom || 0);
         const targetZoomFactor = 1.0 + (targetZoom * 0.1);
         const settings = {
             zoomFactor: targetZoomFactor,
@@ -659,7 +662,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             showZoomOverlay: this.state.showZoomOverlay
         };
         
-        console.log(`[ContentViewPool] Providing prefetch info for index ${articleIndex}: item=${itemId}, openTarget=${SourceOpenTarget[openTarget]}, targetZoom=${targetZoom}, url=${url?.substring(0, 50) || 'null (FullContent)'}...`);
+        console.log(`[ContentViewPool] Providing prefetch info for index ${articleIndex}: item=${itemId}, openTarget=${SourceOpenTarget[openTarget]}, isSameFeed=${isSameFeed}, targetZoom=${targetZoom}, url=${url?.substring(0, 50) || 'null (FullContent)'}...`);
         window.contentViewPool?.providePrefetchInfo(
             articleIndex,
             String(itemId),
@@ -1632,7 +1635,8 @@ window.__articleData = ${JSON.stringify({
                     if (!input.isAutoRepeat) {
                         this.markKeyProcessed(keyWithMods)
                         const stepPlus = input.control ? 0.1 : 1
-                        this.applyZoom((this.state.zoom || 0) + stepPlus)
+                        // Use this.currentZoom (always up-to-date) instead of this.state.zoom (async)
+                        this.applyZoom(this.currentZoom + stepPlus)
                     }
                     break
                 case "-":
@@ -1641,7 +1645,8 @@ window.__articleData = ${JSON.stringify({
                     if (!input.isAutoRepeat) {
                         this.markKeyProcessed(keyWithMods)
                         const stepMinus = input.control ? 0.1 : 1
-                        this.applyZoom((this.state.zoom || 0) - stepMinus)
+                        // Use this.currentZoom (always up-to-date) instead of this.state.zoom (async)
+                        this.applyZoom(this.currentZoom - stepMinus)
                     }
                     break
                 case "#":

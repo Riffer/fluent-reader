@@ -1962,8 +1962,11 @@ export class ContentViewPool {
         const clampedFactor = Math.max(0.25, Math.min(5.0, factor))
         this.cssZoomLevel = (clampedFactor - 1.0) / 0.1
         
+        console.log(`[ContentViewPool] setZoomFactor: factor=${factor.toFixed(2)}, level=${this.cssZoomLevel.toFixed(2)}, activeId=${this.activeViewId}`)
+        
         const active = this.getActiveView()
         if (active) {
+            console.log(`[ContentViewPool] setZoomFactor: applying to active view ${active.id}`)
             if (this.visualZoomEnabled) {
                 active.setVisualZoomLevel(this.cssZoomLevel)
             } else {
@@ -2035,6 +2038,8 @@ export class ContentViewPool {
      * so we only sync to views that have the same feedId as the active view.
      */
     private syncZoomToSameFeedViews(): void {
+        // Use stored activeViewId instead of getActiveView() to avoid reference comparison issues
+        const activeViewId = this.activeViewId
         const activeView = this.getActiveView()
         const activeFeedId = activeView?.feedId
         
@@ -2043,9 +2048,12 @@ export class ContentViewPool {
             return
         }
         
+        console.log(`[ContentViewPool] syncZoomToSameFeedViews: active=${activeViewId}, feed=${activeFeedId}, zoomLevel=${this.cssZoomLevel}`)
+        
         for (const view of this.views) {
-            // Only sync to views of the same feed (excluding the active view which is already updated)
-            if (view !== activeView && view.feedId === activeFeedId) {
+            // Use ID comparison (more robust than object reference comparison)
+            // Skip the active view - it was already updated in setZoomFactor/setCssZoom
+            if (view.id !== activeViewId && view.feedId === activeFeedId) {
                 console.log(`[ContentViewPool] syncZoomToSameFeedViews: syncing ${view.id} (same feed: ${activeFeedId})`)
                 if (this.visualZoomEnabled) {
                     view.setVisualZoomLevel(this.cssZoomLevel)
