@@ -1477,19 +1477,18 @@ try {
   }
 
   // ============================================
-  // Reddit Gallery Expand - Click to expand carousel
+  // Reddit Gallery Expand - Click to expand carousel or single image
   // ============================================
   
   const galleryExpandPatterns = [
     {
-      // Reddit: Click on gallery-carousel to trigger native expand
+      // Reddit: Click on gallery-carousel or single image to trigger native lightbox
       patterns: [/reddit\.com/],
       expand: () => {
         let clicked = false;
         
-        // Find gallery-carousel and click on it to trigger Reddit's native expand
+        // 1. Gallery carousel (multiple images)
         document.querySelectorAll('gallery-carousel').forEach(carousel => {
-          // Look for clickable image or figure inside
           const clickTarget = carousel.querySelector('figure img.media-lightbox-img') ||
                               carousel.querySelector('img.media-lightbox-img') ||
                               carousel.querySelector('figure') ||
@@ -1500,6 +1499,23 @@ try {
             clicked = true;
           }
         });
+        
+        // 2. Single image with lightbox listener
+        if (!clicked) {
+          document.querySelectorAll('shreddit-media-lightbox-listener').forEach(listener => {
+            // Skip if inside gallery-carousel (already handled above)
+            if (listener.closest('gallery-carousel')) return;
+            
+            const clickTarget = listener.querySelector('img.media-lightbox-img') ||
+                                listener.querySelector('img') ||
+                                listener;
+            
+            if (clickTarget) {
+              clickTarget.click();
+              clicked = true;
+            }
+          });
+        }
         
         return clicked;
       }
