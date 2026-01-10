@@ -2910,21 +2910,48 @@ window.__articleData = ${JSON.stringify({
         content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
     <title>Article</title>
     <style>
+/* ====== Responsive Article Layout ====== */
+
 /* Scrollbar Styles */
 ::-webkit-scrollbar { width: 16px; }
-::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background-color: #0006; }
 ::-webkit-scrollbar-thumb:active { background-color: #0008; }
 
 /* CSS Variables */
-:root { --gray: #484644; --primary: #0078d4; --primary-alt: #004578; }
+:root { 
+    --gray: #484644; 
+    --primary: #0078d4; 
+    --primary-alt: #004578;
+    --bg-color: #fafafa;
+    --text-color: #1a1a1a;
+    --content-max-width: 1200px;
+}
 
-/* Base Styles */
-html, body { margin: 0; padding: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
-body { padding: 8px; overflow-x: hidden; overflow-y: auto; font-size: ${this.state.fontSize}px; box-sizing: border-box; width: 100%; }
-${this.state.fontFamily ? `body { font-family: "${this.state.fontFamily}"; }` : ''}
+/* Base Styles - Block layout for proper overflow handling */
+html, body { 
+    margin: 0; 
+    padding: 0; 
+    font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-color);
+    color: var(--text-color);
+}
+body { 
+    padding: 1rem; 
+    overflow-x: hidden; 
+    overflow-y: auto; 
+    font-size: ${this.state.fontSize}px; 
+    box-sizing: border-box;
+    /* No flexbox on body - causes centering issues with large content */
+}
+${this.state.fontFamily ? `body { font-family: "${this.state.fontFamily}", system-ui, sans-serif; }` : ''}
 body.rtl { direction: rtl; }
-body.vertical { writing-mode: vertical-rl; padding: 8px; padding-right: 96px; overflow: scroll hidden; }
+body.vertical { 
+    writing-mode: vertical-rl; 
+    padding: 1rem; 
+    padding-right: 96px; 
+    overflow: scroll hidden;
+}
 * { box-sizing: border-box; }
 
 /* Typography */
@@ -2932,80 +2959,208 @@ h1, h2, h3, h4, h5, h6, b, strong { font-weight: 600; }
 a { color: var(--primary); text-decoration: none; }
 a:hover, a:active { color: var(--primary-alt); text-decoration: underline; }
 
-/* Main Container */
-#main { display: none; width: 100%; margin: 0; max-width: 100%; margin: 0 auto; }
-body.vertical #main { max-width: unset; max-height: 100%; margin: auto 0; }
-#main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
-/* Title and Date */
-#main > p.title { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; margin-block-end: 0; }
-#main > p.date { color: var(--gray); font-size: 0.875rem; margin-block-start: 0.5rem; }
-
-/* Article Content */
-#main > article { max-width: 1024px; margin: 8px auto 0; padding: 0 8px; }
-article { line-height: 1.6; }
-body.vertical article { line-height: 1.5; }
-body.vertical article p { text-indent: 2rem; }
-article * { max-width: 100%; }
-article img { height: auto; max-width: 100%; }
-body.vertical article img { max-height: 75%; }
-article figure { margin: 16px 0; text-align: center; }
-article figure figcaption { font-size: 0.875rem; color: var(--gray); -webkit-user-modify: read-only; }
-article iframe { width: 100%; }
-article code { font-family: Monaco, Consolas, monospace; font-size: 0.875rem; line-height: 1; word-break: break-word; }
-article pre { word-break: normal; overflow-wrap: normal; white-space: pre-wrap; max-width: 100%; overflow-x: auto; }
-article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding: 0 40px; }
-#main table { max-width: 100%; overflow-x: auto; }
-
-/* Dark Mode */
-@media (prefers-color-scheme: dark) {
-  :root { --gray: #a19f9d; --primary: #4ba0e1; --primary-alt: #65aee6; }
-  body { background-color: #2d2d30; color: #f8f8f8; }
-  #main > p.date { color: #a19f9d; }
-  a { color: #4ba0e1; }
-  a:hover, a:active { color: #65aee6; }
-  ::-webkit-scrollbar-thumb { background-color: #fff4; }
-  ::-webkit-scrollbar-thumb:hover { background-color: #fff6; }
-  ::-webkit-scrollbar-thumb:active { background-color: #fff8; }
+/* Main Container - Centered with margin, max-width constraint */
+#main { 
+    display: none; 
+    width: 100%; 
+    max-width: var(--content-max-width);
+    margin: 0 auto; /* Center with margin instead of flexbox */
+}
+body.vertical #main { 
+    max-width: unset; 
+    max-height: 100%; 
+}
+#main.show { 
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    animation: fadeIn 0.367s cubic-bezier(0.1, 0.9, 0.2, 1) both;
+}
+@keyframes fadeIn { 
+    from { opacity: 0; transform: translateY(10px); } 
+    to { opacity: 1; transform: translateY(0); } 
 }
 
-/* Comic Mode Styles - for image-dominated content */
+/* Title and Date - Header section */
+#main > p.title { 
+    font-size: 1.25rem; 
+    line-height: 1.75rem; 
+    font-weight: 600; 
+    margin: 0;
+    padding: 0 0.5rem;
+}
+#main > p.date { 
+    color: var(--gray); 
+    font-size: 0.875rem; 
+    margin: 0;
+    padding: 0 0.5rem;
+}
+
+/* Article Content - Gallery-style layout for images */
+#main > article { 
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    padding: 0 0.5rem;
+    line-height: 1.6;
+}
+body.vertical article { line-height: 1.5; }
+body.vertical article p { text-indent: 2rem; }
+
+/* All elements respect container width */
+article * { max-width: 100%; }
+#main > * { max-width: 100%; }
+
+/* Images - Responsive gallery style */
+/* Use !important to override inline width/height HTML attributes */
+/* Target both images in article AND directly in #main */
+article img,
+#main > img { 
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important; 
+    object-fit: contain;
+    border-radius: 4px;
+    background: #000;
+}
+body.vertical article img { max-height: 75%; }
+
+/* Figures with captions */
+article figure { 
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+article figure figcaption { 
+    font-size: 0.875rem; 
+    color: var(--gray); 
+    text-align: center;
+    -webkit-user-modify: read-only; 
+}
+
+/* Embedded content */
+article iframe { width: 100%; border-radius: 4px; }
+article video { width: 100%; height: auto; border-radius: 4px; }
+
+/* Code blocks */
+article code { 
+    font-family: Monaco, Consolas, "Cascadia Code", monospace; 
+    font-size: 0.875rem; 
+    line-height: 1.4; 
+    word-break: break-word;
+    background: rgba(0,0,0,0.05);
+    padding: 0.1em 0.3em;
+    border-radius: 3px;
+}
+article pre { 
+    word-break: normal; 
+    overflow-wrap: normal; 
+    white-space: pre-wrap; 
+    max-width: 100%; 
+    overflow-x: auto;
+    background: rgba(0,0,0,0.05);
+    padding: 1rem;
+    border-radius: 4px;
+}
+article pre code {
+    background: none;
+    padding: 0;
+}
+
+/* Blockquotes */
+article blockquote { 
+    border-left: 3px solid var(--primary); 
+    margin: 0; 
+    padding: 0.5rem 1rem;
+    background: rgba(0,0,0,0.02);
+    border-radius: 0 4px 4px 0;
+}
+
+/* Tables */
+#main table { 
+    max-width: 100%; 
+    overflow-x: auto;
+    border-collapse: collapse;
+}
+#main table td, #main table th {
+    padding: 0.5rem;
+    border: 1px solid var(--gray);
+}
+
+/* Paragraphs in article */
+article p {
+    margin: 0;
+}
+
+/* ====== Dark Mode ====== */
+@media (prefers-color-scheme: dark) {
+    :root { 
+        --gray: #a19f9d; 
+        --primary: #4ba0e1; 
+        --primary-alt: #65aee6;
+        --bg-color: #1e1e1e;
+        --text-color: #e0e0e0;
+    }
+    article code {
+        background: rgba(255,255,255,0.1);
+    }
+    article pre {
+        background: rgba(255,255,255,0.05);
+    }
+    article blockquote {
+        background: rgba(255,255,255,0.03);
+    }
+    ::-webkit-scrollbar-thumb { background-color: #fff4; }
+    ::-webkit-scrollbar-thumb:hover { background-color: #fff6; }
+    ::-webkit-scrollbar-thumb:active { background-color: #fff8; }
+}
+
+/* ====== Comic Mode - Image-dominated content ====== */
 .comic-mode #main {
     max-width: 100%;
+    padding: 0;
+    gap: 0;
+}
+.comic-mode article {
+    gap: 0.5rem;
     padding: 0;
 }
 .comic-mode article img,
 .comic-mode #main > img {
-    max-width: 100%;
-    width: 100%;
-    height: auto;
-    display: block;
-    margin: 0 auto;
+    border-radius: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
 }
 .comic-mode .title,
 .comic-mode .date {
     text-align: center;
-    padding: 0 8px;
 }
 .comic-mode p {
     text-align: center;
+    padding: 0 1rem;
 }
 
-/* Single Image Mode - single large image */
+/* ====== Single Image Mode ====== */
 .single-image #main {
     max-width: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 0;
+    justify-content: center;
+    min-height: calc(100vh - 2rem);
+}
+.single-image article {
+    align-items: center;
 }
 .single-image article img,
 .single-image #main > img {
-    max-height: 90vh;
-    width: auto;
-    max-width: 100%;
-    object-fit: contain;
+    max-height: 85vh;
+    width: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
 }
     </style>
 </head>
@@ -3037,6 +3192,12 @@ window.__articleData = ${JSON.stringify({
     // Remove scripts
     for (let s of main.querySelectorAll("script")) {
         s.parentNode.removeChild(s);
+    }
+    
+    // Remove width/height attributes from images - they prevent CSS from controlling size
+    for (let img of main.querySelectorAll("img")) {
+        img.removeAttribute('width');
+        img.removeAttribute('height');
     }
     
     // DEBUG: Find elements that might cause horizontal overflow
