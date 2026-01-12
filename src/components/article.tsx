@@ -689,43 +689,41 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     
     /**
      * Generate article HTML for prefetch (RSS/Local mode)
-     * Simplified version of articleView() that works with any item/source
+     * Uses normalized content - extracts images and text, strips all wrapper elements
      */
     private generateArticleHtml = (item: RSSItem, source: RSSSource): string => {
-        // Use item's content (not fullContent - that's only for FullContent mode which we skip)
         const articleContent = item.content || '';
         
-        // Content analysis for comic/image mode
-        const imgCount = (articleContent.match(/<img/gi) || []).length;
-        const pictureCount = (articleContent.match(/<picture/gi) || []).length;
-        const totalImages = imgCount + pictureCount;
+        // Normalize RSS content - extract images and text separately
+        const { images, textParagraphs } = this.normalizeRssContent(articleContent);
         
-        // Extract text without HTML tags
-        const textOnly = articleContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-        const textLength = textOnly.length;
+        // Determine mode based on content
+        const totalTextLength = textParagraphs.join(' ').length;
+        const isComicMode = images.length > 0 && totalTextLength < 200;
+        const isSingleImage = images.length === 1 && totalTextLength < 100;
         
-        const isComicMode = totalImages > 0 && textLength < 200;
-        const isSingleImage = totalImages === 1 && textLength < 100;
-        
-        // Generate header HTML
-        const headerContent = renderToString(
-            <>
-                <p className="title">{item.title}</p>
-                <p className="date">
-                    {item.date.toLocaleString(
-                        this.props.locale,
-                        { hour12: !this.props.locale.startsWith("zh") }
-                    )}
-                </p>
-            </>
+        // Format date
+        const dateStr = item.date.toLocaleString(
+            this.props.locale,
+            { hour12: !this.props.locale.startsWith("zh") }
         );
+        
+        // Build normalized HTML - just images and text paragraphs
+        const imagesHtml = images.map(img => 
+            `<img src="${this.escapeHtml(img.src)}" alt="${this.escapeHtml(img.alt)}">`
+        ).join('\n        ');
+        
+        const textHtml = textParagraphs.map(p => `<p>${this.escapeHtml(p)}</p>`).join('\n        ');
+        
+        // Combine: images first (for comic mode), then text
+        const normalizedContent = isComicMode 
+            ? `${imagesHtml}\n        ${textHtml}`
+            : `${textHtml}\n        ${imagesHtml}`;
         
         const rtlClass = source.textDir === SourceTextDirection.RTL ? "rtl" 
             : source.textDir === SourceTextDirection.Vertical ? "vertical" : "";
-        const comicClass = isComicMode ? "comic-mode" : "";
-        const singleImageClass = isSingleImage ? "single-image" : "";
+        const modeClass = isSingleImage ? "single-image" : isComicMode ? "comic-mode" : "";
         
-        // Use current fontSize from state (same as articleView)
         const fontSize = this.state.fontSize;
         const fontFamily = this.state.fontFamily;
         
@@ -737,119 +735,83 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
     <title>Article</title>
     <style>
-/* Scrollbar Styles */
+/* ====== Local/RSS Mode - Simplified Normalized Layout ====== */
 ::-webkit-scrollbar { width: 16px; }
-::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background-color: #0006; }
-::-webkit-scrollbar-thumb:active { background-color: #0008; }
 
-/* CSS Variables */
-:root { --gray: #484644; --primary: #0078d4; --primary-alt: #004578; }
-
-/* Base Styles */
-html, body { margin: 0; padding: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
-body { padding: 8px; overflow-x: hidden; overflow-y: auto; font-size: ${fontSize}px; box-sizing: border-box; width: 100%; }
-${fontFamily ? `body { font-family: "${fontFamily}"; }` : ''}
-body.rtl { direction: rtl; }
-body.vertical { writing-mode: vertical-rl; padding: 8px; padding-right: 96px; overflow: scroll hidden; }
-* { box-sizing: border-box; }
-
-/* Typography */
-h1, h2, h3, h4, h5, h6, b, strong { font-weight: 600; }
-a { color: var(--primary); text-decoration: none; }
-a:hover, a:active { color: var(--primary-alt); text-decoration: underline; }
-
-/* Main Container */
-#main { display: none; width: 100%; margin: 0; max-width: 100%; margin: 0 auto; }
-body.vertical #main { max-width: unset; max-height: 100%; margin: auto 0; }
-#main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
-/* Title and Date */
-#main > p.title { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; margin-block-end: 0; }
-#main > p.date { color: var(--gray); font-size: 0.875rem; margin-block-start: 0.5rem; }
-
-/* Article Content */
-#main > article { max-width: 1024px; margin: 8px auto 0; padding: 0 8px; }
-article { line-height: 1.6; }
-body.vertical article { line-height: 1.5; }
-body.vertical article p { text-indent: 2rem; }
-article * { max-width: 100%; }
-article img { height: auto; max-width: 100%; }
-body.vertical article img { max-height: 75%; }
-article figure { margin: 16px 0; text-align: center; }
-article figure figcaption { font-size: 0.875rem; color: var(--gray); -webkit-user-modify: read-only; }
-article iframe { width: 100%; }
-article code { font-family: Monaco, Consolas, monospace; font-size: 0.875rem; line-height: 1; word-break: break-word; }
-article pre { word-break: normal; overflow-wrap: normal; white-space: pre-wrap; max-width: 100%; overflow-x: auto; }
-article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding: 0 40px; }
-#main table { max-width: 100%; overflow-x: auto; }
-
-/* Dark Mode */
-@media (prefers-color-scheme: dark) {
-  :root { --gray: #a19f9d; --primary: #4ba0e1; --primary-alt: #65aee6; }
-  body { background-color: #2d2d30; color: #f8f8f8; }
-  #main > p.date { color: #a19f9d; }
-  a { color: #4ba0e1; }
-  a:hover, a:active { color: #65aee6; }
-  ::-webkit-scrollbar-thumb { background-color: #fff4; }
-  ::-webkit-scrollbar-thumb:hover { background-color: #fff6; }
-  ::-webkit-scrollbar-thumb:active { background-color: #fff8; }
+:root { 
+    --gray: #484644; 
+    --primary: #0078d4; 
+    --max-width: 1200px;
 }
 
-/* Comic Mode Styles */
-.comic-mode #main { max-width: 100%; padding: 0; }
-.comic-mode article img, .comic-mode #main > img { max-width: 100%; width: 100%; height: auto; display: block; margin: 0 auto; }
-.comic-mode .title, .comic-mode .date { text-align: center; padding: 0 8px; }
-.comic-mode p { text-align: center; }
+html, body { margin: 0; padding: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #fafafa; color: #1a1a1a; }
+body { padding: 1rem; font-size: ${fontSize}px; overflow-x: hidden; }
+${fontFamily ? `body { font-family: "${fontFamily}"; }` : ''}
+body.rtl { direction: rtl; }
+body.vertical { writing-mode: vertical-rl; padding-right: 96px; overflow: scroll hidden; }
 
-/* Single Image Mode */
-.single-image #main { max-width: 100%; display: flex; flex-direction: column; align-items: center; padding: 0; }
-.single-image article img, .single-image #main > img { max-height: 90vh; width: auto; max-width: 100%; object-fit: contain; }
+/* Main container - simple centered layout */
+#main { 
+    max-width: var(--max-width); 
+    margin: 0 auto; 
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    animation: fadeIn 0.3s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Title and date */
+.title { font-size: 1.25rem; font-weight: 600; margin: 0; }
+.date { color: var(--gray); font-size: 0.875rem; margin: 0; }
+
+/* Images - simple responsive */
+#main img { 
+    width: 100%; 
+    height: auto; 
+    border-radius: 4px; 
+    background: #000;
+}
+
+/* Text paragraphs */
+#main p { margin: 0; line-height: 1.6; }
+
+/* Links */
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+    :root { --gray: #a19f9d; --primary: #4ba0e1; }
+    html, body { background: #1e1e1e; color: #e0e0e0; }
+    ::-webkit-scrollbar-thumb { background-color: #fff4; }
+}
+
+/* Comic/Single-image mode - center everything */
+.comic-mode #main, .single-image #main { 
+    align-items: center; 
+    text-align: center; 
+}
     </style>
 </head>
-<body class="${rtlClass} ${comicClass} ${singleImageClass}">
-    <div id="main"></div>
+<body class="${rtlClass} ${modeClass}">
+    <div id="main">
+        <p class="title">${this.escapeHtml(item.title)}</p>
+        <p class="date">${this.escapeHtml(dateStr)}</p>
+        ${normalizedContent}
+    </div>
     <script>
-window.__articleData = ${JSON.stringify({ 
-    header: headerContent, 
-    article: articleContent, 
-    baseUrl: item.link 
-}).replace(/<\/script>/gi, '<\\/script>')};
-
 (function() {
-    const { header, article, baseUrl } = window.__articleData;
-    let domParser = new DOMParser();
-    let headerDom = domParser.parseFromString(header, 'text/html');
-    let main = document.getElementById("main");
-    main.innerHTML = headerDom.body.innerHTML + article;
-    
+    // Fix relative URLs
+    const baseUrl = "${this.escapeHtml(item.link)}";
     let baseEl = document.createElement('base');
     baseEl.setAttribute('href', baseUrl.split("/").slice(0, 3).join("/"));
     document.head.append(baseEl);
     
-    for (let s of main.querySelectorAll("script")) { s.parentNode.removeChild(s); }
-    for (let e of main.querySelectorAll("*[src]")) { e.src = e.src; }
-    for (let e of main.querySelectorAll("*[href]")) { e.href = e.href; }
-    
-    if (document.body.classList.contains('comic-mode') || document.body.classList.contains('single-image')) {
-        main.querySelectorAll('p > img').forEach(img => {
-            const p = img.parentElement;
-            const textContent = p.textContent.trim();
-            const hasOnlyImage = p.children.length === 1 && textContent === '';
-            if (hasOnlyImage) { p.replaceWith(img); }
-        });
-    }
-    
-    if (document.body.classList.contains('comic-mode')) {
-        const firstImg = main.querySelector('img');
-        if (firstImg) {
-            firstImg.id = 'comic-image';
-            setTimeout(() => { firstImg.scrollIntoView({ behavior: 'instant', block: 'start' }); }, 100);
-        }
-    }
-    
-    main.classList.add("show");
+    document.querySelectorAll("img[src]").forEach(e => { e.src = e.src; });
+    document.querySelectorAll("a[href]").forEach(e => { e.href = e.href; });
 })();
     </script>
 </body>
@@ -857,6 +819,71 @@ window.__articleData = ${JSON.stringify({
 
         // Convert to base64 data URL
         return `data:text/html;base64,${btoa(unescape(encodeURIComponent(htmlContent)))}`;
+    }
+    
+    /**
+     * Normalize RSS content - extract images and text, remove wrapper elements
+     */
+    private normalizeRssContent = (htmlContent: string): { images: Array<{src: string, alt: string}>, textParagraphs: string[] } => {
+        const images: Array<{src: string, alt: string}> = [];
+        
+        // Extract images with regex
+        const imgRegex1 = /<img[^>]+src=["']([^"']+)["'][^>]*(?:alt=["']([^"']*)["'])?[^>]*\/?>/gi;
+        const imgRegex2 = /<img[^>]*alt=["']([^"']*)["'][^>]+src=["']([^"']+)["'][^>]*\/?>/gi;
+        
+        let match;
+        const seenSrcs = new Set<string>();
+        
+        while ((match = imgRegex1.exec(htmlContent)) !== null) {
+            if (!seenSrcs.has(match[1])) {
+                seenSrcs.add(match[1]);
+                images.push({ src: match[1], alt: match[2] || '' });
+            }
+        }
+        
+        while ((match = imgRegex2.exec(htmlContent)) !== null) {
+            if (!seenSrcs.has(match[2])) {
+                seenSrcs.add(match[2]);
+                images.push({ src: match[2], alt: match[1] || '' });
+            }
+        }
+        
+        // Extract text content
+        const textOnly = htmlContent
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<img[^>]*>/gi, '')
+            .replace(/<figure[^>]*>[\s\S]*?<\/figure>/gi, '')
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/p>/gi, '\n\n')
+            .replace(/<[^>]*>/g, '')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        
+        const textParagraphs = textOnly
+            .split(/\n\n+/)
+            .map(p => p.trim())
+            .filter(p => p.length > 0);
+        
+        return { images, textParagraphs };
+    }
+    
+    /**
+     * Escape HTML special characters
+     */
+    private escapeHtml = (text: string): string => {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
     
     /**
@@ -2909,9 +2936,13 @@ window.__articleData = ${JSON.stringify({
     }
 
     articleView = () => {
-        const articleContent = this.isFullContentMode
-            ? this.state.fullContent
-            : this.props.item.content
+        // For Local Mode (RSS content), use the simplified normalized HTML
+        if (!this.isFullContentMode) {
+            return this.generateArticleHtml(this.props.item, this.props.source);
+        }
+        
+        // FullContent Mode - use full HTML structure with extractor content
+        const articleContent = this.state.fullContent
 
         // Content analysis for comic/image mode
         const imgCount = (articleContent.match(/<img/gi) || []).length
@@ -3180,8 +3211,7 @@ article p {
     gap: 0.5rem;
     padding: 0;
 }
-.comic-mode article img,
-.comic-mode #main > img {
+.comic-mode #main img {
     border-radius: 0;
     width: 100% !important;
     max-width: 100% !important;
@@ -3197,23 +3227,26 @@ article p {
 }
 
 /* ====== Single Image Mode ====== */
+/* Note: Do NOT set max-width here - inherit the 1200px from base #main */
 .single-image #main {
-    max-width: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     min-height: calc(100vh - 2rem);
 }
+/* When both comic-mode and single-image are active, restore max-width constraint */
+.comic-mode.single-image #main {
+    max-width: var(--content-max-width);
+}
 .single-image article {
     align-items: center;
 }
-.single-image article img,
-.single-image #main > img {
-    max-height: 85vh;
-    width: auto !important;
-    max-width: 100% !important;
-    height: auto !important;
+.single-image #main img {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
 }
     </style>
 </head>

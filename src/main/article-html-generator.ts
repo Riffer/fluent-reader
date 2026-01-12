@@ -1,8 +1,9 @@
 /**
  * Article HTML Generator for Main Process
  * 
- * Generates article HTML for prefetch in the main process.
- * Used for both RSS/Local and FullContent modes.
+ * Two separate generators for different modes:
+ * - generateLocalArticleHtml(): For RSS/Local mode with normalized, simplified content
+ * - generateArticleHtml(): For FullContent mode with full HTML structure
  */
 
 export interface ArticleRenderOptions {
@@ -37,8 +38,214 @@ export function textDirToString(dir: number): 'ltr' | 'rtl' | 'vertical' {
 }
 
 /**
- * Generate article HTML as a data URL
- * This is the Main process equivalent of articleView() in the renderer
+ * Escape HTML special characters
+ */
+function escapeHtml(text: string): string {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+}
+
+// ============================================================================
+// LOCAL/RSS MODE - Normalized simplified content
+// ============================================================================
+
+/**
+ * Normalize RSS content - extract images, remove wrapper elements, clean attributes
+ */
+function normalizeRssContent(htmlContent: string): { images: Array<{src: string, alt: string}>, textParagraphs: string[] } {
+    const images: Array<{src: string, alt: string}> = []
+    
+    // Extract images with regex (we're in Node, no DOM)
+    // Pattern 1: src before alt
+    const imgRegex1 = /<img[^>]+src=["']([^"']+)["'][^>]*(?:alt=["']([^"']*)["'])?[^>]*\/?>/gi
+    // Pattern 2: alt before src  
+    const imgRegex2 = /<img[^>]*alt=["']([^"']*)["'][^>]+src=["']([^"']+)["'][^>]*\/?>/gi
+    
+    let match
+    const seenSrcs = new Set<string>()
+    
+    // Try pattern 1
+    while ((match = imgRegex1.exec(htmlContent)) !== null) {
+        if (!seenSrcs.has(match[1])) {
+            seenSrcs.add(match[1])
+            images.push({ src: match[1], alt: match[2] || '' })
+        }
+    }
+    
+    // Try pattern 2 for any missed images
+    while ((match = imgRegex2.exec(htmlContent)) !== null) {
+        if (!seenSrcs.has(match[2])) {
+            seenSrcs.add(match[2])
+            images.push({ src: match[2], alt: match[1] || '' })
+        }
+    }
+    
+    // Extract text content - remove HTML tags, clean up whitespace
+    const textOnly = htmlContent
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')  // Remove scripts
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')    // Remove styles
+        .replace(/<img[^>]*>/gi, '')                        // Remove images
+        .replace(/<figure[^>]*>[\s\S]*?<\/figure>/gi, '')  // Remove figures
+        .replace(/<br\s*\/?>/gi, '\n')                      // Convert br to newline
+        .replace(/<\/p>/gi, '\n\n')                         // Paragraph breaks
+        .replace(/<[^>]*>/g, '')                            // Remove all other tags
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\n{3,}/g, '\n\n')                         // Max 2 newlines
+        .trim()
+    
+    // Split into paragraphs
+    const textParagraphs = textOnly
+        .split(/\n\n+/)
+        .map(p => p.trim())
+        .filter(p => p.length > 0)
+    
+    return { images, textParagraphs }
+}
+
+/**
+ * Generate Local/RSS article HTML with normalized, simplified content
+ * This strips all RSS wrapper elements and creates a clean, predictable structure
+ */
+export function generateLocalArticleHtml(options: ArticleRenderOptions): string {
+    const { title, date, content, baseUrl, textDir, fontSize, fontFamily, locale } = options
+    
+    // Normalize RSS content
+    const { images, textParagraphs } = normalizeRssContent(content)
+    
+    // Determine mode based on content
+    const totalTextLength = textParagraphs.join(' ').length
+    const isComicMode = images.length > 0 && totalTextLength < 200
+    const isSingleImage = images.length === 1 && totalTextLength < 100
+    
+    // Format date
+    const dateStr = date.toLocaleString(locale, { 
+        hour12: !locale.startsWith("zh") 
+    })
+    
+    // Build normalized HTML - just title, date, images, text paragraphs
+    const imagesHtml = images.map(img => 
+        `<img src="${escapeHtml(img.src)}" alt="${escapeHtml(img.alt)}">`
+    ).join('\n        ')
+    
+    const textHtml = textParagraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('\n        ')
+    
+    // Combine: images first (for comic mode), then text
+    const normalizedContent = isComicMode 
+        ? `${imagesHtml}\n        ${textHtml}`
+        : `${textHtml}\n        ${imagesHtml}`
+    
+    const rtlClass = textDir === 'rtl' ? 'rtl' : textDir === 'vertical' ? 'vertical' : ''
+    const modeClass = isSingleImage ? 'single-image' : isComicMode ? 'comic-mode' : ''
+    
+    const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
+    <title>Article</title>
+    <style>
+/* ====== Local/RSS Mode - Simplified Normalized Layout ====== */
+::-webkit-scrollbar { width: 16px; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background-color: #0006; }
+
+:root { 
+    --gray: #484644; 
+    --primary: #0078d4; 
+    --max-width: 1200px;
+}
+
+html, body { margin: 0; padding: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #fafafa; color: #1a1a1a; }
+body { padding: 1rem; font-size: ${fontSize}px; overflow-x: hidden; }
+${fontFamily ? `body { font-family: "${fontFamily}"; }` : ''}
+body.rtl { direction: rtl; }
+body.vertical { writing-mode: vertical-rl; padding-right: 96px; overflow: scroll hidden; }
+
+/* Main container - simple centered layout */
+#main { 
+    max-width: var(--max-width); 
+    margin: 0 auto; 
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    animation: fadeIn 0.3s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Title and date */
+.title { font-size: 1.25rem; font-weight: 600; margin: 0; }
+.date { color: var(--gray); font-size: 0.875rem; margin: 0; }
+
+/* Images - simple responsive */
+#main img { 
+    width: 100%; 
+    height: auto; 
+    border-radius: 4px; 
+    background: #000;
+}
+
+/* Text paragraphs */
+#main p { margin: 0; line-height: 1.6; }
+
+/* Links */
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+    :root { --gray: #a19f9d; --primary: #4ba0e1; }
+    html, body { background: #1e1e1e; color: #e0e0e0; }
+    ::-webkit-scrollbar-thumb { background-color: #fff4; }
+}
+
+/* Comic/Single-image mode - center everything */
+.comic-mode #main, .single-image #main { 
+    align-items: center; 
+    text-align: center; 
+}
+    </style>
+</head>
+<body class="${rtlClass} ${modeClass}">
+    <div id="main">
+        <p class="title">${escapeHtml(title)}</p>
+        <p class="date">${escapeHtml(dateStr)}</p>
+        ${normalizedContent}
+    </div>
+    <script>
+(function() {
+    // Fix relative URLs
+    const baseUrl = "${escapeHtml(baseUrl)}";
+    let baseEl = document.createElement('base');
+    baseEl.setAttribute('href', baseUrl.split("/").slice(0, 3).join("/"));
+    document.head.append(baseEl);
+    
+    document.querySelectorAll("img[src]").forEach(e => { e.src = e.src; });
+    document.querySelectorAll("a[href]").forEach(e => { e.href = e.href; });
+})();
+    </script>
+</body>
+</html>`
+
+    return `data:text/html;base64,${Buffer.from(htmlContent, 'utf-8').toString('base64')}`
+}
+
+// ============================================================================
+// FULLCONTENT MODE - Full HTML structure for extracted content
+// ============================================================================
+
+/**
+ * Generate article HTML for FullContent mode
+ * This preserves the full HTML structure from the article extractor
  */
 export function generateArticleHtml(options: ArticleRenderOptions): string {
     const { title, date, content, baseUrl, textDir, fontSize, fontFamily, locale } = options
@@ -78,6 +285,8 @@ export function generateArticleHtml(options: ArticleRenderOptions): string {
         content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
     <title>Article</title>
     <style>
+/* ====== FullContent Mode - Complex HTML Layout ====== */
+
 /* Scrollbar Styles */
 ::-webkit-scrollbar { width: 16px; }
 ::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; }
@@ -85,7 +294,7 @@ export function generateArticleHtml(options: ArticleRenderOptions): string {
 ::-webkit-scrollbar-thumb:active { background-color: #0008; }
 
 /* CSS Variables */
-:root { --gray: #484644; --primary: #0078d4; --primary-alt: #004578; }
+:root { --gray: #484644; --primary: #0078d4; --primary-alt: #004578; --content-max-width: 1200px; }
 
 /* Base Styles */
 html, body { margin: 0; padding: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
@@ -101,7 +310,7 @@ a { color: var(--primary); text-decoration: none; }
 a:hover, a:active { color: var(--primary-alt); text-decoration: underline; }
 
 /* Main Container */
-#main { display: none; width: 100%; margin: 0; max-width: 100%; margin: 0 auto; }
+#main { display: none; width: 100%; margin: 0; max-width: var(--content-max-width); margin: 0 auto; }
 body.vertical #main { max-width: unset; max-height: 100%; margin: auto 0; }
 #main.show { display: block; animation-name: fadeIn; animation-duration: 0.367s; animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1); animation-fill-mode: both; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -126,6 +335,9 @@ article pre { word-break: normal; overflow-wrap: normal; white-space: pre-wrap; 
 article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding: 0 40px; }
 #main table { max-width: 100%; overflow-x: auto; }
 
+/* All images in #main (handles figure > img, p > img, etc.) */
+#main img { max-width: 100%; height: auto; }
+
 /* Dark Mode */
 @media (prefers-color-scheme: dark) {
   :root { --gray: #a19f9d; --primary: #4ba0e1; --primary-alt: #65aee6; }
@@ -140,13 +352,14 @@ article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding:
 
 /* Comic Mode Styles */
 .comic-mode #main { max-width: 100%; padding: 0; }
-.comic-mode article img, .comic-mode #main > img { max-width: 100%; width: 100%; height: auto; display: block; margin: 0 auto; }
+.comic-mode #main img { max-width: 100%; width: 100%; height: auto; display: block; margin: 0 auto; }
 .comic-mode .title, .comic-mode .date { text-align: center; padding: 0 8px; }
 .comic-mode p { text-align: center; }
 
 /* Single Image Mode */
-.single-image #main { max-width: 100%; display: flex; flex-direction: column; align-items: center; padding: 0; }
-.single-image article img, .single-image #main > img { max-height: 90vh; width: auto; max-width: 100%; object-fit: contain; }
+.single-image #main { display: flex; flex-direction: column; align-items: center; padding: 0; }
+.single-image #main img { width: 100%; max-width: 100%; height: auto; object-fit: contain; }
+.comic-mode.single-image #main { max-width: var(--content-max-width); }
     </style>
 </head>
 <body class="${rtlClass} ${comicClass} ${singleImageClass}">
@@ -170,6 +383,13 @@ window.__articleData = ${JSON.stringify({
     document.head.append(baseEl);
     
     for (let s of main.querySelectorAll("script")) { s.parentNode.removeChild(s); }
+    
+    // Remove width/height attributes from images
+    for (let img of main.querySelectorAll("img")) {
+        img.removeAttribute('width');
+        img.removeAttribute('height');
+    }
+    
     for (let e of main.querySelectorAll("*[src]")) { e.src = e.src; }
     for (let e of main.querySelectorAll("*[href]")) { e.href = e.href; }
     
@@ -248,16 +468,4 @@ export function generateFullContentHtml(options: ArticleRenderOptions & {
         title: '',  // Don't show in main header (already in article header)
         content: wrappedContent
     })
-}
-
-/**
- * Escape HTML special characters
- */
-function escapeHtml(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;')
 }
