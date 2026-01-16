@@ -448,8 +448,43 @@ export class ContentViewPool {
                 return
             }
             
-            // Only forward events from the active view
-            if (!view.isActive) return
+            // === Focus Theft Mitigation for Navigation Keys ===
+            // Due to Electron bug, background views may steal focus during prefetch loading.
+            // If a background view receives ArrowLeft/ArrowRight, forward the event to the
+            // active view and restore focus. This ensures navigation works even when focus
+            // was incorrectly stolen.
+            if (!view.isActive) {
+                const isNavigationKey = input.key === 'ArrowLeft' || input.key === 'ArrowRight'
+                
+                if (isNavigationKey && this.activeViewId) {
+                    const activeView = this.getActiveView()
+                    if (activeView && activeView.isReady) {
+                        const activeWc = activeView.getWebContents()
+                        if (activeWc && !activeWc.isDestroyed()) {
+                            console.log(`[ContentViewPool] Focus theft detected: ${view.id} received ${input.key}, forwarding to active ${activeView.id}`)
+                            
+                            // Restore focus to active view
+                            activeView.focus()
+                            
+                            // Forward the input event to the active view
+                            activeWc.sendInputEvent({
+                                type: 'keyDown',
+                                keyCode: input.key,
+                                modifiers: [
+                                    ...(input.shift ? ['shift' as const] : []),
+                                    ...(input.control ? ['control' as const] : []),
+                                    ...(input.alt ? ['alt' as const] : []),
+                                    ...(input.meta ? ['meta' as const] : [])
+                                ]
+                            })
+                            
+                            // Prevent original event from being processed
+                            event.preventDefault()
+                        }
+                    }
+                }
+                return  // Don't process events from non-active views
+            }
             
             // Don't forward F11/F12 - global shortcuts handled by main window
             if (input.key === 'F11' || input.key === 'F12') {
