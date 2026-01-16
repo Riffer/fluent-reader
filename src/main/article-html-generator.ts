@@ -111,133 +111,49 @@ function normalizeRssContent(htmlContent: string): { images: Array<{src: string,
     return { images, textParagraphs }
 }
 
-/**
+/*
+ * UNUSED - This function is not called anywhere.
+ * The Renderer process uses article.tsx -> generateArticleHtml() instead.
+ * Keeping commented out for reference / potential future consolidation.
+ *
  * Generate Local/RSS article HTML with normalized, simplified content
  * This strips all RSS wrapper elements and creates a clean, predictable structure
  */
-export function generateLocalArticleHtml(options: ArticleRenderOptions): string {
-    const { title, date, content, baseUrl, textDir, fontSize, fontFamily, locale } = options
-    
-    // Normalize RSS content
-    const { images, textParagraphs } = normalizeRssContent(content)
-    
-    // Determine mode based on content
-    const totalTextLength = textParagraphs.join(' ').length
-    const isComicMode = images.length > 0 && totalTextLength < 200
-    const isSingleImage = images.length === 1 && totalTextLength < 100
-    
-    // Format date
-    const dateStr = date.toLocaleString(locale, { 
-        hour12: !locale.startsWith("zh") 
-    })
-    
-    // Build normalized HTML - just title, date, images, text paragraphs
-    const imagesHtml = images.map(img => 
-        `<img src="${escapeHtml(img.src)}" alt="${escapeHtml(img.alt)}">`
-    ).join('\n        ')
-    
-    const textHtml = textParagraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('\n        ')
-    
-    // Combine: images first (for comic mode), then text
-    const normalizedContent = isComicMode 
-        ? `${imagesHtml}\n        ${textHtml}`
-        : `${textHtml}\n        ${imagesHtml}`
-    
-    const rtlClass = textDir === 'rtl' ? 'rtl' : textDir === 'vertical' ? 'vertical' : ''
-    const modeClass = isSingleImage ? 'single-image' : isComicMode ? 'comic-mode' : ''
-    
-    const htmlContent = `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'unsafe-inline'; img-src http: https: data:; style-src 'unsafe-inline'; frame-src http: https:; media-src http: https:; connect-src https: http:">
-    <title>Article</title>
-    <style>
-/* ====== Local/RSS Mode - Simplified Normalized Layout ====== */
-::-webkit-scrollbar { width: 16px; }
-::-webkit-scrollbar-thumb { border: 2px solid transparent; background-color: #0004; background-clip: padding-box; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background-color: #0006; }
-
-:root { 
-    --gray: #484644; 
-    --primary: #0078d4; 
-    --max-width: 1200px;
-}
-
-html, body { margin: 0; padding: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #fafafa; color: #1a1a1a; }
-body { padding: 1rem; font-size: ${fontSize}px; overflow-x: hidden; }
-${fontFamily ? `body { font-family: "${fontFamily}"; }` : ''}
-body.rtl { direction: rtl; }
-body.vertical { writing-mode: vertical-rl; padding-right: 96px; overflow: scroll hidden; }
-
-/* Main container - simple centered layout */
-#main { 
-    max-width: var(--max-width); 
-    margin: 0 auto; 
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    animation: fadeIn 0.3s ease-out;
-}
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-/* Title and date */
-.title { font-size: 1.25rem; font-weight: 600; margin: 0; }
-.date { color: var(--gray); font-size: 0.875rem; margin: 0; }
-
-/* Images - simple responsive */
-#main img { 
-    width: 100%; 
-    height: auto; 
-    border-radius: 4px; 
-    background: #000;
-}
-
-/* Text paragraphs */
-#main p { margin: 0; line-height: 1.6; }
-
-/* Links */
-a { color: var(--primary); text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-/* Dark mode */
-@media (prefers-color-scheme: dark) {
-    :root { --gray: #a19f9d; --primary: #4ba0e1; }
-    html, body { background: #1e1e1e; color: #e0e0e0; }
-    ::-webkit-scrollbar-thumb { background-color: #fff4; }
-}
-
-/* Comic/Single-image mode - center everything */
-.comic-mode #main, .single-image #main { 
-    align-items: center; 
-    text-align: center; 
-}
-    </style>
-</head>
-<body class="${rtlClass} ${modeClass}">
-    <div id="main">
-        <p class="title">${escapeHtml(title)}</p>
-        <p class="date">${escapeHtml(dateStr)}</p>
-        ${normalizedContent}
-    </div>
-    <script>
-(function() {
-    // Fix relative URLs
-    const baseUrl = "${escapeHtml(baseUrl)}";
-    let baseEl = document.createElement('base');
-    baseEl.setAttribute('href', baseUrl.split("/").slice(0, 3).join("/"));
-    document.head.append(baseEl);
-    
-    document.querySelectorAll("img[src]").forEach(e => { e.src = e.src; });
-    document.querySelectorAll("a[href]").forEach(e => { e.href = e.href; });
-})();
-    </script>
-</body>
-</html>`
-
-    return `data:text/html;base64,${Buffer.from(htmlContent, 'utf-8').toString('base64')}`
-}
+// export function generateLocalArticleHtml(options: ArticleRenderOptions): string {
+//     const { title, date, content, baseUrl, textDir, fontSize, fontFamily, locale } = options
+//     
+//     // Normalize RSS content
+//     const { images, textParagraphs } = normalizeRssContent(content)
+//     
+//     // Determine mode based on content
+//     const totalTextLength = textParagraphs.join(' ').length
+//     const isComicMode = images.length > 0 && totalTextLength < 200
+//     const isSingleImage = images.length === 1 && totalTextLength < 100
+//     
+//     // Format date
+//     const dateStr = date.toLocaleString(locale, { 
+//         hour12: !locale.startsWith("zh") 
+//     })
+//     
+//     // Build normalized HTML - just title, date, images, text paragraphs
+//     const imagesHtml = images.map(img => 
+//         `<img src="${escapeHtml(img.src)}" alt="${escapeHtml(img.alt)}">`
+//     ).join('\n        ')
+//     
+//     const textHtml = textParagraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('\n        ')
+//     
+//     // Combine: images first (for comic mode), then text
+//     const normalizedContent = isComicMode 
+//         ? `${imagesHtml}\n        ${textHtml}`
+//         : `${textHtml}\n        ${imagesHtml}`
+//     
+//     const rtlClass = textDir === 'rtl' ? 'rtl' : textDir === 'vertical' ? 'vertical' : ''
+//     const modeClass = isSingleImage ? 'single-image' : isComicMode ? 'comic-mode' : ''
+//     
+//     const htmlContent = `...` // HTML template omitted for brevity
+//     
+//     return `data:text/html;base64,${Buffer.from(htmlContent, 'utf-8').toString('base64')}`
+// }
 
 // ============================================================================
 // FULLCONTENT MODE - Full HTML structure for extracted content
@@ -297,6 +213,7 @@ export function generateArticleHtml(options: ArticleRenderOptions): string {
 :root { --gray: #484644; --primary: #0078d4; --primary-alt: #004578; --content-max-width: 1200px; }
 
 /* Base Styles */
+/* GENERATOR: generateArticleHtml() - used by FullContent mode */
 html, body { margin: 0; padding: 0; font-family: "Segoe UI", "Source Han Sans Regular", sans-serif; }
 body { padding: 8px; overflow-x: hidden; overflow-y: auto; font-size: ${fontSize}px; box-sizing: border-box; width: 100%; }
 ${fontFamily ? `body { font-family: "${fontFamily}"; }` : ''}
@@ -359,6 +276,7 @@ article blockquote { border-left: 2px solid var(--gray); margin: 1em 0; padding:
 /* Single Image Mode */
 .single-image #main { display: flex; flex-direction: column; align-items: center; padding: 0; }
 .single-image #main img { width: 100%; max-width: 100%; height: auto; object-fit: contain; }
+.single-image #main img.portrait { width: auto; height: auto; max-height: 100vh; max-width: 100%; }
 .comic-mode.single-image #main { max-width: var(--content-max-width); }
     </style>
 </head>
@@ -400,6 +318,24 @@ window.__articleData = ${JSON.stringify({
             const hasOnlyImage = p.children.length === 1 && textContent === '';
             if (hasOnlyImage) { p.replaceWith(img); }
         });
+    }
+    
+    // Single Image Mode: Detect portrait images and apply portrait class
+    if (document.body.classList.contains('single-image')) {
+        const img = main.querySelector('img');
+        if (img) {
+            const applyPortraitClass = () => {
+                if (img.naturalHeight > img.naturalWidth) {
+                    img.classList.add('portrait');
+                }
+            };
+            // Check if already loaded (cached images)
+            if (img.complete && img.naturalHeight > 0) {
+                applyPortraitClass();
+            } else {
+                img.addEventListener('load', applyPortraitClass);
+            }
+        }
     }
     
     if (document.body.classList.contains('comic-mode')) {

@@ -794,6 +794,9 @@ a:hover { text-decoration: underline; }
     align-items: center; 
     text-align: center; 
 }
+
+/* Single Image Mode - Portrait images constrained by height */
+.single-image #main img.portrait { width: auto; height: auto; max-height: 100vh; max-width: 100%; }
     </style>
 </head>
 <body class="${rtlClass} ${modeClass}">
@@ -812,6 +815,38 @@ a:hover { text-decoration: underline; }
     
     document.querySelectorAll("img[src]").forEach(e => { e.src = e.src; });
     document.querySelectorAll("a[href]").forEach(e => { e.href = e.href; });
+    
+    // Single Image Mode: Optimize portrait image sizing
+    // If a portrait image would exceed viewport height when scaled to full width,
+    // constrain it by height instead to prevent overflow and pixelation
+    if (document.body.classList.contains('single-image')) {
+        const img = document.querySelector('#main img');
+        if (img) {
+            const optimizeImageSize = () => {
+                // Only consider portrait images (taller than wide)
+                if (img.naturalHeight > img.naturalWidth) {
+                    const containerWidth = img.parentElement?.offsetWidth || window.innerWidth;
+                    const viewportHeight = window.innerHeight;
+                    
+                    // Calculate what height the image would have at full container width
+                    const aspectRatio = img.naturalWidth / img.naturalHeight;
+                    const scaledHeight = containerWidth / aspectRatio;
+                    
+                    // If scaled image would exceed viewport height, constrain by height
+                    if (scaledHeight > viewportHeight) {
+                        img.classList.add('portrait');
+                        img.style.height = viewportHeight + 'px';
+                        img.style.width = 'auto';
+                    }
+                }
+            };
+            if (img.complete && img.naturalHeight > 0) {
+                optimizeImageSize();
+            } else {
+                img.addEventListener('load', optimizeImageSize);
+            }
+        }
+    }
 })();
     </script>
 </body>
