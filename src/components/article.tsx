@@ -837,6 +837,10 @@ a:hover { text-decoration: underline; }
                         img.classList.add('portrait');
                         img.style.height = viewportHeight + 'px';
                         img.style.width = 'auto';
+                        // Scroll image to top edge of viewport
+                        setTimeout(() => {
+                            img.scrollIntoView({ behavior: 'instant', block: 'start' });
+                        }, 50);
                     }
                 }
             };
