@@ -125,6 +125,29 @@ export class ContentViewPool {
     private cssZoomLevel: number = 0
     private visualZoomEnabled: boolean = false
     private mobileMode: boolean = false
+    private isSyncingZoom: boolean = false  // Block new zoom requests during sync
+    private isZoomPending: boolean = false  // Waiting for view to confirm zoom applied
+    private zoomPendingTimeout: NodeJS.Timeout | null = null  // Safety timeout for pending zoom
+    
+    /**
+     * Round zoom level to 1 decimal place to avoid floating-point artifacts
+     * (e.g., 8.999999999999998 → 9.0)
+     * This preserves 1% zoom steps (0.1) while eliminating precision issues.
+     */
+    private roundZoom(level: number): number {
+        return Math.round(level * 10) / 10
+    }
+    
+    /**
+     * Called when view confirms zoom was applied
+     */
+    onZoomApplied(): void {
+        this.isZoomPending = false
+        if (this.zoomPendingTimeout) {
+            clearTimeout(this.zoomPendingTimeout)
+            this.zoomPendingTimeout = null
+        }
+    }
     
     // === Input Mode ===
     // When active, most keyboard shortcuts are passed to the page for form input
@@ -803,7 +826,7 @@ export class ContentViewPool {
             // IMPORTANT: Apply zoom settings from the navigation request!
             // The cached view may have been loaded with a different feed's zoom level.
             // We need to apply the current feed's zoom settings (from settings.zoomFactor).
-            const zoomLevel = Math.round((settings.zoomFactor - 1.0) / 0.1)
+            const zoomLevel = this.roundZoom((settings.zoomFactor - 1.0) / 0.1)
             this.cssZoomLevel = zoomLevel
             
             // Check if zoom differs from what the view was loaded with
@@ -826,7 +849,7 @@ export class ContentViewPool {
         
         // Update pool's zoom level to match the feed's settings BEFORE creating view
         // This ensures the correct zoom is applied when createViewWithEvents is called
-        const zoomLevel = Math.round((settings.zoomFactor - 1.0) / 0.1)
+        const zoomLevel = this.roundZoom((settings.zoomFactor - 1.0) / 0.1)
         this.cssZoomLevel = zoomLevel
         
         // Need to load - find or create a view
@@ -1556,7 +1579,7 @@ export class ContentViewPool {
                 this.visualZoomEnabled = settings.visualZoom
                 this.mobileMode = settings.mobileMode
                 const clampedZoom = Math.max(0.25, Math.min(5.0, settings.zoomFactor))
-                this.cssZoomLevel = (clampedZoom - 1.0) / 0.1
+                this.cssZoomLevel = this.roundZoom((clampedZoom - 1.0) / 0.1)
                 
                 // Apply mobile user agent if enabled
                 const mobileUA = "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36"
@@ -1866,7 +1889,7 @@ export class ContentViewPool {
                 this.mobileMode = settings.mobileMode
                 // Convert zoomFactor to cssZoomLevel (0 = 100%, 1 = 110%, -1 = 90%, etc.)
                 const clampedZoom = Math.max(0.25, Math.min(5.0, settings.zoomFactor))
-                this.cssZoomLevel = (clampedZoom - 1.0) / 0.1
+                this.cssZoomLevel = this.roundZoom((clampedZoom - 1.0) / 0.1)
                 
                 // Apply mobile user agent if enabled
                 const mobileUA = "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36"
@@ -2098,13 +2121,31 @@ export class ContentViewPool {
      * Set zoom factor for +/- shortcuts
      */
     private setZoomFactor(factor: number): void {
-        const clampedFactor = Math.max(0.25, Math.min(5.0, factor))
-        this.cssZoomLevel = (clampedFactor - 1.0) / 0.1
+        // Block new zoom requests during sync or if waiting for view confirmation
+        if (this.isSyncingZoom) {
+            console.log(`[ContentViewPool] setZoomFactor: blocked during sync`)
+            return
+        }
+        if (this.isZoomPending) {
+            console.log(`[ContentViewPool] setZoomFactor: blocked - waiting for view confirmation`)
+            return
+        }
         
-        console.log(`[ContentViewPool] setZoomFactor: factor=${factor.toFixed(2)}, level=${this.cssZoomLevel.toFixed(2)}, activeId=${this.activeViewId}`)
+        const clampedFactor = Math.max(0.25, Math.min(5.0, factor))
+        this.cssZoomLevel = this.roundZoom((clampedFactor - 1.0) / 0.1)
+        
+        console.log(`[ContentViewPool] setZoomFactor: factor=${factor.toFixed(2)}, level=${this.cssZoomLevel.toFixed(1)}, activeId=${this.activeViewId}`)
         
         const active = this.getActiveView()
         if (active) {
+            // Set pending flag - will be cleared when view confirms
+            this.isZoomPending = true
+            // Safety timeout in case view doesn't respond (100ms)
+            this.zoomPendingTimeout = setTimeout(() => {
+                console.log(`[ContentViewPool] setZoomFactor: safety timeout - clearing pending`)
+                this.isZoomPending = false
+            }, 100)
+            
             console.log(`[ContentViewPool] setZoomFactor: applying to active view ${active.id}`)
             if (this.visualZoomEnabled) {
                 active.setVisualZoomLevel(this.cssZoomLevel)
@@ -2112,11 +2153,12 @@ export class ContentViewPool {
                 active.setCssZoom(this.cssZoomLevel)
             }
             
-            // Send zoom update to renderer with feedId for correct Redux persistence
+            // Send zoom update to renderer with feedId and viewId for correct Redux persistence
             // Don't round - preserve fine zoom steps (0.1 = 1%)
             const feedId = active.feedId
-            console.log(`[ContentViewPool] Sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}`)
-            this.sendToRenderer("content-view-zoom-changed", this.cssZoomLevel, feedId)
+            const viewId = active.id
+            console.log(`[ContentViewPool] Sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}, viewId=${viewId}`)
+            this.sendToRenderer("content-view-zoom-changed", this.cssZoomLevel, feedId, viewId)
         }
         
         // Sync to views of the same feed (zoom is feed-specific)
@@ -2127,31 +2169,86 @@ export class ContentViewPool {
      * Set CSS zoom level directly
      */
     private setCssZoom(level: number): void {
-        const clampedLevel = Math.max(-6, Math.min(40, level))
-        this.cssZoomLevel = clampedLevel
+        // Block new zoom requests during sync or if waiting for view confirmation
+        if (this.isSyncingZoom) {
+            console.log(`[ContentViewPool] setCssZoom: blocked during sync`)
+            return
+        }
+        if (this.isZoomPending) {
+            console.log(`[ContentViewPool] setCssZoom: blocked - waiting for view confirmation`)
+            return
+        }
         
-        console.log(`[ContentViewPool] setCssZoom(${level}) -> clamped to ${clampedLevel}, visualZoomEnabled=${this.visualZoomEnabled}`)
+        const clampedLevel = Math.max(-6, Math.min(40, level))
+        this.cssZoomLevel = this.roundZoom(clampedLevel)
+        
+        console.log(`[ContentViewPool] setCssZoom(${level}) -> rounded to ${this.cssZoomLevel}, visualZoomEnabled=${this.visualZoomEnabled}`)
 
         const active = this.getActiveView()
         if (active) {
+            // Set pending flag - will be cleared when view confirms
+            this.isZoomPending = true
+            // Safety timeout in case view doesn't respond (100ms)
+            this.zoomPendingTimeout = setTimeout(() => {
+                console.log(`[ContentViewPool] setCssZoom: safety timeout - clearing pending`)
+                this.isZoomPending = false
+            }, 100)
+            
             // Use the correct zoom method based on visual zoom mode
             if (this.visualZoomEnabled) {
                 console.log(`[ContentViewPool] setCssZoom: Visual Zoom enabled, calling setVisualZoomLevel`)
-                active.setVisualZoomLevel(clampedLevel)
+                active.setVisualZoomLevel(this.cssZoomLevel)
             } else {
                 console.log(`[ContentViewPool] setCssZoom: CSS Zoom, calling setCssZoom on active view ${active.id}`)
-                active.setCssZoom(clampedLevel)
+                active.setCssZoom(this.cssZoomLevel)
             }
             
-            // Send zoom update to renderer with feedId for correct Redux persistence
+            // Send zoom update to renderer with feedId and viewId for correct Redux persistence
             const feedId = active.feedId
-            console.log(`[ContentViewPool] Sending zoom update to renderer: zoom=${clampedLevel}, feedId=${feedId}`)
-            this.sendToRenderer("content-view-zoom-changed", clampedLevel, feedId)
+            const viewId = active.id
+            console.log(`[ContentViewPool] Sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}, viewId=${viewId}`)
+            this.sendToRenderer("content-view-zoom-changed", this.cssZoomLevel, feedId, viewId)
         } else {
             console.log(`[ContentViewPool] setCssZoom: no active view!`)
         }
         
         // Sync to views of the same feed (zoom is feed-specific)
+        this.syncZoomToSameFeedViews()
+    }
+    
+    /**
+     * Handle zoom request from preload (mouse wheel, pinch zoom)
+     * The preload has already applied the zoom locally for immediate feedback.
+     * We update our state and send the canonical event to renderer for Redux persistence.
+     * This is a PUBLIC method called from window.ts IPC handler.
+     */
+    handleZoomRequest(zoomLevel: number): void {
+        // Block new zoom requests during sync or if waiting for view confirmation
+        if (this.isSyncingZoom) {
+            console.log(`[ContentViewPool] handleZoomRequest: blocked during sync`)
+            return
+        }
+        if (this.isZoomPending) {
+            console.log(`[ContentViewPool] handleZoomRequest: blocked - waiting for view confirmation`)
+            return
+        }
+        
+        const clampedLevel = Math.max(-6, Math.min(40, zoomLevel))
+        this.cssZoomLevel = this.roundZoom(clampedLevel)
+        
+        console.log(`[ContentViewPool] handleZoomRequest(${zoomLevel}) -> rounded to ${this.cssZoomLevel}`)
+        
+        // Note: For handleZoomRequest, the preload has already applied zoom locally,
+        // so we don't need to wait for confirmation - just update state and notify renderer
+        const active = this.getActiveView()
+        if (active) {
+            const feedId = active.feedId
+            const viewId = active.id
+            console.log(`[ContentViewPool] handleZoomRequest: sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}, viewId=${viewId}`)
+            this.sendToRenderer("content-view-zoom-changed", this.cssZoomLevel, feedId, viewId)
+        }
+        
+        // Sync to other views of the same feed
         this.syncZoomToSameFeedViews()
     }
     
@@ -2188,29 +2285,37 @@ export class ContentViewPool {
      * so we only sync to views that have the same feedId as the active view.
      */
     private syncZoomToSameFeedViews(): void {
-        // Use stored activeViewId instead of getActiveView() to avoid reference comparison issues
-        const activeViewId = this.activeViewId
-        const activeView = this.getActiveView()
-        const activeFeedId = activeView?.feedId
+        // Set flag to block new zoom requests during sync
+        this.isSyncingZoom = true
         
-        if (!activeFeedId) {
-            console.log('[ContentViewPool] syncZoomToSameFeedViews: no active feed, skipping')
-            return
-        }
-        
-        console.log(`[ContentViewPool] syncZoomToSameFeedViews: active=${activeViewId}, feed=${activeFeedId}, zoomLevel=${this.cssZoomLevel}`)
-        
-        for (const view of this.views) {
-            // Use ID comparison (more robust than object reference comparison)
-            // Skip the active view - it was already updated in setZoomFactor/setCssZoom
-            if (view.id !== activeViewId && view.feedId === activeFeedId) {
-                console.log(`[ContentViewPool] syncZoomToSameFeedViews: syncing ${view.id} (same feed: ${activeFeedId})`)
-                if (this.visualZoomEnabled) {
-                    view.setVisualZoomLevel(this.cssZoomLevel)
-                } else {
-                    view.setCssZoom(this.cssZoomLevel)
+        try {
+            // Use stored activeViewId instead of getActiveView() to avoid reference comparison issues
+            const activeViewId = this.activeViewId
+            const activeView = this.getActiveView()
+            const activeFeedId = activeView?.feedId
+            
+            if (!activeFeedId) {
+                console.log('[ContentViewPool] syncZoomToSameFeedViews: no active feed, skipping')
+                return
+            }
+            
+            console.log(`[ContentViewPool] syncZoomToSameFeedViews: active=${activeViewId}, feed=${activeFeedId}, zoomLevel=${this.cssZoomLevel}`)
+            
+            for (const view of this.views) {
+                // Use ID comparison (more robust than object reference comparison)
+                // Skip the active view - it was already updated in setZoomFactor/setCssZoom
+                if (view.id !== activeViewId && view.feedId === activeFeedId) {
+                    console.log(`[ContentViewPool] syncZoomToSameFeedViews: syncing ${view.id} (same feed: ${activeFeedId})`)
+                    if (this.visualZoomEnabled) {
+                        view.setVisualZoomLevel(this.cssZoomLevel)
+                    } else {
+                        view.setCssZoom(this.cssZoomLevel)
+                    }
                 }
             }
+        } finally {
+            // Always clear flag, even if error occurs
+            this.isSyncingZoom = false
         }
     }
     

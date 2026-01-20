@@ -111,22 +111,24 @@ export class WindowManager {
         initDatabase()
         setupDatabaseIPC()
 
-        // Forward zoom changes from ContentView -> Renderer
-        // Now includes feedId for correct Redux persistence
-        // If feedId is missing (from legacy preload events), try to get it from the active view
-        ipcMain.on("content-view-zoom-changed", (_event, zoom: number, feedId?: string) => {
-            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-                let finalFeedId = feedId
-                
-                // If feedId is missing, try to get it from the active ContentView
-                if (!finalFeedId) {
-                    const pool = getContentViewPool()
-                    if (pool) {
-                        finalFeedId = pool.getActiveFeedId()
-                    }
-                }
-                
-                this.mainWindow.webContents.send("content-view-zoom-changed", zoom, finalFeedId)
+        // Handle zoom requests from preload (mouse wheel, pinch zoom)
+        // The preload applies zoom locally for immediate feedback,
+        // then sends this request so the Pool can update its state and persist to Redux.
+        // This replaces the old 'content-view-zoom-changed' forwarding to avoid duplicate events.
+        ipcMain.on("content-view-zoom-request", (_event, zoomLevel: number) => {
+            const pool = getContentViewPool()
+            if (pool) {
+                // Update Pool's zoom state - this will send the canonical event to renderer
+                pool.handleZoomRequest(zoomLevel)
+            }
+        })
+
+        // Handle zoom applied confirmation from preload
+        // This enables synchronous zoom flow: Pool sends zoom → View applies → View confirms → Pool allows next zoom
+        ipcMain.on("content-view-zoom-applied", () => {
+            const pool = getContentViewPool()
+            if (pool) {
+                pool.onZoomApplied()
             }
         })
 

@@ -251,9 +251,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // We REQUIRE feedId to match current source before updating Redux.
         // Events without feedId (e.g., from legacy preload) only update local UI state.
         if ((window as any).ipcRenderer) {
-            (window as any).ipcRenderer.on('content-view-zoom-changed', (event: any, zoomLevel: number, feedId?: string) => {
+            (window as any).ipcRenderer.on('content-view-zoom-changed', (event: any, zoomLevel: number, feedId?: string, viewId?: string) => {
                 const currentSourceId = String(this.props.source?.sid)
-                window.contentViewPool?.debugLog?.(`[Article] IPC content-view-zoom-changed: zoom=${zoomLevel}, feedId=${feedId}, currentSource=${currentSourceId}, name=${this.props.source?.name}`)
+                window.contentViewPool?.debugLog?.(`[Article] IPC content-view-zoom-changed: zoom=${zoomLevel}, feedId=${feedId}, viewId=${viewId}, currentSource=${currentSourceId}, name=${this.props.source?.name}`)
                 
                 // Only update zoom state (for UI)
                 this.currentZoom = zoomLevel

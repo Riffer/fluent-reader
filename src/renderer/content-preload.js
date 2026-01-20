@@ -541,10 +541,10 @@ try {
     // Show zoom overlay (always when zoom changes)
     showZoomOverlay(zoomLevel);
     
-    // Sende Notification an Main-Prozess (only if this view is active)
-    if (options.notify) {
-      try { sendIfActive('content-view-zoom-changed', zoomLevel); } catch {}
-    }
+    // NOTE: We no longer send 'content-view-zoom-changed' from preload.
+    // The ContentViewPool is the single source of truth for zoom changes
+    // and handles Redux persistence via its own sendToRenderer().
+    // This prevents duplicate events (Pool + Preload both sending).
   }
 
   // Initial: Wait for DOM
@@ -585,13 +585,19 @@ try {
         document.addEventListener('DOMContentLoaded', () => {
           logToMain(`[ContentPreload] DOMContentLoaded - calling applyZoom`);
           applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
+          // Confirm zoom applied to Pool (enables next zoom in key-repeat chain)
+          try { ipcRenderer.send('content-view-zoom-applied'); } catch {}
         }, { once: true });
       } else {
         logToMain(`[ContentPreload] DOM ready - calling applyZoom now`);
         applyZoom(zoomLevel, { notify: false, preserveScroll: true, zoomPointX: null, zoomPointY: null });
+        // Confirm zoom applied to Pool (enables next zoom in key-repeat chain)
+        try { ipcRenderer.send('content-view-zoom-applied'); } catch {}
       }
     } else {
       logToMain(`[ContentPreload] Visual Zoom enabled - skipping CSS zoom`);
+      // Even for Visual Zoom, confirm so Pool can proceed
+      try { ipcRenderer.send('content-view-zoom-applied'); } catch {}
     }
     
     // Show zoom overlay on article change if enabled
@@ -711,19 +717,11 @@ try {
         // The larger this value, the less sensitive
         const steps = (delta > 0 ? 1 : -1) * 0.125;
         
-        // TEMP: Scroll compensation disabled for testing
-        // Calculate mouse position relative to container
-        // const container = document.querySelector('#fr-zoom-container');
-        // const wrapper = container.parentElement;
-        // if (container && wrapper) {
-        //   const rect = wrapper.getBoundingClientRect();
-        //   const mouseX = (container.scrollLeft || 0) + (e.clientX - rect.left);
-        //   const mouseY = (container.scrollTop || 0) + (e.clientY - rect.top);
-        //   applyZoom(zoomLevel + steps, { notify: true, zoomPointX: mouseX, zoomPointY: mouseY, preserveScroll: false });
-        // } else {
-        //   applyZoom(zoomLevel + steps, { notify: true, preserveScroll: false });
-        // }
-        applyZoom(zoomLevel + steps, { notify: true, preserveScroll: true });
+        // Apply zoom locally (for immediate visual feedback)
+        applyZoom(zoomLevel + steps, { notify: false, preserveScroll: true });
+        
+        // Notify Pool about zoom change (Pool handles Redux persistence)
+        try { sendIfActive('content-view-zoom-request', zoomLevel); } catch {}
       }
     } catch {}
   }, { passive: false });
@@ -797,19 +795,11 @@ try {
           const currentMidX = (touch1.clientX + touch2.clientX) / 2;
           const currentMidY = (touch1.clientY + touch2.clientY) / 2;
           
-          // TEMP: Scroll compensation disabled for testing
-          // Calculate touch position relative to container
-          // const container = document.querySelector('#fr-zoom-container');
-          // const wrapper = container.parentElement;
-          // if (container && wrapper) {
-          //   const rect = wrapper.getBoundingClientRect();
-          //   const touchX = (container.scrollLeft || 0) + (currentMidX - rect.left);
-          //   const touchY = (container.scrollTop || 0) + (currentMidY - rect.top);
-          //   applyZoom(factorToZoomLevel(newFactor), { notify: true, zoomPointX: touchX, zoomPointY: touchY, preserveScroll: false });
-          // } else {
-          //   applyZoom(factorToZoomLevel(newFactor), { notify: true, preserveScroll: false });
-          // }
-          applyZoom(factorToZoomLevel(newFactor), { notify: true, preserveScroll: true });
+          // Apply zoom locally (for immediate visual feedback)
+          applyZoom(factorToZoomLevel(newFactor), { notify: false, preserveScroll: true });
+          
+          // Notify Pool about zoom change (Pool handles Redux persistence)
+          try { sendIfActive('content-view-zoom-request', zoomLevel); } catch {}
         }
       } catch (err) { console.error('[ContentPreload] touchmove error:', err); }
     }, { passive: false, capture: true });
@@ -864,7 +854,12 @@ try {
       e.preventDefault();
       const scale = typeof e.scale === 'number' ? e.scale : 1;
       const newFactor = zoomLevelToFactor(zoomLevel) * scale;
-      applyZoom(factorToZoomLevel(newFactor), { notify: true });
+      
+      // Apply zoom locally (for immediate visual feedback)
+      applyZoom(factorToZoomLevel(newFactor), { notify: false });
+      
+      // Notify Pool about zoom change (Pool handles Redux persistence)
+      try { sendIfActive('content-view-zoom-request', zoomLevel); } catch {}
     } catch {}
   }, { passive: false });
 
