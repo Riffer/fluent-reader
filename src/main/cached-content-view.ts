@@ -918,7 +918,7 @@ export class CachedContentView {
         const oldStatus = this._status
         this._status = status
         
-        console.log(`[CachedContentView:${this.id}] Status: ${oldStatus} → ${status}`)
+        console.log(`[CachedContentView:${this.id}] Status: ${oldStatus} -> ${status}`)
         this.onStatusChanged?.(status)
     }
     
