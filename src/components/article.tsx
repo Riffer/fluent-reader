@@ -49,6 +49,7 @@ type ArticleProps = {
         source: RSSSource,
         defaultZoom: Number
     ) => void
+    updateDefaultZoomBySid: (sid: number, defaultZoom: number) => void
     updateSourceOpenTarget: (
         source: RSSSource,
         openTarget: SourceOpenTarget
@@ -245,12 +246,36 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             videoFullscreen: false,
         }
 
-        // IPC listener for zoom changes from preload script
+        // IPC listener for zoom changes from preload script or ContentViewPool
+        // NOTE: This listener may fire with stale props if user switches articles quickly.
+        // We REQUIRE feedId to match current source before updating Redux.
+        // Events without feedId (e.g., from legacy preload) only update local UI state.
         if ((window as any).ipcRenderer) {
-            (window as any).ipcRenderer.on('content-view-zoom-changed', (event: any, zoomLevel: number) => {
+            (window as any).ipcRenderer.on('content-view-zoom-changed', (event: any, zoomLevel: number, feedId?: string) => {
+                const currentSourceId = String(this.props.source?.sid)
+                window.contentViewPool?.debugLog?.(`[Article] IPC content-view-zoom-changed: zoom=${zoomLevel}, feedId=${feedId}, currentSource=${currentSourceId}, name=${this.props.source?.name}`)
+                
+                // Only update zoom state (for UI)
                 this.currentZoom = zoomLevel
                 this.setState({ zoom: zoomLevel })
-                this.props.updateDefaultZoom(this.props.source, zoomLevel);
+                
+                // CRITICAL: Only persist to Redux if:
+                // 1. feedId is provided (from ContentViewPool)
+                // 2. feedId matches current source
+                // This prevents zoom bleeding between feeds when switching quickly
+                // Events without feedId (e.g., from legacy preload) only update local UI
+                if (feedId && feedId === currentSourceId) {
+                    // Use the new sid-based function that fetches fresh state from Redux
+                    // This avoids stale props issues
+                    const sid = parseInt(feedId)
+                    if (!isNaN(sid)) {
+                        this.props.updateDefaultZoomBySid(sid, zoomLevel);
+                    }
+                } else if (!feedId) {
+                    window.contentViewPool?.debugLog?.(`[Article] SKIPPING updateDefaultZoom - no feedId (legacy event)`)
+                } else {
+                    window.contentViewPool?.debugLog?.(`[Article] SKIPPING updateDefaultZoom - feedId mismatch: ${feedId} != ${currentSourceId}`)
+                }
             });
         }
     }
@@ -282,11 +307,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             window.contentViewPool.setCssZoom(clampedLevel);
         }
         
-        // Update state and persist
+        // Update local state only - Redux persistence is handled via IPC callback
+        // from Pool (setZoomFactor/setCssZoom send 'content-view-zoom-changed' with feedId)
+        // This prevents zoom bleeding when props.source is stale after feed switch
         if (this._isMounted) {
             this.setState({ zoom: clampedLevel });
         }
-        this.updateDefaultZoom(clampedLevel);
+        // DO NOT call updateDefaultZoom here - it would use potentially stale this.props.source!
+        // The IPC listener 'content-view-zoom-changed' handles Redux updates with feedId validation
     }
     
     /**
@@ -324,6 +352,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     private getNavigationSettings = () => {
         const zoomLevel = this.currentZoom;
         const factor = 1.0 + (zoomLevel * 0.1);
+        
+        // DEBUG: Send debug info to Main process via IPC
+        window.contentViewPool?.debugLog?.(`[getNavigationSettings] currentZoom=${zoomLevel}, factor=${factor.toFixed(2)}, source.sid=${this.props.source?.sid}, source.defaultZoom=${this.props.source?.defaultZoom}`)
+        
         return {
             zoomFactor: factor,
             visualZoom: this.state.visualZoomEnabled,
@@ -666,7 +698,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // This ensures:
         // 1. Same-feed prefetched articles inherit the user's current zoom (even if not yet saved)
         // 2. Different-feed articles use their own stored default zoom
-        const isSameFeed = feedId && item.source === feedId;
+        // Note: Compare source IDs (numbers), not feedId (which is a string like "ALL" or "SOURCE" or "123")
+        const currentSourceId = this.props.source?.sid;
+        const isSameFeed = currentSourceId !== undefined && item.source === currentSourceId;
         const targetZoom = isSameFeed ? this.currentZoom : (source.defaultZoom || 0);
         const targetZoomFactor = 1.0 + (targetZoom * 0.1);
         const settings = {
@@ -681,7 +715,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             articleIndex,
             String(itemId),
             url,
-            feedId || null,
+            // Use the prefetch article's source ID as feedId, not the current article's
+            String(item.source),
             settings,
             articleInfo
         );
@@ -1343,6 +1378,7 @@ a:hover { text-decoration: underline; }
     }
 
     updateDefaultZoom = (defaultZoom: Number) => {
+        window.contentViewPool?.debugLog?.(`[Article] updateDefaultZoom: zoom=${defaultZoom}, source.sid=${this.props.source?.sid}, name=${this.props.source?.name}`)
         this.props.updateDefaultZoom(this.props.source, defaultZoom)
     }
 
@@ -1742,27 +1778,25 @@ a:hover { text-decoration: underline; }
                     break
                 case "+":
                 case "=":
-                    // Zoom handled by both IPC and globalKeydownListener - use debounce
-                    // Ctrl+Plus: fine step (0.1 = 1%), Plus alone: normal step (1 = 10%)
-                    if (!input.isAutoRepeat) {
-                        this.markKeyProcessed(keyWithMods)
+                    // Zoom: Ctrl+Plus = fine step (0.1 = 1%), Plus alone = normal step (1 = 10%)
+                    // Allow key repeat for continuous zoom when holding the key
+                    // No debounce needed - zoom is only handled here (not in globalKeydownListener)
+                    {
                         const stepPlus = input.control ? 0.1 : 1
-                        // Use this.currentZoom (always up-to-date) instead of this.state.zoom (async)
                         this.applyZoom(this.currentZoom + stepPlus)
                     }
                     break
                 case "-":
                 case "_":
-                    // Ctrl+Minus: fine step (0.1 = 1%), Minus alone: normal step (1 = 10%)
-                    if (!input.isAutoRepeat) {
-                        this.markKeyProcessed(keyWithMods)
+                    // Zoom: Ctrl+Minus = fine step (0.1 = 1%), Minus alone = normal step (1 = 10%)
+                    // Allow key repeat for continuous zoom when holding the key
+                    {
                         const stepMinus = input.control ? 0.1 : 1
-                        // Use this.currentZoom (always up-to-date) instead of this.state.zoom (async)
                         this.applyZoom(this.currentZoom - stepMinus)
                     }
                     break
                 case "#":
-                    this.markKeyProcessed(keyWithMods)
+                    // Reset zoom to 100%
                     this.applyZoom(0)
                     break
                 case "w":
@@ -1885,51 +1919,20 @@ a:hover { text-decoration: underline; }
         }
         
         // Global keyboard listener for zoom (also outside ContentView)
+        // NOTE: Zoom keys (+, -, #) are now ONLY handled via IPC from ContentView
+        // This prevents duplicate zoom events when ContentView is focused
+        // Zoom will only work when ContentView has focus - this is intentional
         this.globalKeydownListener = (e: KeyboardEvent) => {
-            // Lineare 10%-Schritte: -6 = 40%, 0 = 100%, 40 = 500%
-            const MIN_ZOOM_LEVEL = -6
-            const MAX_ZOOM_LEVEL = 40
+            // Zoom keys are handled exclusively by IPC from ContentView (keyDownHandler)
+            // Do NOT handle them here to prevent duplicate zoom events
             const isZoomKey = (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_' || e.key === '#')
-            
-            // Allow Ctrl for fine zoom steps, block other modifiers (Meta/Alt/Shift)
-            if (!isZoomKey || e.metaKey || e.altKey || e.shiftKey) return
-            
-            // Ignoriere repeat Events (Taste wird gehalten)
-            if (e.repeat) return
-            
-            // Build key string with modifiers for accurate debounce comparison
-            const keyWithMods = this.buildKeyWithModifiers(e.key, e.ctrlKey, e.shiftKey, e.altKey, e.metaKey)
-            
-            // Unified Key Debounce: Block if same key was processed recently
-            // (either by this handler or by keyDownHandler via IPC)
-            if (this.isDuplicateKey(keyWithMods)) {
+            if (isZoomKey) {
+                // Let the event pass through - it will be handled by ContentView via IPC
+                // or ignored if ContentView doesn't have focus
                 return
             }
             
-            e.preventDefault()
-            this.pressedZoomKeys.add(e.key)
-            
-            // Ctrl+Plus/Minus: fine step (0.1 = 1%), otherwise: normal step (1 = 10%)
-            const step = e.ctrlKey ? 0.1 : 1
-            
-            if (e.key === '+' || e.key === '=') {
-                this.markKeyProcessed(keyWithMods)
-                const newZoom = Math.min(MAX_ZOOM_LEVEL, this.currentZoom + step)
-                this.currentZoom = newZoom
-                this.setState({ zoom: newZoom })
-                this.applyZoom(newZoom)
-            } else if (e.key === '-' || e.key === '_') {
-                this.markKeyProcessed(keyWithMods)
-                const newZoom = Math.max(MIN_ZOOM_LEVEL, this.currentZoom - step)
-                this.currentZoom = newZoom
-                this.setState({ zoom: newZoom })
-                this.applyZoom(newZoom)
-            } else if (e.key === '#') {
-                this.markKeyProcessed(keyWithMods)
-                this.currentZoom = 0
-                this.setState({ zoom: 0 })
-                this.applyZoom(0)
-            }
+            // Other global keys can be handled here if needed in the future
         }
         
         this.globalKeyupListener = (e: KeyboardEvent) => {
@@ -1994,9 +1997,16 @@ a:hover { text-decoration: underline; }
             // Use CURRENT zoom (this.currentZoom), not the stored one from props
             // The stored props.source.defaultZoom may be outdated if user just zoomed
             // Only when switching to a DIFFERENT source, we use the stored value
+            
+            // DEBUG: Log all zoom-related values via IPC
+            window.contentViewPool?.debugLog?.(`[Article] componentDidUpdate: prev.sid=${prevProps.source.sid} prev.zoom=${prevProps.source.defaultZoom} | this.sid=${this.props.source.sid} this.zoom=${this.props.source.defaultZoom} | currentZoom=${this.currentZoom} | isSameSource=${isSameSource}`)
+            
             const savedZoom = isSameSource 
                 ? this.currentZoom  // Same source: keep current zoom
                 : (this.props.source.defaultZoom || 0)  // Different source: use stored zoom
+            
+            window.contentViewPool?.debugLog?.(`[Article] savedZoom (will use): ${savedZoom}`)
+            
             this.currentZoom = savedZoom
             this.setState({ zoom: savedZoom })
             

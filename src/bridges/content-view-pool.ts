@@ -462,6 +462,14 @@ export const contentViewPoolBridge = {
     },
     
     /**
+     * Debug log - sends message to main process for console output
+     * @param message Debug message to log
+     */
+    debugLog: (message: string): void => {
+        ipcRenderer.send("cvp-debug-log", message)
+    },
+    
+    /**
      * Remove all pool event listeners
      */
     removeAllListeners: (): void => {

@@ -351,9 +351,11 @@ export class CachedContentView {
         this._visualZoomEnabled = settings.visualZoom
         this._mobileMode = settings.mobileMode
         // Convert zoomFactor back to level: factor = 1.0 + (level * 0.1) → level = (factor - 1.0) / 0.1
-        this._visualZoomLevel = Math.round((settings.zoomFactor - 1.0) / 0.1)
+        const zoomLevel = Math.round((settings.zoomFactor - 1.0) / 0.1)
+        this._visualZoomLevel = zoomLevel
+        this._cssZoomLevel = zoomLevel  // Also set CSS zoom level for get-css-zoom-level IPC
         
-        console.log(`[CachedContentView:${this.id}] Load settings: visualZoom=${settings.visualZoom}, zoomLevel=${this._visualZoomLevel}, mobileMode=${settings.mobileMode}`)
+        console.log(`[CachedContentView:${this.id}] Load settings: visualZoom=${settings.visualZoom}, zoomLevel=${zoomLevel}, mobileMode=${settings.mobileMode}`)
         
         // Reset error state
         this._loadError = null

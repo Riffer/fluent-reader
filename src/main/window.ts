@@ -112,9 +112,21 @@ export class WindowManager {
         setupDatabaseIPC()
 
         // Forward zoom changes from ContentView -> Renderer
-        ipcMain.on("content-view-zoom-changed", (_event, zoom: number) => {
+        // Now includes feedId for correct Redux persistence
+        // If feedId is missing (from legacy preload events), try to get it from the active view
+        ipcMain.on("content-view-zoom-changed", (_event, zoom: number, feedId?: string) => {
             if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-                this.mainWindow.webContents.send("content-view-zoom-changed", zoom)
+                let finalFeedId = feedId
+                
+                // If feedId is missing, try to get it from the active ContentView
+                if (!finalFeedId) {
+                    const pool = getContentViewPool()
+                    if (pool) {
+                        finalFeedId = pool.getActiveFeedId()
+                    }
+                }
+                
+                this.mainWindow.webContents.send("content-view-zoom-changed", zoom, finalFeedId)
             }
         })
 

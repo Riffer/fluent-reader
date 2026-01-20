@@ -726,6 +726,16 @@ export class ContentViewPool {
     }
     
     /**
+     * Get the feedId of the currently active view
+     * Used by window.ts to enrich zoom events from preload scripts
+     * that don't have access to feedId themselves
+     */
+    getActiveFeedId(): string | null {
+        const active = this.getActiveView()
+        return active?.feedId ?? null
+    }
+    
+    /**
      * Get a view by its ID
      */
     getViewById(id: string): CachedContentView | null {
@@ -790,6 +800,22 @@ export class ContentViewPool {
                 shell.beep()
             }
             
+            // IMPORTANT: Apply zoom settings from the navigation request!
+            // The cached view may have been loaded with a different feed's zoom level.
+            // We need to apply the current feed's zoom settings (from settings.zoomFactor).
+            const zoomLevel = Math.round((settings.zoomFactor - 1.0) / 0.1)
+            this.cssZoomLevel = zoomLevel
+            
+            // Check if zoom differs from what the view was loaded with
+            if (Math.abs(cachedView.loadedWithZoom - settings.zoomFactor) > 0.01) {
+                console.log(`[ContentViewPool] Cache HIT: Applying feed-specific zoom: factor=${settings.zoomFactor.toFixed(2)}, level=${zoomLevel} (was loaded with factor=${cachedView.loadedWithZoom.toFixed(2)})`)
+                if (this.visualZoomEnabled) {
+                    cachedView.setVisualZoomLevel(zoomLevel)
+                } else {
+                    cachedView.setCssZoom(zoomLevel)
+                }
+            }
+            
             this.activateView(cachedView)
             
             // Schedule prefetch for next articles
@@ -797,6 +823,11 @@ export class ContentViewPool {
             
             return true
         }
+        
+        // Update pool's zoom level to match the feed's settings BEFORE creating view
+        // This ensures the correct zoom is applied when createViewWithEvents is called
+        const zoomLevel = Math.round((settings.zoomFactor - 1.0) / 0.1)
+        this.cssZoomLevel = zoomLevel
         
         // Need to load - find or create a view
         const view = cachedView ?? this.getOrCreateView(articleId)
@@ -1552,8 +1583,34 @@ export class ContentViewPool {
         })
         
         // Legacy: get-css-zoom-level (sync - used by content-preload.js)
+        // IMPORTANT: Return the zoom level for the SPECIFIC view that sent the request,
+        // not the global pool zoom. This enables per-feed zoom levels.
         ipcMain.on("get-css-zoom-level", (event) => {
-            event.returnValue = this.cssZoomLevel
+            // Find the view that sent this request by matching webContentsId
+            const senderWebContentsId = event.sender.id
+            
+            // First try the map (fast path)
+            let view = this.viewsByWebContentsId.get(senderWebContentsId)
+            
+            // If not found in map, search directly in views array (map might be stale)
+            if (!view) {
+                view = this.views.find(v => v.webContentsId === senderWebContentsId) ?? null
+                // Update the map if we found it
+                if (view) {
+                    this.viewsByWebContentsId.set(senderWebContentsId, view)
+                }
+            }
+            
+            if (view) {
+                // Return the view's own zoom level
+                const viewZoom = view.getCssZoomLevel()
+                console.log(`[ContentViewPool] get-css-zoom-level from ${view.id}: returning view-specific zoom ${viewZoom}`)
+                event.returnValue = viewZoom
+            } else {
+                // Fallback to pool's global zoom if view not found (shouldn't happen)
+                console.log(`[ContentViewPool] get-css-zoom-level: view not found for webContentsId ${senderWebContentsId}, returning pool zoom ${this.cssZoomLevel}`)
+                event.returnValue = this.cssZoomLevel
+            }
         })
         
         // Legacy: get-mobile-mode (sync - used by content-preload.js)
@@ -2028,6 +2085,11 @@ export class ContentViewPool {
                 return []
             }
         })
+        
+        // Debug log from renderer
+        ipcMain.on("cvp-debug-log", (_event, message: string) => {
+            console.log(`[Renderer DEBUG] ${message}`)
+        })
     }
     
     // ========== Zoom Methods ==========
@@ -2049,6 +2111,12 @@ export class ContentViewPool {
             } else {
                 active.setCssZoom(this.cssZoomLevel)
             }
+            
+            // Send zoom update to renderer with feedId for correct Redux persistence
+            // Don't round - preserve fine zoom steps (0.1 = 1%)
+            const feedId = active.feedId
+            console.log(`[ContentViewPool] Sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}`)
+            this.sendToRenderer("content-view-zoom-changed", this.cssZoomLevel, feedId)
         }
         
         // Sync to views of the same feed (zoom is feed-specific)
@@ -2074,6 +2142,11 @@ export class ContentViewPool {
                 console.log(`[ContentViewPool] setCssZoom: CSS Zoom, calling setCssZoom on active view ${active.id}`)
                 active.setCssZoom(clampedLevel)
             }
+            
+            // Send zoom update to renderer with feedId for correct Redux persistence
+            const feedId = active.feedId
+            console.log(`[ContentViewPool] Sending zoom update to renderer: zoom=${clampedLevel}, feedId=${feedId}`)
+            this.sendToRenderer("content-view-zoom-changed", clampedLevel, feedId)
         } else {
             console.log(`[ContentViewPool] setCssZoom: no active view!`)
         }

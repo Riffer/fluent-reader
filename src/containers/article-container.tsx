@@ -22,6 +22,7 @@ import {
     SourceTextDirection,
     SourceOpenTarget,
     updateSource,
+    updateSourceZoomBySid,
 } from "../scripts/models/source"
 
 type ArticleContainerProps = {
@@ -83,7 +84,9 @@ const makeMapStateToProps = () => {
                 // ContentViewPool support: article position in feed
                 articleIndex: articleIndex,
                 listLength: listLength,
-                feedId: feedId,
+                // Use source.sid (article's actual source) instead of page.feedId (UI selection)
+                // This ensures zoom is correctly isolated per-source, not per-UI-view
+                feedId: String(source.sid),
                 // For prefetch: access to article list and store data
                 articleIds: articleIds,
                 items: items,
@@ -135,6 +138,10 @@ const mapDispatchToProps = (dispatch: AppDispatch) => {
             dispatch(
                 updateSource({ ...source, defaultZoom: defaultZoom } as RSSSource)
             )
+        },
+        // New sid-based zoom update that avoids stale props issues
+        updateDefaultZoomBySid: (sid: number, defaultZoom: number) => {
+            dispatch(updateSourceZoomBySid(sid, defaultZoom))
         },
         updateMobileMode: (
             source: RSSSource,

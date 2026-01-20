@@ -406,8 +406,46 @@ export function updateSource(source: RSSSource): AppThunk<Promise<void>> {
         delete sourceCopy.unreadCount
         // Use SQLite for update via window.db bridge
         const row = sourceToRow(sourceCopy)
+        
+        // DEBUG: Log what we're saving
+        console.log(`[Redux updateSource] Saving source: sid=${source.sid}, name=${source.name}, defaultZoom=${source.defaultZoom}`)
+        
         await window.db.sources.update(source.sid, row)
         dispatch(updateSourceDone(source))
+    }
+}
+
+/**
+ * Update zoom level for a specific source by sid.
+ * This function fetches the current source from Redux state to avoid stale props issues.
+ * @param sid - The source ID to update
+ * @param defaultZoom - The new zoom level
+ */
+export function updateSourceZoomBySid(sid: number, defaultZoom: number): AppThunk<Promise<void>> {
+    return async (dispatch, getState) => {
+        const state = getState()
+        const currentSource = state.sources[sid]
+        
+        if (!currentSource) {
+            console.error(`[updateSourceZoomBySid] Source not found for sid=${sid}`)
+            return
+        }
+        
+        console.log(`[updateSourceZoomBySid] Updating zoom: sid=${sid}, name=${currentSource.name}, oldZoom=${currentSource.defaultZoom}, newZoom=${defaultZoom}`)
+        
+        // Only update if zoom actually changed
+        if (currentSource.defaultZoom === defaultZoom) {
+            console.log(`[updateSourceZoomBySid] Zoom unchanged, skipping update`)
+            return
+        }
+        
+        const updatedSource = { ...currentSource, defaultZoom }
+        let sourceCopy = { ...updatedSource }
+        delete sourceCopy.unreadCount
+        
+        const row = sourceToRow(sourceCopy)
+        await window.db.sources.update(sid, row)
+        dispatch(updateSourceDone(updatedSource))
     }
 }
 
