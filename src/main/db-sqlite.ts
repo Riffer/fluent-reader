@@ -278,6 +278,12 @@ export function getAllSources(): SourceRow[] {
     return db.prepare("SELECT * FROM sources").all() as SourceRow[]
 }
 
+export function getAllSourceSids(): number[] {
+    if (!db) throw new Error("Database not initialized")
+    const rows = db.prepare("SELECT sid FROM sources").all() as { sid: number }[]
+    return rows.map(r => r.sid)
+}
+
 export function getSourceById(sid: number): SourceRow | undefined {
     if (!db) throw new Error("Database not initialized")
     return db.prepare("SELECT * FROM sources WHERE sid = ?").get(sid) as SourceRow | undefined
@@ -1184,6 +1190,7 @@ export function setupDatabaseIPC(): void {
 
     // Source operations
     ipcMain.handle("db:sources:getAll", () => getAllSources())
+    ipcMain.handle("db:sources:getAllSids", () => getAllSourceSids())
     ipcMain.handle("db:sources:getById", (_, sid: number) => getSourceById(sid))
     ipcMain.handle("db:sources:getByUrl", (_, url: string) => getSourceByUrl(url))
     ipcMain.handle("db:sources:insert", (_, source) => insertSource(source))

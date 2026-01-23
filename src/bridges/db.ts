@@ -74,6 +74,9 @@ const dbBridge = {
         getAll: (): Promise<SourceRow[]> => 
             ipcRenderer.invoke("db:sources:getAll"),
         
+        getAllSids: (): Promise<number[]> => 
+            ipcRenderer.invoke("db:sources:getAllSids"),
+        
         getById: (sid: number): Promise<SourceRow | undefined> => 
             ipcRenderer.invoke("db:sources:getById", sid),
         

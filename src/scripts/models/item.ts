@@ -242,14 +242,36 @@ export async function insertItems(items: RSSItem[]): Promise<RSSItem[]> {
     }
     if (items.length === 0) return []
     
-    items.sort((a, b) => a.date.getTime() - b.date.getTime())
+    // Filter out items whose source no longer exists in the database
+    // This prevents FOREIGN KEY constraint failures when a feed is deleted
+    // while items are still being fetched for it
+    const existingSids = await window.db.sources.getAllSids()
+    const existingSidsSet = new Set(existingSids)
+    const validItems = items.filter(item => {
+        if (!existingSidsSet.has(item.source)) {
+            console.warn(`[insertItems] Skipping item - source ${item.source} no longer exists: "${item.title?.substring(0, 50)}..."`)
+            return false
+        }
+        return true
+    })
+    
+    if (validItems.length === 0) {
+        console.log(`[insertItems] No valid items to insert (all sources deleted)`)
+        return []
+    }
+    
+    if (validItems.length !== items.length) {
+        console.log(`[insertItems] Filtered ${items.length - validItems.length} items with deleted sources`)
+    }
+    
+    validItems.sort((a, b) => a.date.getTime() - b.date.getTime())
     
     // Use SQLite for insert via window.db bridge
-    const rows = items.map(itemToRow)
+    const rows = validItems.map(itemToRow)
     const insertedIds = await window.db.items.insertMany(rows)
     
     // Update items with their new IDs
-    const inserted = items.map((item, index) => ({
+    const inserted = validItems.map((item, index) => ({
         ...item,
         _id: insertedIds[index]
     }))

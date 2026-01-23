@@ -103,6 +103,7 @@ type ArticleState = {
     menuBlurScreenshot: string | null  // Screenshot for blur placeholder when menu is open
     isNavigatingWithVisualZoom: boolean  // Show loading spinner during Visual Zoom navigation
     videoFullscreen: boolean  // Video playing in fullscreen mode (ContentView fills window)
+    activeViewId: string | null  // Currently active ContentView ID (for debug badge)
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -244,6 +245,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             menuBlurScreenshot: null,
             isNavigatingWithVisualZoom: false,
             videoFullscreen: false,
+            activeViewId: null,
         }
 
         // IPC listener for zoom changes from preload script or ContentViewPool
@@ -255,9 +257,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                 const currentSourceId = String(this.props.source?.sid)
                 window.contentViewPool?.debugLog?.(`[Article] IPC content-view-zoom-changed: zoom=${zoomLevel}, feedId=${feedId}, viewId=${viewId}, currentSource=${currentSourceId}, name=${this.props.source?.name}`)
                 
-                // Only update zoom state (for UI)
+                // Only update zoom state and viewId (for UI)
                 this.currentZoom = zoomLevel
-                this.setState({ zoom: zoomLevel })
+                this.setState({ zoom: zoomLevel, activeViewId: viewId || null })
                 
                 // CRITICAL: Only persist to Redux if:
                 // 1. feedId is provided (from ContentViewPool)
@@ -277,6 +279,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     window.contentViewPool?.debugLog?.(`[Article] SKIPPING updateDefaultZoom - feedId mismatch: ${feedId} != ${currentSourceId}`)
                 }
             });
+            // Note: activeViewId is now updated via content-view-zoom-changed event
+            // which fires on every view activation (no separate cvp-view-activated needed)
         }
     }
 
@@ -3463,6 +3467,26 @@ window.__articleData = ${JSON.stringify({
                                     title={this.getViewportTooltip()}
                                 >
                                     🔍 {this.getZoomDisplayText()}
+                                </span>
+                            )}
+                            {/* View ID Badge (Debug) */}
+                            {this.state.activeViewId && (
+                                <span 
+                                    className="view-badge"
+                                    style={{
+                                        marginLeft: 8,
+                                        padding: '2px 6px',
+                                        backgroundColor: '#107c10',
+                                        color: 'white',
+                                        borderRadius: 3,
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                        whiteSpace: 'nowrap',
+                                        cursor: 'default',
+                                    }}
+                                    title={`Aktiver ContentView: ${this.state.activeViewId}`}
+                                >
+                                    📺 {this.state.activeViewId}
                                 </span>
                             )}
                         </div>

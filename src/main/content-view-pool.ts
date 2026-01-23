@@ -810,7 +810,11 @@ export class ContentViewPool {
         this.currentArticleIndex = articleIndex
         this.articleListLength = listLength
         
+        // Log pool status for debugging
         console.log(`[ContentViewPool] Navigate to: ${articleId} (index ${articleIndex}/${listLength}, direction: ${this.readingDirection})`)
+        console.log(`[ContentViewPool] Pool status:`, this.views.map(v => 
+            `${v.id}: ${v.articleId || 'empty'} (${v.status}, active=${v.isActive})`
+        ).join(', '))
         
         // Check if article is already cached
         const cachedView = this.getViewByArticleId(articleId)
@@ -890,6 +894,10 @@ export class ContentViewPool {
                 console.log(`[ContentViewPool] Load complete for ${view.id}, waiting for bounds`)
             }
             
+            // Notify renderer about view activation with current zoom level
+            // This ensures both viewId and zoom are displayed in the UI
+            this.sendToRenderer('content-view-zoom-changed', this.cssZoomLevel, feedId, view.id)
+            
             // Notify renderer
             this.sendToRenderer('cvp-navigation-complete', articleId)
             
@@ -959,8 +967,12 @@ export class ContentViewPool {
         
         console.log(`[ContentViewPool] Prefetch: ${articleId} in ${freeView.id}`)
         
-        // Recycle the view if it has old content
+        // Recycle the view if it has old content (but not if protected!)
         if (!freeView.isEmpty) {
+            if (freeView.articleId && this.protectedArticleIds.has(freeView.articleId)) {
+                console.log(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds protected article ${freeView.articleId}`)
+                return
+            }
             freeView.recycle()
         }
         
@@ -1341,16 +1353,12 @@ export class ContentViewPool {
     }
     
     /**
-     * Find a free view for prefetching (not active)
+     * Find a free view for prefetching (not active, not protected)
      */
     private findFreeView(): CachedContentView | null {
         // Prefer empty views
         const empty = this.views.find(v => v.isEmpty && !v.isActive)
         if (empty) return empty
-        
-        // Then views that aren't loading
-        const ready = this.views.find(v => !v.isActive && !v.isLoading)
-        if (ready) return ready
         
         // Can we create a new one?
         if (this.views.length < this.config.size) {
@@ -1358,6 +1366,14 @@ export class ContentViewPool {
             this.views.push(newView)
             return newView
         }
+        
+        // Then views that aren't loading AND not protected
+        const ready = this.views.find(v => 
+            !v.isActive && 
+            !v.isLoading && 
+            (!v.articleId || !this.protectedArticleIds.has(v.articleId))
+        )
+        if (ready) return ready
         
         return null
     }
@@ -1447,6 +1463,10 @@ export class ContentViewPool {
             // Pool is visible but no bounds yet - view will be shown when bounds arrive
             console.log(`[ContentViewPool] Activated ${view.id} - waiting for bounds before showing`)
         }
+        
+        // Notify renderer about view activation with current zoom level
+        // This ensures both viewId and zoom are always in sync in the UI
+        this.sendToRenderer('content-view-zoom-changed', this.cssZoomLevel, view.feedId, view.id)
         
         // Notify renderer
         this.sendToRenderer('cvp-navigation-complete', view.articleId)
