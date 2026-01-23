@@ -76,6 +76,40 @@ class CardsFeed extends React.Component<FeedProps> {
         }
     }
 
+    /**
+     * Handle keyboard events on the feed list.
+     * When an article is displayed (currentItem is set) and the user presses
+     * ArrowLeft/ArrowRight, trigger article navigation.
+     * 
+     * This is a fallback for when focus escapes from the WebContentsView
+     * (e.g., during long-running scripts like NSFW-Cleanup or zoom automation).
+     * The FocusZone captures the focus, but we still want navigation to work.
+     */
+    handleKeyDown = (e: React.KeyboardEvent) => {
+        // Only handle ArrowLeft/ArrowRight when an article is displayed
+        if (this.props.currentItem && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+            e.preventDefault()
+            e.stopPropagation()
+            
+            // Save scroll position before navigation (prevents list jump)
+            const scrollContainer = document.getElementById('refocus')
+            const savedScrollTop = scrollContainer?.scrollTop ?? 0
+            
+            console.log(`[CardsFeed] Fallback navigation: ${e.key} (focus escaped to list)`)
+            this.props.offsetItem(e.key === 'ArrowLeft' ? -1 : 1)
+            
+            // Request focus back to WebContentsView ASAP using requestAnimationFrame
+            // This minimizes the visible focus on the list
+            requestAnimationFrame(() => {
+                // Restore scroll position if it changed unexpectedly
+                if (scrollContainer && Math.abs(scrollContainer.scrollTop - savedScrollTop) > 100) {
+                    scrollContainer.scrollTop = savedScrollTop
+                }
+                window.contentViewPool?.focus()
+            })
+        }
+    }
+
     render() {
         return (
             this.props.feed.loaded && (
@@ -84,6 +118,8 @@ class CardsFeed extends React.Component<FeedProps> {
                     id="refocus"
                     className="cards-feed-container"
                     shouldReceiveFocus={this.canFocusChild}
+                    onKeyDown={this.handleKeyDown}
+                    preventFocusRestoration={true}
                     data-is-scrollable>
                     <List
                         className={AnimationClassNames.slideUpIn10}

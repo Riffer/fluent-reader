@@ -1760,16 +1760,18 @@ a:hover { text-decoration: underline; }
                         this.markKeyProcessed(keyWithMods)
                         // this.setNavigationLock(true)
                         
-                        // WORKAROUND: Focus the article card before navigation
-                        // This releases focus from the current WebContentsView, allowing
-                        // the new view to receive focus cleanly after navigation
-                        const currentCard = document.querySelector(
-                            `#refocus div[data-iid="${this.props.item._id}"]`
-                        ) as HTMLElement
-                        if (currentCard) {
-                            currentCard.focus()
-                            console.log(`[Article] Pre-navigation: focused card for article ${this.props.item._id}`)
-                        }
+                        // NOTE: "Pre-navigation card focus" workaround was REMOVED.
+                        // It was interfering with the Focus Guard system - the FocusZone
+                        // in the article list would capture focus and not release it to
+                        // the new WebContentsView. The Focus Guard now handles focus
+                        // restoration for background view events, making this workaround
+                        // unnecessary and counterproductive.
+                        
+                        // Request focus restoration after navigation via IPC
+                        // Use requestAnimationFrame for faster focus restoration (less visible)
+                        requestAnimationFrame(() => {
+                            window.contentViewPool?.focus()
+                        })
                         
                         console.log(`[Article] Arrow key navigation: ${input.key}, current index: ${this.props.articleIndex}`)
                         this.props.offsetItem(input.key === "ArrowLeft" ? -1 : 1)

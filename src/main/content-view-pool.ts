@@ -919,6 +919,11 @@ export class ContentViewPool {
     prefetch(articleId: string, url: string, feedId: string | null, settings: NavigationSettings): void {
         if (!this.config.enabled) return
         
+        // Add this articleId to protected set - it's a prefetch target
+        // This prevents another concurrent prefetch from recycling a view
+        // that's loading/holding this article
+        this.protectedArticleIds.add(articleId)
+        
         // Check if article is already in a view
         const existingView = this.getViewByArticleId(articleId)
         let viewToUse: CachedContentView | null = null
@@ -1242,8 +1247,13 @@ export class ContentViewPool {
         
         console.log(`[ContentViewPool] Prefetch targets:`, targets)
         
-        // Clear old protected articles and protect current neighbors
-        // This prevents recycling views that hold articles we might navigate to
+        // Update protected articles:
+        // Only protect the ACTIVE article and its immediate neighbors (±1).
+        // This allows views holding older articles to be recycled.
+        // 
+        // IMPORTANT: We clear and rebuild the protection set on each navigation.
+        // This ensures that when the user moves forward, the article 2 positions
+        // behind becomes recyclable.
         this.protectedArticleIds.clear()
         
         // Protect the active article
@@ -1252,17 +1262,26 @@ export class ContentViewPool {
             this.protectedArticleIds.add(activeView.articleId)
         }
         
-        // Protect articles at target indices (we don't know their IDs yet,
-        // but we can protect any view holding articles at adjacent indices)
-        // For simplicity, protect all non-active ready views for the duration of prefetch
-        // The protection will be updated on next navigation
-        for (const view of this.views) {
-            if (!view.isActive && view.articleId && view.status === 'ready') {
-                this.protectedArticleIds.add(view.articleId)
-            }
-        }
+        // Protect articles at target indices (neighbors of current position)
+        // We look up which views hold articles that should be protected based on
+        // their articleId matching what we expect at those indices.
+        // Note: We don't know the articleIds for indices yet (renderer will provide them),
+        // but any existing cached view at those positions should be kept.
+        // 
+        // Strategy: Protect views that are likely to be navigated to next.
+        // Since we're about to request prefetch for targets.primary and targets.secondary,
+        // we should protect any view that already holds those articles.
+        // But we don't know the articleIds yet... so we'll let the prefetch() method
+        // handle the protection check when it tries to recycle.
+        //
+        // The key insight: DON'T protect all ready views. Only protect:
+        // 1. The active article
+        // 2. Articles we're about to prefetch (checked in prefetch() method)
         
-        console.log(`[ContentViewPool] Protected articles:`, Array.from(this.protectedArticleIds))
+        console.log(`[ContentViewPool] Protected articles (active only):`, Array.from(this.protectedArticleIds))
+        console.log(`[ContentViewPool] Current views:`, this.views.map(v => 
+            `${v.id}: ${v.articleId?.substring(0, 8) || 'empty'} (${v.status}${v.isActive ? ', ACTIVE' : ''})`
+        ).join(', '))
         
         // Request prefetch info from renderer
         // The renderer knows the article URLs

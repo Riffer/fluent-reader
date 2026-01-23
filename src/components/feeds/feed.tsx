@@ -19,6 +19,7 @@ export type FeedProps = FeedReduxProps & {
     contextMenu: (feedId: string, item: RSSItem, e) => void
     loadMore: (feed: RSSFeed) => void
     showItem: (fid: string, item: RSSItem) => void
+    offsetItem: (offset: number) => void
 }
 
 export class Feed extends React.Component<FeedProps> {
