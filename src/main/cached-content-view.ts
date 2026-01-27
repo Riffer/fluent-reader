@@ -49,11 +49,13 @@ export class CachedContentView {
     private _articleId: string | null = null
     private _feedId: string | null = null
     private _url: string | null = null
+    private _articleIndex: number = -1  // Position in feed list for smart recycling
     
     // === Status ===
     private _status: CachedViewStatus = 'empty'
     private _loadError: Error | null = null
     private _loadStartTime: number = 0
+    private _lastUsedAt: number = 0  // Timestamp when view was last activated (for LRU recycling)
     
     // === Settings at Load Time ===
     private _loadedWithZoom: number = 1.0
@@ -152,6 +154,10 @@ export class CachedContentView {
         return this._url
     }
     
+    get articleIndex(): number {
+        return this._articleIndex
+    }
+    
     get status(): CachedViewStatus {
         return this._status
     }
@@ -162,6 +168,10 @@ export class CachedContentView {
     
     get isActive(): boolean {
         return this._isActive
+    }
+    
+    get lastUsedAt(): number {
+        return this._lastUsedAt
     }
     
     get loadedWithZoom(): number {
@@ -301,6 +311,7 @@ export class CachedContentView {
         // Reset load state
         this._loadError = null
         this._loadStartTime = 0
+        this._articleIndex = -1
         
         // Reset settings
         this._loadedWithZoom = 1.0
@@ -325,7 +336,8 @@ export class CachedContentView {
         articleId: string, 
         feedId: string | null,
         settings: NavigationSettings,
-        useMobileUserAgent: boolean = false
+        useMobileUserAgent: boolean = false,
+        articleIndex: number = -1
     ): Promise<void> {
         // Ensure view exists
         if (!this._view && this.parentWindow) {
@@ -340,6 +352,7 @@ export class CachedContentView {
         this._articleId = articleId
         this._feedId = feedId
         this._url = url
+        this._articleIndex = articleIndex
         
         // Store settings
         this._loadedWithZoom = settings.zoomFactor
@@ -449,6 +462,11 @@ export class CachedContentView {
         if (this._isActive === active) return
         
         this._isActive = active
+        
+        // Update lastUsedAt timestamp on BOTH activation and deactivation
+        // This keeps recently viewed articles "fresh" for LRU recycling,
+        // especially important for direction changes (going back to previous article)
+        this._lastUsedAt = Date.now()
         
         if (this._view?.webContents && !this._view.webContents.isDestroyed()) {
             // Inform the preload script about activity state

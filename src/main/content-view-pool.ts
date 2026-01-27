@@ -120,6 +120,7 @@ export class ContentViewPool {
     private prefetchTimer: NodeJS.Timeout | null = null
     private pendingPrefetch: PrefetchRequest[] = []
     private protectedArticleIds: Set<string> = new Set()  // Articles that should not be recycled (prefetch targets)
+    private pendingPrefetchArticleIds: Set<string> = new Set()  // ArticleIds being prefetched right now
     
     // === Zoom State ===
     private cssZoomLevel: number = 0
@@ -876,7 +877,7 @@ export class ContentViewPool {
         
         // Load the article
         try {
-            await view.load(url, articleId, feedId, settings, isMobileUserAgentEnabled())
+            await view.load(url, articleId, feedId, settings, isMobileUserAgentEnabled(), articleIndex)
             
             // IMPORTANT: Check if this view is still the active one!
             // User may have navigated to another article while we were loading
@@ -916,7 +917,7 @@ export class ContentViewPool {
     /**
      * Prefetch an article in the background
      */
-    prefetch(articleId: string, url: string, feedId: string | null, settings: NavigationSettings): void {
+    prefetch(articleId: string, url: string, feedId: string | null, settings: NavigationSettings, articleIndex: number = -1): void {
         if (!this.config.enabled) return
         
         // Add this articleId to protected set - it's a prefetch target
@@ -972,10 +973,13 @@ export class ContentViewPool {
         
         console.log(`[ContentViewPool] Prefetch: ${articleId} in ${freeView.id}`)
         
-        // Recycle the view if it has old content (but not if protected!)
+        // Recycle the view if it has old content (but not if protected or pending!)
         if (!freeView.isEmpty) {
-            if (freeView.articleId && this.protectedArticleIds.has(freeView.articleId)) {
-                console.log(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds protected article ${freeView.articleId}`)
+            if (freeView.articleId && (
+                this.protectedArticleIds.has(freeView.articleId) || 
+                this.pendingPrefetchArticleIds.has(freeView.articleId)
+            )) {
+                console.log(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds protected/pending article ${freeView.articleId}`)
                 return
             }
             freeView.recycle()
@@ -987,7 +991,7 @@ export class ContentViewPool {
         }
         
         // Load in background
-        freeView.load(url, articleId, feedId, settings, isMobileUserAgentEnabled())
+        freeView.load(url, articleId, feedId, settings, isMobileUserAgentEnabled(), articleIndex)
             .catch(err => {
                 console.error(`[ContentViewPool] Prefetch failed for ${articleId}:`, err)
             })
@@ -1001,7 +1005,8 @@ export class ContentViewPool {
         articleId: string,
         feedId: string | null,
         settings: NavigationSettings,
-        articleInfo: PrefetchArticleInfo
+        articleInfo: PrefetchArticleInfo,
+        articleIndex: number = -1
     ): Promise<void> {
         if (!this.config.enabled) return
         
@@ -1068,7 +1073,7 @@ export class ContentViewPool {
             console.log(`[ContentViewPool] FullContent: loading extracted content for ${articleId}`)
             
             // Step 5: Load the generated HTML
-            await freeView.load(dataUrl, articleId, feedId, settings, false)
+            await freeView.load(dataUrl, articleId, feedId, settings, false, articleIndex)
             
             console.log(`[ContentViewPool] FullContent prefetch complete: ${articleId}`)
         } catch (err) {
@@ -1248,13 +1253,10 @@ export class ContentViewPool {
         console.log(`[ContentViewPool] Prefetch targets:`, targets)
         
         // Update protected articles:
-        // Only protect the ACTIVE article and its immediate neighbors (±1).
-        // This allows views holding older articles to be recycled.
-        // 
-        // IMPORTANT: We clear and rebuild the protection set on each navigation.
-        // This ensures that when the user moves forward, the article 2 positions
-        // behind becomes recyclable.
+        // Only protect the ACTIVE article. The pending prefetch articleIds will be
+        // protected dynamically as prefetch-info responses arrive.
         this.protectedArticleIds.clear()
+        this.pendingPrefetchArticleIds.clear()  // Clear pending prefetch tracking
         
         // Protect the active article
         const activeView = this.getActiveView()
@@ -1262,65 +1264,64 @@ export class ContentViewPool {
             this.protectedArticleIds.add(activeView.articleId)
         }
         
-        // Protect articles at target indices (neighbors of current position)
-        // We look up which views hold articles that should be protected based on
-        // their articleId matching what we expect at those indices.
-        // Note: We don't know the articleIds for indices yet (renderer will provide them),
-        // but any existing cached view at those positions should be kept.
-        // 
-        // Strategy: Protect views that are likely to be navigated to next.
-        // Since we're about to request prefetch for targets.primary and targets.secondary,
-        // we should protect any view that already holds those articles.
-        // But we don't know the articleIds yet... so we'll let the prefetch() method
-        // handle the protection check when it tries to recycle.
-        //
-        // The key insight: DON'T protect all ready views. Only protect:
-        // 1. The active article
-        // 2. Articles we're about to prefetch (checked in prefetch() method)
-        
-        console.log(`[ContentViewPool] Protected articles (active only):`, Array.from(this.protectedArticleIds))
+        console.log(`[ContentViewPool] Protected articles:`, Array.from(this.protectedArticleIds))
         console.log(`[ContentViewPool] Current views:`, this.views.map(v => 
             `${v.id}: ${v.articleId?.substring(0, 8) || 'empty'} (${v.status}${v.isActive ? ', ACTIVE' : ''})`
         ).join(', '))
         
-        // Request prefetch info from renderer
+        // Request prefetch info from renderer for all targets
         // The renderer knows the article URLs
-        if (targets.primary !== null) {
-            console.log(`[ContentViewPool] Requesting prefetch info for primary target index ${targets.primary}`)
-            this.sendToRenderer('cvp-request-prefetch-info', targets.primary)
-        }
-        if (targets.secondary !== null) {
-            console.log(`[ContentViewPool] Requesting prefetch info for secondary target index ${targets.secondary}`)
-            this.sendToRenderer('cvp-request-prefetch-info', targets.secondary)
+        console.log(`[ContentViewPool] Requesting prefetch info for ${targets.length} targets: [${targets.join(', ')}]`)
+        for (const targetIndex of targets) {
+            this.sendToRenderer('cvp-request-prefetch-info', targetIndex)
         }
     }
     
     /**
-     * Determine which articles to prefetch based on reading direction
+     * Determine which articles to prefetch based on reading direction.
+     * With 5 views: 1 active + 3 in reading direction + 1 opposite direction.
+     * Returns array of indices sorted by priority (most likely needed first).
      */
-    private determinePrefetchTargets(): { primary: number | null, secondary: number | null } {
+    private determinePrefetchTargets(): number[] {
         const { currentArticleIndex: index, articleListLength: length } = this
+        const targets: number[] = []
+        
+        // Helper to add valid index
+        const addIfValid = (i: number) => {
+            if (i >= 0 && i < length && i !== index) {
+                targets.push(i)
+            }
+        }
         
         switch (this.readingDirection) {
             case 'forward':
-                return {
-                    primary: index + 1 < length ? index + 1 : null,
-                    secondary: index - 1 >= 0 ? index - 1 : null
-                }
+                // Primary direction: +1, +2, +3
+                addIfValid(index + 1)
+                addIfValid(index + 2)
+                addIfValid(index + 3)
+                // Opposite direction: -1 (for going back)
+                addIfValid(index - 1)
+                break
             
             case 'backward':
-                return {
-                    primary: index - 1 >= 0 ? index - 1 : null,
-                    secondary: index + 1 < length ? index + 1 : null
-                }
+                // Primary direction: -1, -2, -3
+                addIfValid(index - 1)
+                addIfValid(index - 2)
+                addIfValid(index - 3)
+                // Opposite direction: +1 (for going forward)
+                addIfValid(index + 1)
+                break
             
             case 'unknown':
-                // Both directions equally likely
-                return {
-                    primary: index + 1 < length ? index + 1 : null,
-                    secondary: index - 1 >= 0 ? index - 1 : null
-                }
+                // Balanced prefetch: +1, -1, +2, -2
+                addIfValid(index + 1)
+                addIfValid(index - 1)
+                addIfValid(index + 2)
+                addIfValid(index - 2)
+                break
         }
+        
+        return targets
     }
     
     // ========== Pool Management ==========
@@ -1386,15 +1387,27 @@ export class ContentViewPool {
             return newView
         }
         
-        // Then views that aren't loading AND not protected
-        const ready = this.views.find(v => 
-            !v.isActive && 
-            !v.isLoading && 
-            (!v.articleId || !this.protectedArticleIds.has(v.articleId))
-        )
-        if (ready) return ready
+        // Find the oldest (LRU) view that's not:
+        // - Active
+        // - Loading
+        // - Protected (in protectedArticleIds or pendingPrefetchArticleIds)
+        // LRU ensures recently used views are kept
+        const candidates = this.views.filter(v => {
+            if (v.isActive) return false
+            if (v.isLoading) return false
+            if (v.articleId && this.protectedArticleIds.has(v.articleId)) return false
+            if (v.articleId && this.pendingPrefetchArticleIds.has(v.articleId)) return false
+            
+            return true
+        })
         
-        return null
+        if (candidates.length === 0) return null
+        
+        // Sort by lastUsedAt (oldest first = best to recycle)
+        candidates.sort((a, b) => a.lastUsedAt - b.lastUsedAt)
+        
+        console.log(`[ContentViewPool] findFreeView: Using LRU view ${candidates[0].id} (age=${((Date.now() - candidates[0].lastUsedAt) / 1000).toFixed(1)}s)`)
+        return candidates[0]
     }
     
     /**
@@ -1403,7 +1416,7 @@ export class ContentViewPool {
      * NEVER recycles views holding protected articles (current prefetch targets)
      */
     private findRecyclableView(): CachedContentView | null {
-        // Don't recycle active view or views with protected articles
+        // Don't recycle active view or views with protected/pending articles
         const candidates = this.views.filter(v => {
             if (v.isActive) return false
             // Don't recycle if article is protected (needed as prefetch target)
@@ -1411,19 +1424,18 @@ export class ContentViewPool {
                 console.log(`[ContentViewPool] Skipping ${v.id} (protected article ${v.articleId})`)
                 return false
             }
+            // Don't recycle if article is pending prefetch
+            if (v.articleId && this.pendingPrefetchArticleIds.has(v.articleId)) {
+                console.log(`[ContentViewPool] Skipping ${v.id} (pending prefetch article ${v.articleId})`)
+                return false
+            }
             return true
         })
         
         if (candidates.length === 0) return null
         
-        // If we don't know the current position, just return any non-active
-        if (this.currentArticleIndex < 0) {
-            return candidates[0]
-        }
-        
-        // Calculate "distance" for each candidate based on reading direction
-        // Negative distance = opposite to reading direction (prefer recycling)
-        // Positive distance = same as reading direction (keep for cache)
+        // Score each candidate using LRU (Least Recently Used) strategy
+        // Lower score = better candidate for recycling
         const scored = candidates.map(view => {
             // Empty views are best to recycle
             if (view.isEmpty || !view.articleId) {
@@ -1436,17 +1448,33 @@ export class ContentViewPool {
             }
             
             // Loading views - prefer to recycle these over ready views
-            // (a loading view's article might not be visited anyway)
             if (view.isLoading) {
                 return { view, score: -500 }
             }
             
-            // Ready views - keep these if possible
-            return { view, score: 0 }
+            // Ready views - use LRU (age-based scoring)
+            // Older views (larger ageMs) get lower scores = better to recycle
+            
+            // Use LRU: Older lastUsedAt = lower score = better to recycle
+            // Invert the timestamp so older = lower score
+            // Normalize to reasonable range (0-1000 based on age in seconds)
+            const ageMs = Date.now() - view.lastUsedAt
+            const ageScore = Math.min(ageMs / 1000, 1000)  // Cap at 1000 seconds
+            
+            // Lower score = recycle first
+            // Older views have larger ageMs, so we negate to make them lower score
+            return { view, score: -ageScore }
         })
         
-        // Sort by score (lowest/most negative first = best to recycle)
+        // Sort by score (lowest first = best to recycle)
         scored.sort((a, b) => a.score - b.score)
+        
+        // Log scoring for debugging
+        console.log(`[ContentViewPool] Recycle candidates (currentIdx=${this.currentArticleIndex}, dir=${this.readingDirection}):`,
+            scored.map(s => {
+                const age = s.view.lastUsedAt > 0 ? `${((Date.now() - s.view.lastUsedAt) / 1000).toFixed(1)}s` : 'never'
+                return `${s.view.id}[idx=${s.view.articleIndex}, age=${age}]=>${s.score.toFixed(0)}`
+            }).join(', '))
         
         return scored[0].view
     }
@@ -1705,13 +1733,21 @@ export class ContentViewPool {
         ipcMain.on('cvp-prefetch-info', (event, articleIndex, articleId, url, feedId, settings, articleInfo) => {
             console.log(`[ContentViewPool] IPC cvp-prefetch-info received: index=${articleIndex}, articleId=${articleId}, url=${url?.substring(0, 50) || 'null'}...`)
             
+            // CRITICAL: Add articleId to pending set BEFORE calling prefetch()
+            // This prevents a race condition where one prefetch recycles a view
+            // that another concurrent prefetch needs
+            if (articleId) {
+                this.pendingPrefetchArticleIds.add(articleId)
+                console.log(`[ContentViewPool] Added ${articleId} to pending prefetch set:`, Array.from(this.pendingPrefetchArticleIds))
+            }
+            
             if (articleId && articleInfo?.openTarget === PrefetchOpenTarget.FullContent) {
                 // FullContent mode: fetch and extract in background
-                console.log(`[ContentViewPool] Starting FullContent prefetch for ${articleId}`)
-                this.prefetchFullContent(articleId, feedId, settings, articleInfo)
+                console.log(`[ContentViewPool] Starting FullContent prefetch for ${articleId} at index ${articleIndex}`)
+                this.prefetchFullContent(articleId, feedId, settings, articleInfo, articleIndex)
             } else if (articleId && url) {
                 // Webpage or RSS mode: use URL directly
-                this.prefetch(articleId, url, feedId, settings)
+                this.prefetch(articleId, url, feedId, settings, articleIndex)
             } else {
                 console.log(`[ContentViewPool] Prefetch info incomplete, skipping`)
             }
@@ -2013,6 +2049,7 @@ export class ContentViewPool {
             const active = this.getActiveView()
             if (active) {
                 const articleId = active.articleId
+                const articleIndex = active.articleIndex
                 const url = active.getWebContents()?.getURL()
                 if (articleId && url) {
                     // Recycle and reload
@@ -2023,7 +2060,7 @@ export class ContentViewPool {
                         visualZoom: this.visualZoomEnabled,
                         mobileMode: this.mobileMode,
                         showZoomOverlay: false
-                    }, isMobileUserAgentEnabled())
+                    }, isMobileUserAgentEnabled(), articleIndex)
                     return true
                 }
             }

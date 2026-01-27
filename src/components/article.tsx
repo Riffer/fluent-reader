@@ -1747,6 +1747,11 @@ a:hover { text-decoration: underline; }
                 case "Escape":
                     this.props.dismiss()
                     break
+                case "F5":
+                    // Forward F5 to main window to trigger feed refresh
+                    // The nav component listens for F5 on document.keydown
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5' }))
+                    break
                 case "ArrowLeft":
                 case "ArrowRight":
                     // Ignore key repeat (held key) for article navigation
@@ -3471,8 +3476,8 @@ window.__articleData = ${JSON.stringify({
                                     🔍 {this.getZoomDisplayText()}
                                 </span>
                             )}
-                            {/* View ID Badge (Debug) */}
-                            {this.state.activeViewId && (
+                            {/* View ID Badge (Debug) - Only shown in development */}
+                            {process.env.NODE_ENV !== 'production' && this.state.activeViewId && (
                                 <span 
                                     className="view-badge"
                                     style={{
