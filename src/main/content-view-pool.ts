@@ -115,6 +115,7 @@ export class ContentViewPool {
     private readingDirection: ReadingDirection = 'unknown'
     private currentArticleIndex: number = -1
     private articleListLength: number = 0
+    private currentSourceId: number | null = null  // Current feed group/view ID for cache invalidation
     
     // === Prefetch Timer ===
     private prefetchTimer: NodeJS.Timeout | null = null
@@ -792,10 +793,18 @@ export class ContentViewPool {
         feedId: string | null,
         settings: NavigationSettings,
         articleIndex: number,
-        listLength: number
+        listLength: number,
+        sourceId: number | null = null
     ): Promise<boolean> {
         // Cancel any pending prefetch
         this.cancelPrefetch()
+        
+        // Check if source/feed group changed - invalidate cache if so
+        if (sourceId !== null && this.currentSourceId !== null && sourceId !== this.currentSourceId) {
+            console.log(`[ContentViewPool] Source changed: ${this.currentSourceId} -> ${sourceId}, invalidating cache`)
+            this.invalidateCacheOnSourceChange()
+        }
+        this.currentSourceId = sourceId
         
         // Reset input mode on article change (user may have left it on)
         if (this.inputModeActive) {
@@ -1227,6 +1236,36 @@ export class ContentViewPool {
             this.prefetchTimer = null
         }
         this.pendingPrefetch = []
+    }
+    
+    /**
+     * Invalidate cache when user switches to a different feed group/source
+     * This recycles all non-active views to free memory and ensure
+     * fresh prefetch for the new context
+     */
+    private invalidateCacheOnSourceChange(): void {
+        let recycledCount = 0
+        
+        for (const view of this.views) {
+            // Don't recycle the active view - it will be replaced by the new navigation
+            if (view.isActive) continue
+            
+            // Recycle any view that has content
+            if (!view.isEmpty) {
+                console.log(`[ContentViewPool] Recycling ${view.id} (was: ${view.articleId}) on source change`)
+                view.recycle()
+                recycledCount++
+            }
+        }
+        
+        // Clear protection sets - old prefetch targets are no longer relevant
+        this.protectedArticleIds.clear()
+        this.pendingPrefetchArticleIds.clear()
+        
+        // Reset reading direction - new context, unknown direction
+        this.readingDirection = 'unknown'
+        
+        console.log(`[ContentViewPool] Cache invalidated: ${recycledCount} views recycled`)
     }
     
     /**
@@ -1718,9 +1757,9 @@ export class ContentViewPool {
         })
         
         // Navigate to article
-        ipcMain.handle('cvp-navigate', async (event, articleId, url, feedId, settings, index, listLength) => {
-            console.log(`[ContentViewPool] IPC cvp-navigate received: articleId=${articleId}, index=${index}`)
-            return this.navigateToArticle(articleId, url, feedId, settings, index, listLength)
+        ipcMain.handle('cvp-navigate', async (event, articleId, url, feedId, settings, index, listLength, sourceId) => {
+            console.log(`[ContentViewPool] IPC cvp-navigate received: articleId=${articleId}, index=${index}, source=${sourceId}`)
+            return this.navigateToArticle(articleId, url, feedId, settings, index, listLength, sourceId)
         })
         
         // Prefetch article

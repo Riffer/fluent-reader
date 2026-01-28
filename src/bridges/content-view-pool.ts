@@ -101,6 +101,7 @@ export const contentViewPoolBridge = {
      * @param settings - Navigation settings (zoom, etc.)
      * @param articleIndex - Current article index in list
      * @param listLength - Total articles in list
+     * @param sourceId - Source/Group ID (to detect feed group changes)
      */
     navigateToArticle: (
         articleId: string,
@@ -108,9 +109,10 @@ export const contentViewPoolBridge = {
         feedId: string | null,
         settings: NavigationSettings,
         articleIndex: number,
-        listLength: number
+        listLength: number,
+        sourceId: number | null = null
     ): Promise<boolean> => {
-        console.log(`[ContentViewPool Bridge] navigateToArticle: ${articleId}, index=${articleIndex}`)
+        console.log(`[ContentViewPool Bridge] navigateToArticle: ${articleId}, index=${articleIndex}, source=${sourceId}`)
         return ipcRenderer.invoke(
             "cvp-navigate",
             articleId,
@@ -118,7 +120,8 @@ export const contentViewPoolBridge = {
             feedId,
             settings,
             articleIndex,
-            listLength
+            listLength,
+            sourceId
         )
     },
     

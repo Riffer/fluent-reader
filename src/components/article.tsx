@@ -381,8 +381,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const settings = this.getNavigationSettings();
         const { articleIndex = -1, listLength = 0, feedId = null } = this.props;
         const artId = articleId || String(this.props.item?._id) || 'unknown';
+        const sourceId = this.props.source?.sid ?? null;  // Current feed group/view ID
         
-        console.log(`[Article] Pool navigate: ${artId} (${articleIndex}/${listLength})`);
+        console.log(`[Article] Pool navigate: ${artId} (${articleIndex}/${listLength}, source=${sourceId})`);
         
         // Set visible first - Pool will apply stored bounds when available
         window.contentViewPool.setVisible(true);
@@ -397,7 +398,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             feedId,
             settings,
             articleIndex,
-            listLength
+            listLength,
+            sourceId
         ).catch((err: any) => {
             console.error("[Article] Pool navigation failed:", err);
         });
