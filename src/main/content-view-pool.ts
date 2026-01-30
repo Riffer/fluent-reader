@@ -1001,8 +1001,15 @@ export class ContentViewPool {
         
         // Load in background
         freeView.load(url, articleId, feedId, settings, isMobileUserAgentEnabled(), articleIndex)
+            .then(() => {
+                // Remove from pending set after successful load
+                this.pendingPrefetchArticleIds.delete(articleId)
+                // Keep in protectedArticleIds - will be cleared on next executePrefetch()
+            })
             .catch(err => {
                 console.error(`[ContentViewPool] Prefetch failed for ${articleId}:`, err)
+                // Remove from pending set on failure too
+                this.pendingPrefetchArticleIds.delete(articleId)
             })
     }
     
@@ -1085,8 +1092,12 @@ export class ContentViewPool {
             await freeView.load(dataUrl, articleId, feedId, settings, false, articleIndex)
             
             console.log(`[ContentViewPool] FullContent prefetch complete: ${articleId}`)
+            // Remove from pending set after successful load
+            this.pendingPrefetchArticleIds.delete(articleId)
         } catch (err) {
             console.error(`[ContentViewPool] FullContent prefetch failed for ${articleId}:`, err)
+            // Remove from pending set on failure too
+            this.pendingPrefetchArticleIds.delete(articleId)
             // On error, the view stays empty/error state
         }
     }

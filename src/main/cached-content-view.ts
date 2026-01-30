@@ -396,8 +396,12 @@ export class CachedContentView {
             const timeout = setTimeout(() => {
                 console.warn(`[CachedContentView:${this.id}] Load timeout after 30s`)
                 cleanup()
-                // Resolve anyway - partial content is better than nothing
-                resolve()
+                // Set error status so view can be recycled
+                const err = new Error('Load timeout after 30s')
+                this._loadError = err
+                this.setStatus('error')
+                this.onLoadError?.(err)
+                resolve()  // Resolve (not reject) to not crash prefetch chain
             }, 30000)
             
             // Handler for dom-ready
