@@ -123,6 +123,15 @@ export class ContentViewPool {
     private protectedArticleIds: Set<string> = new Set()  // Articles that should not be recycled (prefetch targets)
     private pendingPrefetchArticleIds: Set<string> = new Set()  // ArticleIds being prefetched right now
     
+    // === Cascaded Prefetch ===
+    private prefetchQueue: number[] = []  // Queue of article indices to prefetch (prioritized)
+    private prefetchInProgress: string | null = null  // Currently prefetching articleId
+    private cascadedPrefetchEnabled: boolean = true  // Enable/disable cascaded mode
+    
+    // === Prefetch Status Tracking ===
+    private prefetchTargets: number[] = []  // All prefetch target indices (for status)
+    private prefetchCompletedIndices: Set<number> = new Set()  // Completed prefetch indices
+    
     // === Zoom State ===
     private cssZoomLevel: number = 0
     private visualZoomEnabled: boolean = false
@@ -1005,11 +1014,17 @@ export class ContentViewPool {
                 // Remove from pending set after successful load
                 this.pendingPrefetchArticleIds.delete(articleId)
                 // Keep in protectedArticleIds - will be cleared on next executePrefetch()
+                
+                // Cascaded prefetch: trigger next item (with index for status tracking)
+                this.onPrefetchComplete(articleId, articleIndex)
             })
             .catch(err => {
                 console.error(`[ContentViewPool] Prefetch failed for ${articleId}:`, err)
                 // Remove from pending set on failure too
                 this.pendingPrefetchArticleIds.delete(articleId)
+                
+                // Cascaded prefetch: continue with next even on failure
+                this.onPrefetchComplete(articleId, articleIndex)
             })
     }
     
@@ -1094,11 +1109,17 @@ export class ContentViewPool {
             // console.log(`[ContentViewPool] FullContent prefetch complete: ${articleId}`)
             // Remove from pending set after successful load
             this.pendingPrefetchArticleIds.delete(articleId)
+            
+            // Cascaded prefetch: trigger next item (with index for status tracking)
+            this.onPrefetchComplete(articleId, articleIndex)
         } catch (err) {
             console.error(`[ContentViewPool] FullContent prefetch failed for ${articleId}:`, err)
             // Remove from pending set on failure too
             this.pendingPrefetchArticleIds.delete(articleId)
             // On error, the view stays empty/error state
+            
+            // Cascaded prefetch: continue with next even on failure (with index for status tracking)
+            this.onPrefetchComplete(articleId, articleIndex)
         }
     }
     
@@ -1247,6 +1268,10 @@ export class ContentViewPool {
             this.prefetchTimer = null
         }
         this.pendingPrefetch = []
+        
+        // Cancel cascaded prefetch queue
+        this.prefetchQueue = []
+        this.prefetchInProgress = null
     }
     
     /**
@@ -1289,6 +1314,10 @@ export class ContentViewPool {
      * the current article and its neighbors from being recycled. This prevents
      * a race condition where the primary prefetch recycles a view that holds
      * an article needed by the secondary prefetch.
+     * 
+     * CASCADED MODE: Instead of requesting all targets in parallel, we queue them
+     * and process one at a time. This prioritizes the most likely next article
+     * and reduces network/CPU load.
      */
     private executePrefetch(): void {
         // console.log(`[ContentViewPool] executePrefetch() - index=${this.currentArticleIndex}, listLength=${this.articleListLength}, direction=${this.readingDirection}`)
@@ -1301,6 +1330,18 @@ export class ContentViewPool {
         const targets = this.determinePrefetchTargets()
         
         // console.log(`[ContentViewPool] Prefetch targets:`, targets)
+        
+        // Track targets for status reporting
+        this.prefetchTargets = [...targets]
+        this.prefetchCompletedIndices.clear()
+        
+        // Pre-populate completedIndices with targets that are ALREADY ready in the pool
+        // This prevents the status from showing "red" when the next article is actually cached
+        for (const targetIndex of targets) {
+            if (this.isArticleIndexReady(targetIndex)) {
+                this.prefetchCompletedIndices.add(targetIndex)
+            }
+        }
         
         // Update protected articles:
         // Only protect the ACTIVE article. The pending prefetch articleIds will be
@@ -1319,12 +1360,147 @@ export class ContentViewPool {
         //     `${v.id}: ${v.articleId?.substring(0, 8) || 'empty'} (${v.status}${v.isActive ? ', ACTIVE' : ''})`
         // ).join(', '))
         
-        // Request prefetch info from renderer for all targets
-        // The renderer knows the article URLs
-        // console.log(`[ContentViewPool] Requesting prefetch info for ${targets.length} targets: [${targets.join(', ')}]`)
-        for (const targetIndex of targets) {
-            this.sendToRenderer('cvp-request-prefetch-info', targetIndex)
+        // Filter out already-ready targets from the queue
+        const targetsToFetch = targets.filter(idx => !this.prefetchCompletedIndices.has(idx))
+        
+        if (this.cascadedPrefetchEnabled) {
+            // CASCADED MODE: Queue only targets that need fetching
+            this.prefetchQueue = [...targetsToFetch]
+            this.prefetchInProgress = null
+            console.log(`[ContentViewPool] Cascaded prefetch: ${this.prefetchCompletedIndices.size} already ready, queued ${targetsToFetch.length} targets: [${targetsToFetch.join(', ')}]`)
+            
+            // Send initial status (some may already be complete)
+            this.sendPrefetchStatus()
+            
+            this.processNextPrefetch()
+        } else {
+            // PARALLEL MODE (original): Request only targets that need fetching
+            // console.log(`[ContentViewPool] Requesting prefetch info for ${targetsToFetch.length} targets: [${targetsToFetch.join(', ')}]`)
+            for (const targetIndex of targetsToFetch) {
+                this.sendToRenderer('cvp-request-prefetch-info', targetIndex)
+            }
+            // Send initial status
+            this.sendPrefetchStatus()
         }
+    }
+    
+    /**
+     * Process the next item in the prefetch queue (cascaded mode)
+     */
+    private processNextPrefetch(): void {
+        if (!this.cascadedPrefetchEnabled) return
+        
+        // If something is already in progress, wait for it
+        if (this.prefetchInProgress) {
+            console.log(`[ContentViewPool] Cascaded prefetch: waiting for ${this.prefetchInProgress.substring(0, 8)} to complete`)
+            return
+        }
+        
+        // Get next target from queue
+        const nextTarget = this.prefetchQueue.shift()
+        if (nextTarget === undefined) {
+            console.log(`[ContentViewPool] Cascaded prefetch: queue empty, done`)
+            return
+        }
+        
+        console.log(`[ContentViewPool] Cascaded prefetch: requesting index ${nextTarget} (${this.prefetchQueue.length} remaining)`)
+        this.sendToRenderer('cvp-request-prefetch-info', nextTarget)
+    }
+    
+    /**
+     * Called when a prefetch completes (view becomes ready)
+     * Triggers the next item in the cascade
+     */
+    onPrefetchComplete(articleId: string, articleIndex?: number): void {
+        // Track completion by index
+        if (articleIndex !== undefined && articleIndex >= 0) {
+            this.prefetchCompletedIndices.add(articleIndex)
+        }
+        
+        // Send updated status
+        this.sendPrefetchStatus()
+        
+        if (!this.cascadedPrefetchEnabled) return
+        
+        if (this.prefetchInProgress === articleId) {
+            console.log(`[ContentViewPool] Cascaded prefetch: ${articleId.substring(0, 8)} complete, processing next`)
+            this.prefetchInProgress = null
+            this.processNextPrefetch()
+        }
+    }
+    
+    /**
+     * Calculate and send prefetch status to renderer
+     * Used for visual feedback (traffic light indicator)
+     */
+    private sendPrefetchStatus(): void {
+        const direction = this.readingDirection
+        const currentIndex = this.currentArticleIndex
+        const totalTargets = this.prefetchTargets.length
+        const completedCount = this.prefetchCompletedIndices.size
+        
+        // Determine "next" article based on direction
+        let nextIndex = -1
+        if (direction === 'forward' && currentIndex < this.articleListLength - 1) {
+            nextIndex = currentIndex + 1
+        } else if (direction === 'backward' && currentIndex > 0) {
+            nextIndex = currentIndex - 1
+        } else if (direction === 'unknown') {
+            // Both directions possible - check both neighbors
+            nextIndex = -1  // Special case: will check both
+        }
+        
+        // Check if next article is ready
+        let nextArticleReady = false
+        if (direction === 'unknown') {
+            // For unknown: both neighbors must be ready (if they exist)
+            const forwardReady = currentIndex >= this.articleListLength - 1 || 
+                this.isArticleIndexReady(currentIndex + 1)
+            const backwardReady = currentIndex <= 0 || 
+                this.isArticleIndexReady(currentIndex - 1)
+            nextArticleReady = forwardReady && backwardReady
+        } else if (nextIndex >= 0) {
+            nextArticleReady = this.isArticleIndexReady(nextIndex)
+        } else {
+            // No next article (at list boundary)
+            nextArticleReady = true
+        }
+        
+        // Calculate queue length (remaining items)
+        const queueLength = this.prefetchQueue.length + (this.prefetchInProgress ? 1 : 0)
+        
+        const status = {
+            direction,
+            nextArticleReady,
+            nextIndex,
+            queueLength,
+            totalTargets,
+            completedCount,
+            loadingArticleId: this.prefetchInProgress,
+            targets: this.prefetchTargets,
+            completedIndices: Array.from(this.prefetchCompletedIndices)
+        }
+        
+        console.log(`[ContentViewPool] Sending prefetch status:`, status)
+        this.sendToRenderer('cvp-prefetch-status', status)
+    }
+    
+    /**
+     * Check if an article at given index is ready in the pool
+     * First checks by articleIndex, then by completed indices
+     */
+    private isArticleIndexReady(index: number): boolean {
+        // Find view by articleIndex (set during load)
+        for (const view of this.views) {
+            if (view.articleIndex === index && view.isReady) {
+                return true
+            }
+        }
+        // Also check if it was completed in this prefetch cycle
+        if (this.prefetchCompletedIndices.has(index)) {
+            return true
+        }
+        return false
     }
     
     /**
@@ -1789,6 +1965,11 @@ export class ContentViewPool {
             if (articleId) {
                 this.pendingPrefetchArticleIds.add(articleId)
                 // console.log(`[ContentViewPool] Added ${articleId} to pending prefetch set:`, Array.from(this.pendingPrefetchArticleIds))
+                
+                // Cascaded prefetch: mark this article as in-progress
+                if (this.cascadedPrefetchEnabled) {
+                    this.prefetchInProgress = articleId
+                }
             }
             
             if (articleId && articleInfo?.openTarget === PrefetchOpenTarget.FullContent) {
@@ -1800,6 +1981,11 @@ export class ContentViewPool {
                 this.prefetch(articleId, url, feedId, settings, articleIndex)
             } else {
                 // console.log(`[ContentViewPool] Prefetch info incomplete, skipping`)
+                // Cascaded prefetch: if no valid prefetch, continue with next
+                if (this.cascadedPrefetchEnabled && this.prefetchInProgress === articleId) {
+                    this.prefetchInProgress = null
+                    this.processNextPrefetch()
+                }
             }
         })
         

@@ -104,6 +104,16 @@ type ArticleState = {
     isNavigatingWithVisualZoom: boolean  // Show loading spinner during Visual Zoom navigation
     videoFullscreen: boolean  // Video playing in fullscreen mode (ContentView fills window)
     activeViewId: string | null  // Currently active ContentView ID (for debug badge)
+    // Prefetch status for traffic light indicator
+    prefetchStatus: {
+        direction: 'forward' | 'backward' | 'unknown'
+        nextArticleReady: boolean
+        queueLength: number
+        totalTargets: number
+        completedCount: number
+        targets: number[]
+        completedIndices: number[]
+    } | null
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -246,6 +256,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             isNavigatingWithVisualZoom: false,
             videoFullscreen: false,
             activeViewId: null,
+            prefetchStatus: null,
         }
 
         // IPC listener for zoom changes from preload script or ContentViewPool
@@ -347,6 +358,104 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         } catch (e) {
             return `Zoom: ${this.getZoomDisplayText()}`;
         }
+    }
+    
+    /**
+     * Render prefetch status indicator (traffic light)
+     * - Red: Next article not ready
+     * - Yellow: Next ready, but prefetch still in progress
+     * - Green: All done
+     * - Circle (○) instead of dot (●) when direction is unknown
+     */
+    private renderPrefetchIndicator = () => {
+        const status = this.state.prefetchStatus;
+        
+        // No status = show gray dot (waiting for data)
+        if (!status) {
+            return (
+                <span
+                    className="prefetch-indicator"
+                    style={{
+                        marginLeft: 8,
+                        fontSize: 14,
+                        color: '#888',
+                        cursor: 'default',
+                        userSelect: 'none',
+                    }}
+                    title="Prefetch: Warte auf Status..."
+                >
+                    ○
+                </span>
+            );
+        }
+        
+        // No targets = no indicator needed
+        if (status.totalTargets === 0) {
+            return null;
+        }
+        
+        const { direction, nextArticleReady, queueLength, totalTargets, completedCount, targets, completedIndices } = status;
+        
+        // Determine color based on:
+        // - Red: Next article not ready (highest priority for user)
+        // - Yellow: Next ready, but prefetch queue not empty
+        // - Green: Next ready AND queue empty (even if not all targets completed due to errors)
+        let color: string;
+        let statusText: string;
+        
+        if (!nextArticleReady) {
+            // Red: Next article not ready - user would have to wait
+            color = '#d13438';  // Fluent Red
+            statusText = 'Nächster Artikel lädt noch';
+        } else if (queueLength > 0) {
+            // Yellow: Next ready, but still prefetching others
+            color = '#ffb900';  // Fluent Yellow
+            statusText = `Nächster bereit, noch ${queueLength} laden`;
+        } else {
+            // Green: Next ready and queue empty
+            color = '#107c10';  // Fluent Green
+            statusText = completedCount === totalTargets 
+                ? 'Alle Artikel bereit' 
+                : `Prefetch fertig (${completedCount}/${totalTargets})`;
+        }
+        
+        // Build tooltip
+        const directionText = direction === 'forward' ? '→ vorwärts' 
+            : direction === 'backward' ? '← rückwärts' 
+            : '↔ unbekannt';
+        
+        const targetsList = targets.map(idx => {
+            const isComplete = completedIndices.includes(idx);
+            return `  ${isComplete ? '✓' : '○'} Index ${idx}`;
+        }).join('\n');
+        
+        const tooltip = [
+            `Prefetch Status: ${statusText}`,
+            `Richtung: ${directionText}`,
+            `Fortschritt: ${completedCount}/${totalTargets}`,
+            '',
+            'Targets:',
+            targetsList
+        ].join('\n');
+        
+        // Use circle (○) for unknown direction, dot (●) for known
+        const symbol = direction === 'unknown' ? '○' : '●';
+        
+        return (
+            <span
+                className="prefetch-indicator"
+                style={{
+                    marginLeft: 8,
+                    fontSize: 12,
+                    color: color,
+                    cursor: 'default',
+                    userSelect: 'none',
+                }}
+                title={tooltip}
+            >
+                {symbol}
+            </span>
+        );
     }
     
     /**
@@ -611,6 +720,16 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         };
         ipc.on('cvp-error', onPoolError);
         this.contentViewCleanup.push(() => ipc.removeListener('cvp-error', onPoolError));
+        
+        // Prefetch status updates (for traffic light indicator)
+        const onPrefetchStatus = (_event: any, status: ArticleState['prefetchStatus']) => {
+            console.log('[Article] Received prefetch status:', status);
+            if (this._isMounted) {
+                this.setState({ prefetchStatus: status });
+            }
+        };
+        ipc.on('cvp-prefetch-status', onPrefetchStatus);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-prefetch-status', onPrefetchStatus));
         
         // Prefetch info request from Pool
         const onPrefetchRequest = (_event: any, articleIndex: number) => {
@@ -3458,6 +3577,8 @@ window.__articleData = ${JSON.stringify({
                                     ⌨ EINGABE
                                 </span>
                             )}
+                            {/* Prefetch Status Indicator (Traffic Light) */}
+                            {this.renderPrefetchIndicator()}
                             {/* Zoom Badge with viewport tooltip */}
                             {(this.state.zoom !== undefined && this.state.zoom !== 0) && (
                                 <span 

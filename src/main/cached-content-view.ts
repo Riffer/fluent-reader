@@ -311,7 +311,9 @@ export class CachedContentView {
         // Reset load state
         this._loadError = null
         this._loadStartTime = 0
-        this._articleIndex = -1
+        // NOTE: Keep _articleIndex - it helps track which index was last loaded
+        // and enables prefetch status to correctly identify already-loaded indices.
+        // It will be overwritten when a new article is loaded.
         
         // Reset settings
         this._loadedWithZoom = 1.0

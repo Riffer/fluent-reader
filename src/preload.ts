@@ -67,6 +67,7 @@ const limitedIpcRenderer = {
             "cvp-navigation-complete",
             "cvp-request-prefetch-info",
             "cvp-error",
+            "cvp-prefetch-status",  // Prefetch status for traffic light indicator
         ]
         if (allowedOnChannels.includes(channel)) {
             ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
