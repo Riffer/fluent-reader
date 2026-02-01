@@ -1373,9 +1373,9 @@ export class ContentViewPool {
         this.prefetchCompletedIndices.clear()
         
         // Debug: Log current view states before pre-population check
-        console.log(`[ContentViewPool] Views before pre-population:`, this.views.map(v => 
-            `${v.id}: idx=${v.articleIndex}, hasLoadedOnce=${v.hasLoadedOnce}, isReady=${v.isReady}, articleId=${v.articleId?.substring(0, 8) || 'empty'}`
-        ))
+        // console.log(`[ContentViewPool] Views before pre-population:`, this.views.map(v => 
+        //     `${v.id}: idx=${v.articleIndex}, hasLoadedOnce=${v.hasLoadedOnce}, isReady=${v.isReady}, articleId=${v.articleId?.substring(0, 8) || 'empty'}`
+        // ))
         
         // Pre-populate completedIndices with targets that are ALREADY ready in the pool
         // This prevents the status from showing "red" when the next article is actually cached
@@ -1409,7 +1409,7 @@ export class ContentViewPool {
             // CASCADED MODE: Queue only targets that need fetching
             this.prefetchQueue = [...targetsToFetch]
             this.prefetchInProgress = null
-            console.log(`[ContentViewPool] Cascaded prefetch: ${this.prefetchCompletedIndices.size} already ready, queued ${targetsToFetch.length} targets: [${targetsToFetch.join(', ')}]`)
+            // console.log(`[ContentViewPool] Cascaded prefetch: ${this.prefetchCompletedIndices.size} already ready, queued ${targetsToFetch.length} targets: [${targetsToFetch.join(', ')}]`)
             
             // Send initial status (some may already be complete)
             this.sendPrefetchStatus()
@@ -1434,20 +1434,20 @@ export class ContentViewPool {
         
         // If something is already in progress, wait for it
         if (this.prefetchInProgress) {
-            console.log(`[ContentViewPool] Cascaded prefetch: waiting for ${this.prefetchInProgress.substring(0, 8)} to complete`)
+            // console.log(`[ContentViewPool] Cascaded prefetch: waiting for ${this.prefetchInProgress.substring(0, 8)} to complete`)
             return
         }
         
         // Get next target from queue
         const nextTarget = this.prefetchQueue.shift()
         if (nextTarget === undefined) {
-            console.log(`[ContentViewPool] Cascaded prefetch: queue empty, prefetchInProgress=${this.prefetchInProgress}, sending final status`)
+            // console.log(`[ContentViewPool] Cascaded prefetch: queue empty, prefetchInProgress=${this.prefetchInProgress}, sending final status`)
             // Send final status with queueLength = 0
             this.sendPrefetchStatus()
             return
         }
         
-        console.log(`[ContentViewPool] Cascaded prefetch: requesting index ${nextTarget} (${this.prefetchQueue.length} remaining)`)
+        // console.log(`[ContentViewPool] Cascaded prefetch: requesting index ${nextTarget} (${this.prefetchQueue.length} remaining)`)
         this.sendToRenderer('cvp-request-prefetch-info', nextTarget)
     }
     
@@ -1470,20 +1470,20 @@ export class ContentViewPool {
         // ALWAYS clear prefetchInProgress and continue chain
         // Even if articleId doesn't match (edge case: early return for already-ready article)
         if (this.prefetchInProgress) {
-            const wasInProgress = this.prefetchInProgress
-            if (wasInProgress === articleId) {
-                console.log(`[ContentViewPool] Cascaded prefetch: ${articleId.substring(0, 8)} complete`)
-            } else {
-                console.log(`[ContentViewPool] Cascaded prefetch: completing ${articleId?.substring(0, 8)} (was expecting ${wasInProgress.substring(0, 8)})`)
-            }
+            // const wasInProgress = this.prefetchInProgress
+            // if (wasInProgress === articleId) {
+            //     console.log(`[ContentViewPool] Cascaded prefetch: ${articleId.substring(0, 8)} complete`)
+            // } else {
+            //     console.log(`[ContentViewPool] Cascaded prefetch: completing ${articleId?.substring(0, 8)} (was expecting ${wasInProgress.substring(0, 8)})`)
+            // }
             this.prefetchInProgress = null
         }
         
-        console.log(`[ContentViewPool] About to send status after completion, queue.length=${this.prefetchQueue.length}`)
+        // console.log(`[ContentViewPool] About to send status after completion, queue.length=${this.prefetchQueue.length}`)
         // Send status AFTER clearing prefetchInProgress so queueLength is correct
         this.sendPrefetchStatus()
         
-        console.log(`[ContentViewPool] Status sent, calling processNextPrefetch`)
+        // console.log(`[ContentViewPool] Status sent, calling processNextPrefetch`)
         this.processNextPrefetch()
     }
     
@@ -1539,7 +1539,7 @@ export class ContentViewPool {
             completedIndices: Array.from(this.prefetchCompletedIndices)
         }
         
-        console.log(`[ContentViewPool] Sending prefetch status:`, status)
+        // console.log(`[ContentViewPool] Sending prefetch status:`, status)
         this.sendToRenderer('cvp-prefetch-status', status)
     }
     
@@ -1552,7 +1552,7 @@ export class ContentViewPool {
         // Find view by articleIndex - use hasLoadedOnce to ignore temporary loading states
         for (const view of this.views) {
             if (view.articleIndex === index) {
-                console.log(`[ContentViewPool] isArticleIndexReady(${index}): found view ${view.id}, hasLoadedOnce=${view.hasLoadedOnce}, isReady=${view.isReady}, articleId=${view.articleId?.substring(0,8)}`)
+                // console.log(`[ContentViewPool] isArticleIndexReady(${index}): found view ${view.id}, hasLoadedOnce=${view.hasLoadedOnce}, isReady=${view.isReady}, articleId=${view.articleId?.substring(0,8)}`)
                 if (view.hasLoadedOnce) {
                     return true
                 }
@@ -1560,10 +1560,10 @@ export class ContentViewPool {
         }
         // Also check if it was completed in this prefetch cycle
         if (this.prefetchCompletedIndices.has(index)) {
-            console.log(`[ContentViewPool] isArticleIndexReady(${index}): in completedIndices`)
+            // console.log(`[ContentViewPool] isArticleIndexReady(${index}): in completedIndices`)
             return true
         }
-        console.log(`[ContentViewPool] isArticleIndexReady(${index}): NOT ready`)
+        // console.log(`[ContentViewPool] isArticleIndexReady(${index}): NOT ready`)
         return false
     }
     
