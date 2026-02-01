@@ -1399,7 +1399,9 @@ export class ContentViewPool {
         // Get next target from queue
         const nextTarget = this.prefetchQueue.shift()
         if (nextTarget === undefined) {
-            console.log(`[ContentViewPool] Cascaded prefetch: queue empty, done`)
+            console.log(`[ContentViewPool] Cascaded prefetch: queue empty, prefetchInProgress=${this.prefetchInProgress}, sending final status`)
+            // Send final status with queueLength = 0
+            this.sendPrefetchStatus()
             return
         }
         
@@ -1417,15 +1419,25 @@ export class ContentViewPool {
             this.prefetchCompletedIndices.add(articleIndex)
         }
         
-        // Send updated status
-        this.sendPrefetchStatus()
-        
-        if (!this.cascadedPrefetchEnabled) return
+        if (!this.cascadedPrefetchEnabled) {
+            // Send updated status for non-cascaded mode
+            this.sendPrefetchStatus()
+            return
+        }
         
         if (this.prefetchInProgress === articleId) {
-            console.log(`[ContentViewPool] Cascaded prefetch: ${articleId.substring(0, 8)} complete, processing next`)
+            console.log(`[ContentViewPool] Cascaded prefetch: ${articleId.substring(0, 8)} complete, setting prefetchInProgress to null`)
             this.prefetchInProgress = null
+            
+            console.log(`[ContentViewPool] About to send status after completion, queue.length=${this.prefetchQueue.length}`)
+            // Send status AFTER clearing prefetchInProgress so queueLength is correct
+            this.sendPrefetchStatus()
+            
+            console.log(`[ContentViewPool] Status sent, calling processNextPrefetch`)
             this.processNextPrefetch()
+        } else {
+            // Not the in-progress item, just send status update
+            this.sendPrefetchStatus()
         }
     }
     
@@ -1487,12 +1499,13 @@ export class ContentViewPool {
     
     /**
      * Check if an article at given index is ready in the pool
-     * First checks by articleIndex, then by completed indices
+     * Uses hasLoadedOnce instead of isReady to ignore temporary "loading" states
+     * caused by ads/videos reloading content.
      */
     private isArticleIndexReady(index: number): boolean {
-        // Find view by articleIndex (set during load)
+        // Find view by articleIndex - use hasLoadedOnce to ignore temporary loading states
         for (const view of this.views) {
-            if (view.articleIndex === index && view.isReady) {
+            if (view.articleIndex === index && view.hasLoadedOnce) {
                 return true
             }
         }

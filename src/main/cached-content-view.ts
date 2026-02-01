@@ -56,6 +56,7 @@ export class CachedContentView {
     private _loadError: Error | null = null
     private _loadStartTime: number = 0
     private _lastUsedAt: number = 0  // Timestamp when view was last activated (for LRU recycling)
+    private _hasLoadedOnce: boolean = false  // True if dom-ready was ever received (survives status changes)
     
     // === Settings at Load Time ===
     private _loadedWithZoom: number = 1.0
@@ -190,6 +191,15 @@ export class CachedContentView {
         return this._status === 'ready'
     }
     
+    /**
+     * Returns true if the view has ever completed loading (dom-ready).
+     * This remains true even if the page is currently reloading due to ads/videos.
+     * Reset only on recycle().
+     */
+    get hasLoadedOnce(): boolean {
+        return this._hasLoadedOnce
+    }
+    
     get isEmpty(): boolean {
         return this._status === 'empty'
     }
@@ -311,6 +321,7 @@ export class CachedContentView {
         // Reset load state
         this._loadError = null
         this._loadStartTime = 0
+        this._hasLoadedOnce = false  // Reset - this view needs to load fresh
         // NOTE: Keep _articleIndex - it helps track which index was last loaded
         // and enables prefetch status to correctly identify already-loaded indices.
         // It will be overwritten when a new article is loaded.
@@ -958,6 +969,7 @@ export class CachedContentView {
                 // console.log(`[CachedContentView:${this.id}] DOM ready (${loadTime.toFixed(0)}ms)`)
                 
                 this.setStatus('ready')
+                this._hasLoadedOnce = true  // Mark that we've successfully loaded once
                 this.onDomReady?.()
                 
                 // Apply Device Emulation if Visual Zoom is enabled
