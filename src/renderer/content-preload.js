@@ -1590,13 +1590,13 @@ try {
       singleImageExpandPending = true;
     }
     
-    // If already active, apply immediately after short delay
-    if (isActiveView && (galleryExpandPending || singleImageExpandPending)) {
+    // Apply immediately after delay - works both active and offscreen (prefetch)
+    // DOM clicks work offscreen, so we can expand galleries during prefetch
+    if (galleryExpandPending || singleImageExpandPending) {
       setTimeout(() => {
         applyRedditExpands();
-      }, 2000);  // 2 seconds for initial active view
+      }, 2000);  // 2 seconds to let page render
     }
-    // Otherwise, onViewBecameActive will handle it when view is shown
   }
 
   let cookieConsentObserver = null;
