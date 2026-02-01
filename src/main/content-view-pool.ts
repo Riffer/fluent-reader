@@ -808,12 +808,11 @@ export class ContentViewPool {
         // Cancel any pending prefetch
         this.cancelPrefetch()
         
-        // Check if source/feed group changed - invalidate cache if so
-        if (sourceId !== null && this.currentSourceId !== null && sourceId !== this.currentSourceId) {
-            // console.log(`[ContentViewPool] Source changed: ${this.currentSourceId} -> ${sourceId}, invalidating cache`)
-            this.invalidateCacheOnSourceChange()
-        }
-        this.currentSourceId = sourceId
+        // NOTE: We no longer invalidate cache on sourceId change.
+        // Lists can contain articles from multiple feeds (e.g., "All Articles").
+        // Navigating within such a list changes sourceId but should NOT clear the cache.
+        // View parameters (zoom etc.) are adjusted per-navigation based on feed settings.
+        // The LRU mechanism handles view recycling appropriately.
         
         // Reset input mode on article change (user may have left it on)
         if (this.inputModeActive) {
@@ -836,8 +835,10 @@ export class ContentViewPool {
         // ).join(', '))
         
         // Check if article is already cached
+        // Use hasLoadedOnce instead of isReady to handle pages that temporarily "load"
+        // due to ads/videos refreshing - the content is still usable
         const cachedView = this.getViewByArticleId(articleId)
-        if (cachedView && cachedView.isReady) {
+        if (cachedView && cachedView.hasLoadedOnce) {
             // Instant swap!
             // console.log(`[ContentViewPool] Cache HIT - instant swap to ${cachedView.id}`)
             
@@ -951,13 +952,23 @@ export class ContentViewPool {
             // Check the status of the existing view
             switch (existingView.status) {
                 case 'ready':
-                    // Already loaded - skip
+                    // Already loaded - mark complete and continue cascade
                     // console.log(`[ContentViewPool] Prefetch skip - already ready: ${articleId}`)
+                    this.onPrefetchComplete(articleId, articleIndex)
                     return
                 case 'loading':
-                    // Currently loading - skip, will be ready soon
-                    // console.log(`[ContentViewPool] Prefetch skip - already loading: ${articleId}`)
-                    return
+                    // Currently loading - check if it's stuck (stale)
+                    if (existingView.isStaleLoading) {
+                        console.warn(`[ContentViewPool] Prefetch: view ${existingView.id} is stale loading (> 60s), recycling`)
+                        existingView.recycle()
+                        viewToUse = existingView
+                    } else {
+                        // Still loading normally - the load's completion will trigger onPrefetchComplete
+                        // Don't call onPrefetchComplete here - wait for the load to finish
+                        // console.log(`[ContentViewPool] Prefetch skip - already loading: ${articleId}`)
+                        return
+                    }
+                    break
                 case 'error':
                     // Previous load failed - recycle and try again
                     // console.log(`[ContentViewPool] Prefetch retry - previous load failed: ${articleId}`)
@@ -985,19 +996,30 @@ export class ContentViewPool {
         }
         
         if (!freeView) {
-            // console.log(`[ContentViewPool] Prefetch skip - no free view for: ${articleId}`)
+            // No free view - mark as complete anyway so cascade continues
+            console.warn(`[ContentViewPool] Prefetch skip - no free view for: ${articleId}`)
+            this.onPrefetchComplete(articleId, articleIndex)
             return
         }
         
         // console.log(`[ContentViewPool] Prefetch: ${articleId} in ${freeView.id}`)
         
-        // Recycle the view if it has old content (but not if protected or pending!)
+        // Recycle the view if it has old content (but not if protected, pending, or target!)
         if (!freeView.isEmpty) {
             if (freeView.articleId && (
                 this.protectedArticleIds.has(freeView.articleId) || 
                 this.pendingPrefetchArticleIds.has(freeView.articleId)
             )) {
-                // console.log(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds protected/pending article ${freeView.articleId}`)
+                // View holds protected article - mark as complete so cascade continues
+                console.warn(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds protected/pending article ${freeView.articleId}`)
+                this.onPrefetchComplete(articleId, articleIndex)
+                return
+            }
+            // Don't recycle if view holds ready content for a current prefetch target
+            if (freeView.hasLoadedOnce && freeView.articleIndex >= 0 && this.prefetchTargets.includes(freeView.articleIndex)) {
+                // View holds target content - mark as complete so cascade continues
+                console.warn(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds ready target index ${freeView.articleIndex}`)
+                this.onPrefetchComplete(articleId, articleIndex)
                 return
             }
             freeView.recycle()
@@ -1039,12 +1061,16 @@ export class ContentViewPool {
         articleInfo: PrefetchArticleInfo,
         articleIndex: number = -1
     ): Promise<void> {
-        if (!this.config.enabled) return
+        if (!this.config.enabled) {
+            this.onPrefetchComplete(articleId, articleIndex)
+            return
+        }
         
         // Check if article is already in a view
         const existingView = this.getViewByArticleId(articleId)
         if (existingView && (existingView.status === 'ready' || existingView.status === 'loading')) {
             // console.log(`[ContentViewPool] FullContent prefetch skip - already ${existingView.status}: ${articleId}`)
+            this.onPrefetchComplete(articleId, articleIndex)
             return
         }
         
@@ -1060,6 +1086,7 @@ export class ContentViewPool {
         
         if (!freeView) {
             // console.log(`[ContentViewPool] FullContent prefetch skip - no free view for: ${articleId}`)
+            this.onPrefetchComplete(articleId, articleIndex)
             return
         }
         
@@ -1183,16 +1210,26 @@ export class ContentViewPool {
      */
     private updateReadingDirection(newIndex: number, listLength: number): void {
         const oldIndex = this.currentArticleIndex
+        const oldListLength = this.articleListLength
         
-        // First navigation or index not set yet
-        if (oldIndex < 0) {
+        // Detect list change: different list length suggests a new list
+        // When entering a new list, reset direction based on position
+        const isNewList = listLength !== oldListLength
+        
+        // First navigation, list change, or index not set yet
+        if (oldIndex < 0 || isNewList) {
             // At boundaries, we know the direction
             if (newIndex === 0 && listLength > 1) {
                 this.readingDirection = 'forward'
+                // console.log(`[ContentViewPool] Reading direction: forward (at start of list)`)
             } else if (newIndex === listLength - 1 && listLength > 1) {
                 this.readingDirection = 'backward'
+                // console.log(`[ContentViewPool] Reading direction: backward (at end of list)`)
+            } else {
+                // Middle of list - unknown direction
+                this.readingDirection = 'unknown'
+                // console.log(`[ContentViewPool] Reading direction: unknown (middle of list)`)
             }
-            // Otherwise keep unknown
             return
         }
         
@@ -1335,6 +1372,11 @@ export class ContentViewPool {
         this.prefetchTargets = [...targets]
         this.prefetchCompletedIndices.clear()
         
+        // Debug: Log current view states before pre-population check
+        console.log(`[ContentViewPool] Views before pre-population:`, this.views.map(v => 
+            `${v.id}: idx=${v.articleIndex}, hasLoadedOnce=${v.hasLoadedOnce}, isReady=${v.isReady}, articleId=${v.articleId?.substring(0, 8) || 'empty'}`
+        ))
+        
         // Pre-populate completedIndices with targets that are ALREADY ready in the pool
         // This prevents the status from showing "red" when the next article is actually cached
         for (const targetIndex of targets) {
@@ -1425,20 +1467,24 @@ export class ContentViewPool {
             return
         }
         
-        if (this.prefetchInProgress === articleId) {
-            console.log(`[ContentViewPool] Cascaded prefetch: ${articleId.substring(0, 8)} complete, setting prefetchInProgress to null`)
+        // ALWAYS clear prefetchInProgress and continue chain
+        // Even if articleId doesn't match (edge case: early return for already-ready article)
+        if (this.prefetchInProgress) {
+            const wasInProgress = this.prefetchInProgress
+            if (wasInProgress === articleId) {
+                console.log(`[ContentViewPool] Cascaded prefetch: ${articleId.substring(0, 8)} complete`)
+            } else {
+                console.log(`[ContentViewPool] Cascaded prefetch: completing ${articleId?.substring(0, 8)} (was expecting ${wasInProgress.substring(0, 8)})`)
+            }
             this.prefetchInProgress = null
-            
-            console.log(`[ContentViewPool] About to send status after completion, queue.length=${this.prefetchQueue.length}`)
-            // Send status AFTER clearing prefetchInProgress so queueLength is correct
-            this.sendPrefetchStatus()
-            
-            console.log(`[ContentViewPool] Status sent, calling processNextPrefetch`)
-            this.processNextPrefetch()
-        } else {
-            // Not the in-progress item, just send status update
-            this.sendPrefetchStatus()
         }
+        
+        console.log(`[ContentViewPool] About to send status after completion, queue.length=${this.prefetchQueue.length}`)
+        // Send status AFTER clearing prefetchInProgress so queueLength is correct
+        this.sendPrefetchStatus()
+        
+        console.log(`[ContentViewPool] Status sent, calling processNextPrefetch`)
+        this.processNextPrefetch()
     }
     
     /**
@@ -1505,14 +1551,19 @@ export class ContentViewPool {
     private isArticleIndexReady(index: number): boolean {
         // Find view by articleIndex - use hasLoadedOnce to ignore temporary loading states
         for (const view of this.views) {
-            if (view.articleIndex === index && view.hasLoadedOnce) {
-                return true
+            if (view.articleIndex === index) {
+                console.log(`[ContentViewPool] isArticleIndexReady(${index}): found view ${view.id}, hasLoadedOnce=${view.hasLoadedOnce}, isReady=${view.isReady}, articleId=${view.articleId?.substring(0,8)}`)
+                if (view.hasLoadedOnce) {
+                    return true
+                }
             }
         }
         // Also check if it was completed in this prefetch cycle
         if (this.prefetchCompletedIndices.has(index)) {
+            console.log(`[ContentViewPool] isArticleIndexReady(${index}): in completedIndices`)
             return true
         }
+        console.log(`[ContentViewPool] isArticleIndexReady(${index}): NOT ready`)
         return false
     }
     
@@ -1628,14 +1679,23 @@ export class ContentViewPool {
         
         // Find the oldest (LRU) view that's not:
         // - Active
-        // - Loading
+        // - Loading (unless stale > 60s)
         // - Protected (in protectedArticleIds or pendingPrefetchArticleIds)
+        // - Holding a ready article that's a prefetch target (preserve cached content!)
         // LRU ensures recently used views are kept
         const candidates = this.views.filter(v => {
             if (v.isActive) return false
-            if (v.isLoading) return false
+            // Allow stale-loading views to be recycled
+            if (v.isLoading && !v.isStaleLoading) return false
             if (v.articleId && this.protectedArticleIds.has(v.articleId)) return false
             if (v.articleId && this.pendingPrefetchArticleIds.has(v.articleId)) return false
+            
+            // Don't recycle views that hold ready content for current prefetch targets
+            // This preserves already-cached articles when starting a new prefetch cycle
+            if (v.hasLoadedOnce && v.articleIndex >= 0 && this.prefetchTargets.includes(v.articleIndex)) {
+                // console.log(`[ContentViewPool] findFreeView: Skipping ${v.id} - holds target index ${v.articleIndex}`)
+                return false
+            }
             
             return true
         })
@@ -1666,6 +1726,12 @@ export class ContentViewPool {
             // Don't recycle if article is pending prefetch
             if (v.articleId && this.pendingPrefetchArticleIds.has(v.articleId)) {
                 // console.log(`[ContentViewPool] Skipping ${v.id} (pending prefetch article ${v.articleId})`)
+                return false
+            }
+            // Don't recycle views that hold ready content for current prefetch targets
+            // This preserves already-cached articles when starting a new prefetch cycle
+            if (v.hasLoadedOnce && v.articleIndex >= 0 && this.prefetchTargets.includes(v.articleIndex)) {
+                // console.log(`[ContentViewPool] Skipping ${v.id} - holds target index ${v.articleIndex}`)
                 return false
             }
             return true

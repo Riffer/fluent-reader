@@ -208,11 +208,17 @@ export class CachedContentView {
         return this._status === 'loading'
     }
     
-    get hasError(): boolean {
-        return this._status === 'error'
+    /**
+     * Returns true if loading has been stuck for too long (> 60 seconds).
+     * This helps detect views that are "zombies" - stuck in loading state
+     * due to network issues or other problems.
+     */
+    get isStaleLoading(): boolean {
+        if (this._status !== 'loading') return false
+        if (this._loadStartTime === 0) return false
+        const elapsed = performance.now() - this._loadStartTime
+        return elapsed > 60000  // 60 seconds
     }
-    
-    // ========== Event Registration ==========
     
     setOnStatusChanged(callback: ((status: CachedViewStatus) => void) | null): void {
         this.onStatusChanged = callback
