@@ -355,6 +355,18 @@ export const contentViewPoolBridge = {
     },
     
     /**
+     * Invalidate prefetched views for a specific feed when settings change.
+     * This recycles all non-active views for the given feedId and triggers re-prefetch.
+     * Use this when feed-specific settings change (mobileMode, openTarget, etc.)
+     * 
+     * @param feedId - The feed ID whose views should be invalidated, or null for all feeds
+     * @param settingName - Optional name of the setting that changed (for logging)
+     */
+    invalidatePrefetchForFeed: (feedId: string | null, settingName?: string): void => {
+        ipcRenderer.send("cvp-invalidate-prefetch-for-feed", feedId, settingName)
+    },
+    
+    /**
      * Load HTML directly
      */
     loadHtml: (html: string, baseURL?: string): Promise<boolean> => {

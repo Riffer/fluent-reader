@@ -1322,6 +1322,11 @@ a:hover { text-decoration: underline; }
         // Use ContentView Pool bridge - this handles User-Agent, Device Emulation, and reload
         if (window.contentViewPool) {
             window.contentViewPool.setMobileMode(newMobileMode);
+            
+            // Invalidate prefetched views for this feed - mobileMode changes User-Agent
+            // which means server returns different HTML, so cached views are stale
+            const feedId = this.props.source?.sid?.toString() || null;
+            window.contentViewPool.invalidatePrefetchForFeed(feedId, 'mobileMode');
         }
     }
 
@@ -2580,6 +2585,9 @@ a:hover { text-decoration: underline; }
                 // Nuke the view before re-initializing (clean slate for mode switch)
                 if (window.contentViewPool) {
                     await window.contentViewPool.nuke();
+                    // Invalidate prefetched views - openTarget change means completely different content
+                    const feedId = sourceSnapshot?.sid?.toString() || null;
+                    window.contentViewPool.invalidatePrefetchForFeed(feedId, 'openTarget');
                 }
                 // Re-initialize ContentView with RSS content
                 this.initializeContentView();
@@ -2607,6 +2615,9 @@ a:hover { text-decoration: underline; }
                 // Nuke the view before re-initializing (clean slate for mode switch)
                 if (window.contentViewPool) {
                     await window.contentViewPool.nuke();
+                    // Invalidate prefetched views - openTarget change means completely different content
+                    const feedId = sourceSnapshot?.sid?.toString() || null;
+                    window.contentViewPool.invalidatePrefetchForFeed(feedId, 'openTarget');
                 }
                 // Re-initialize ContentView with webpage URL
                 this.initializeContentView();
@@ -2641,6 +2652,9 @@ a:hover { text-decoration: underline; }
                 // Nuke the view before re-initializing (clean slate for mode switch)
                 if (window.contentViewPool) {
                     await window.contentViewPool.nuke();
+                    // Invalidate prefetched views - openTarget change means completely different content
+                    const feedId = sourceSnapshot?.sid?.toString() || null;
+                    window.contentViewPool.invalidatePrefetchForFeed(feedId, 'openTarget');
                 }
                 // Re-initialize ContentView with RSS content
                 this.initializeContentView();
@@ -2668,6 +2682,9 @@ a:hover { text-decoration: underline; }
                 // Nuke the view before loading full content (clean slate for mode switch)
                 if (window.contentViewPool) {
                     await window.contentViewPool.nuke();
+                    // Invalidate prefetched views - openTarget change means completely different content
+                    const feedId = sourceSnapshot?.sid?.toString() || null;
+                    window.contentViewPool.invalidatePrefetchForFeed(feedId, 'openTarget');
                 }
                 // Load and extract full content
                 this.loadFull()

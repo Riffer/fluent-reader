@@ -1207,14 +1207,19 @@ export class ContentViewPool {
     /**
      * Update reading direction based on navigation
      * Compares new index with previous to determine direction
+     * 
+     * Special rule: At list boundaries, force the logical direction:
+     * - At start (index 0): can only go forward
+     * - At end (index = length-1): can only go backward
      */
     private updateReadingDirection(newIndex: number, listLength: number): void {
         const oldIndex = this.currentArticleIndex
         const oldListLength = this.articleListLength
         
         // Detect list change: different list length suggests a new list
-        // When entering a new list, reset direction based on position
         const isNewList = listLength !== oldListLength
+        
+        // console.log(`[ContentViewPool] updateReadingDirection: newIndex=${newIndex}, listLength=${listLength}, oldIndex=${oldIndex}, oldListLength=${oldListLength}, isNewList=${isNewList}`)
         
         // First navigation, list change, or index not set yet
         if (oldIndex < 0 || isNewList) {
@@ -1228,12 +1233,31 @@ export class ContentViewPool {
             } else {
                 // Middle of list - unknown direction
                 this.readingDirection = 'unknown'
-                // console.log(`[ContentViewPool] Reading direction: unknown (middle of list)`)
+                // console.log(`[ContentViewPool] Reading direction: unknown (middle of list, index ${newIndex} of ${listLength})`)
             }
             return
         }
         
-        // Determine direction from index change
+        // BOUNDARY RULE: At list edges, force the only possible direction
+        // This handles jumps to the end (e.g., clicking last article while at first)
+        if (newIndex === 0 && listLength > 1) {
+            // At start - can only go forward
+            if (this.readingDirection !== 'forward') {
+                // console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → forward (reached start of list)`)
+                this.readingDirection = 'forward'
+            }
+            return
+        }
+        if (newIndex === listLength - 1 && listLength > 1) {
+            // At end - can only go backward
+            if (this.readingDirection !== 'backward') {
+                // console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → backward (reached end of list)`)
+                this.readingDirection = 'backward'
+            }
+            return
+        }
+        
+        // Normal case: Determine direction from index change
         if (newIndex > oldIndex) {
             if (this.readingDirection !== 'forward') {
                 // console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → forward (index ${oldIndex} → ${newIndex})`)
@@ -2263,6 +2287,11 @@ export class ContentViewPool {
             event.returnValue = this.mobileMode
         })
         
+        // Invalidate prefetched views for a specific feed when settings change
+        ipcMain.on("cvp-invalidate-prefetch-for-feed", (event, feedId: string | null, settingName?: string) => {
+            this.invalidatePrefetchForFeed(feedId, settingName)
+        })
+        
         // Navigate with settings (direct URL navigation without prefetch/cache)
         // Used for HTML content (RSS articles) where caching doesn't apply
         ipcMain.handle("cvp-navigate-with-settings", async (event, url: string, settings: NavigationSettings) => {
@@ -2667,6 +2696,62 @@ export class ContentViewPool {
         for (const view of this.views) {
             view.setMobileMode(enabled)
         }
+    }
+    
+    /**
+     * Invalidate prefetched views for a specific feed when settings change.
+     * This recycles all non-active views for the given feedId and triggers re-prefetch.
+     * 
+     * Used when feed-specific settings change that require a full reload:
+     * - mobileMode (changes User-Agent, server returns different HTML)
+     * - openTarget (RSS/Local/Webpage/FullContent - completely different load paths)
+     * - visualZoom (changes Device Emulation)
+     * 
+     * NOT needed for zoom changes (can be applied dynamically).
+     * 
+     * @param feedId - The feed ID whose views should be invalidated, or null for all feeds
+     * @param settingName - Optional name of the setting that changed (for logging)
+     */
+    private invalidatePrefetchForFeed(feedId: string | null, settingName?: string): void {
+        console.log(`[ContentViewPool] invalidatePrefetchForFeed: feedId=${feedId}, setting=${settingName || 'unknown'}`)
+        
+        let recycledCount = 0
+        const activeView = this.getActiveView()
+        
+        for (const view of this.views) {
+            // Never recycle the active view
+            if (view.isActive) continue
+            
+            // Skip empty views
+            if (view.isEmpty) continue
+            
+            // If feedId is null, invalidate ALL non-active views
+            // If feedId is specified, only invalidate views with matching feedId
+            if (feedId === null || view.feedId === feedId) {
+                console.log(`[ContentViewPool] Recycling prefetched view ${view.id} (feedId=${view.feedId}, articleId=${view.articleId?.substring(0, 8)})`)
+                view.recycle()
+                recycledCount++
+            }
+        }
+        
+        // Clear protection sets - old prefetch targets are no longer valid
+        this.protectedArticleIds.clear()
+        this.pendingPrefetchArticleIds.clear()
+        
+        // Clear prefetch tracking for re-prefetch
+        this.prefetchQueue = []
+        this.prefetchInProgress = null
+        this.prefetchCompletedIndices.clear()
+        
+        console.log(`[ContentViewPool] invalidatePrefetchForFeed: recycled ${recycledCount} views, scheduling re-prefetch`)
+        
+        // Schedule re-prefetch with the new settings
+        if (recycledCount > 0 && this.currentArticleIndex >= 0) {
+            this.schedulePrefetch()
+        }
+        
+        // Send updated status (will show red/yellow until re-prefetch completes)
+        this.sendPrefetchStatus()
     }
     
     /**
