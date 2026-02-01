@@ -329,9 +329,9 @@ export function updateSource(sid: number, updates: Partial<SourceRow>): void {
     if (fields.length === 0) return
     
     // DEBUG: Log what we're updating
-    if ('defaultZoom' in updates) {
-        console.log(`[db-sqlite updateSource] Updating sid=${sid}, defaultZoom=${updates.defaultZoom}`)
-    }
+    // if ('defaultZoom' in updates) {
+    //     console.log(`[db-sqlite updateSource] Updating sid=${sid}, defaultZoom=${updates.defaultZoom}`)
+    // }
     
     const setClause = fields.map(f => `${f} = @${f}`).join(", ")
     const stmt = db.prepare(`UPDATE sources SET ${setClause} WHERE sid = @sid`)

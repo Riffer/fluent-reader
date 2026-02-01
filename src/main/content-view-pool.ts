@@ -181,7 +181,7 @@ export class ContentViewPool {
      */
     initialize(parentWindow: BrowserWindow): void {
         if (this.parentWindow) {
-            console.warn("[ContentViewPool] Already initialized")
+            // console.warn("[ContentViewPool] Already initialized")
             return
         }
         
@@ -189,7 +189,7 @@ export class ContentViewPool {
         
         // Load initial settings from store
         this.visualZoomEnabled = isVisualZoomEnabled()
-        console.log(`[ContentViewPool] Initialized with pool size: ${this.config.size}, visualZoom: ${this.visualZoomEnabled}`)
+        // console.log(`[ContentViewPool] Initialized with pool size: ${this.config.size}, visualZoom: ${this.visualZoomEnabled}`)
         
         // Setup window focus tracking
         this.setupWindowFocusTracking()
@@ -219,25 +219,25 @@ export class ContentViewPool {
             if (activeView && this.isPoolVisible && activeView.isReady) {
                 // ContentView is visible and ready - restore its focus when window regains focus
                 this.contentViewHadFocus = true
-                console.log(`[ContentViewPool] Window blur - ContentView ${activeView.id} visible, will restore focus`)
+                // console.log(`[ContentViewPool] Window blur - ContentView ${activeView.id} visible, will restore focus`)
             } else {
                 this.contentViewHadFocus = false
-                console.log('[ContentViewPool] Window blur - ContentView not visible/ready')
+                // console.log('[ContentViewPool] Window blur - ContentView not visible/ready')
             }
         })
         
         // When window regains focus, restore ContentView focus if it was visible before
         this.parentWindow.on('focus', () => {
-            console.log(`[ContentViewPool] Window focus - contentViewHadFocus=${this.contentViewHadFocus}, isPoolVisible=${this.isPoolVisible}`)
+            // console.log(`[ContentViewPool] Window focus - contentViewHadFocus=${this.contentViewHadFocus}, isPoolVisible=${this.isPoolVisible}`)
             if (this.contentViewHadFocus && this.isPoolVisible) {
                 const activeView = this.getActiveView()
                 if (activeView && activeView.isReady) {
-                    console.log('[ContentViewPool] Window focus - restoring ContentView focus')
+                    // console.log('[ContentViewPool] Window focus - restoring ContentView focus')
                     // Small delay to let window focus settle
                     setTimeout(() => {
                         if (this.contentViewHadFocus && activeView.isActive) {
                             activeView.focus()
-                            console.log('[ContentViewPool] ContentView focus restored')
+                            // console.log('[ContentViewPool] ContentView focus restored')
                         }
                     }, 50)
                 }
@@ -257,7 +257,7 @@ export class ContentViewPool {
             this.config.size = 2
         }
         
-        console.log(`[ContentViewPool] Config updated:`, this.config)
+        // console.log(`[ContentViewPool] Config updated:`, this.config)
     }
     
     // ========== View Creation Helper ==========
@@ -304,7 +304,7 @@ export class ContentViewPool {
         view.setOnVideoFullscreen((isFullscreen) => {
             // Only send events for the active view
             if (view.isActive) {
-                console.log(`[ContentViewPool] Video fullscreen: ${isFullscreen}`)
+                // console.log(`[ContentViewPool] Video fullscreen: ${isFullscreen}`)
                 this.sendToRenderer('content-view-video-fullscreen', isFullscreen)
                 
                 // Track fullscreen state to prevent setBounds from overriding
@@ -324,7 +324,7 @@ export class ContentViewPool {
                     setTimeout(() => {
                         if (this.parentWindow && !this.parentWindow.isDestroyed()) {
                             const [width, height] = this.parentWindow.getContentSize()
-                            console.log(`[ContentViewPool] Setting fullscreen bounds: ${width}x${height}`)
+                            // console.log(`[ContentViewPool] Setting fullscreen bounds: ${width}x${height}`)
                             view.setBounds({ x: 0, y: 0, width, height })
                             
                             // Force the content to recognize the new size by triggering a resize event
@@ -399,7 +399,7 @@ export class ContentViewPool {
             if (!view.isActive && this.activeViewId) {
                 const activeView = this.getActiveView()
                 if (activeView && activeView.isReady) {
-                    console.log(`[ContentViewPool] Focus guard: Background ${view.id} fired ${eventName}, refocusing active ${activeView.id}`)
+                    // console.log(`[ContentViewPool] Focus guard: Background ${view.id} fired ${eventName}, refocusing active ${activeView.id}`)
                     // Small delay to ensure Electron has finished its internal focus handling
                     setTimeout(() => {
                         if (activeView.isActive) {
@@ -486,7 +486,7 @@ export class ContentViewPool {
                     if (activeView && activeView.isReady) {
                         const activeWc = activeView.getWebContents()
                         if (activeWc && !activeWc.isDestroyed()) {
-                            console.log(`[ContentViewPool] Focus theft detected: ${view.id} received ${input.key}, forwarding to active ${activeView.id}`)
+                            // console.log(`[ContentViewPool] Focus theft detected: ${view.id} received ${input.key}, forwarding to active ${activeView.id}`)
                             
                             // Restore focus to active view
                             activeView.focus()
@@ -519,7 +519,7 @@ export class ContentViewPool {
             // During video fullscreen, let certain keys pass through to the video player
             // instead of being handled by the app (e.g., ArrowLeft/Right for seeking, m for mute)
             if (this.videoFullscreenActive && ContentViewPool.VIDEO_FULLSCREEN_PASSTHROUGH_KEYS.has(input.key)) {
-                console.log(`[ContentViewPool] Video fullscreen: passing ${input.key} to page`)
+                // console.log(`[ContentViewPool] Video fullscreen: passing ${input.key} to page`)
                 return  // Don't block, don't forward to renderer - let page handle it
             }
             
@@ -533,7 +533,7 @@ export class ContentViewPool {
                 if (isCtrlI || isEscape) {
                     // Block and forward to renderer for input mode handling
                     event.preventDefault()
-                    console.log(`[ContentViewPool] Input mode: forwarding ${input.key} to renderer for mode toggle/exit`)
+                    // console.log(`[ContentViewPool] Input mode: forwarding ${input.key} to renderer for mode toggle/exit`)
                     this.sendToRenderer("content-view-input", input)
                 }
                 // All other keys pass through to page - no blocking, no forwarding
@@ -547,7 +547,7 @@ export class ContentViewPool {
             }
             
             // Forward to renderer for processing
-            console.log(`[ContentViewPool] Forwarding ${input.key} from ${view.id} to renderer`)
+            // console.log(`[ContentViewPool] Forwarding ${input.key} from ${view.id} to renderer`)
             this.sendToRenderer("content-view-input", input)
         })
     }
@@ -801,7 +801,7 @@ export class ContentViewPool {
         
         // Check if source/feed group changed - invalidate cache if so
         if (sourceId !== null && this.currentSourceId !== null && sourceId !== this.currentSourceId) {
-            console.log(`[ContentViewPool] Source changed: ${this.currentSourceId} -> ${sourceId}, invalidating cache`)
+            // console.log(`[ContentViewPool] Source changed: ${this.currentSourceId} -> ${sourceId}, invalidating cache`)
             this.invalidateCacheOnSourceChange()
         }
         this.currentSourceId = sourceId
@@ -809,7 +809,7 @@ export class ContentViewPool {
         // Reset input mode on article change (user may have left it on)
         if (this.inputModeActive) {
             this.inputModeActive = false
-            console.log('[ContentViewPool] Input mode reset on article change')
+            // console.log('[ContentViewPool] Input mode reset on article change')
         }
         
         // Update reading direction BEFORE updating currentArticleIndex
@@ -821,16 +821,16 @@ export class ContentViewPool {
         this.articleListLength = listLength
         
         // Log pool status for debugging
-        console.log(`[ContentViewPool] Navigate to: ${articleId} (index ${articleIndex}/${listLength}, direction: ${this.readingDirection})`)
-        console.log(`[ContentViewPool] Pool status:`, this.views.map(v => 
-            `${v.id}: ${v.articleId || 'empty'} (${v.status}, active=${v.isActive})`
-        ).join(', '))
+        // console.log(`[ContentViewPool] Navigate to: ${articleId} (index ${articleIndex}/${listLength}, direction: ${this.readingDirection})`)
+        // console.log(`[ContentViewPool] Pool status:`, this.views.map(v => 
+        //     `${v.id}: ${v.articleId || 'empty'} (${v.status}, active=${v.isActive})`
+        // ).join(', '))
         
         // Check if article is already cached
         const cachedView = this.getViewByArticleId(articleId)
         if (cachedView && cachedView.isReady) {
             // Instant swap!
-            console.log(`[ContentViewPool] Cache HIT - instant swap to ${cachedView.id}`)
+            // console.log(`[ContentViewPool] Cache HIT - instant swap to ${cachedView.id}`)
             
             // Play sound on cache hit (dev mode only, for debugging)
             if (!app.isPackaged) {
@@ -845,7 +845,7 @@ export class ContentViewPool {
             
             // Check if zoom differs from what the view was loaded with
             if (Math.abs(cachedView.loadedWithZoom - settings.zoomFactor) > 0.01) {
-                console.log(`[ContentViewPool] Cache HIT: Applying feed-specific zoom: factor=${settings.zoomFactor.toFixed(2)}, level=${zoomLevel} (was loaded with factor=${cachedView.loadedWithZoom.toFixed(2)})`)
+                // console.log(`[ContentViewPool] Cache HIT: Applying feed-specific zoom: factor=${settings.zoomFactor.toFixed(2)}, level=${zoomLevel} (was loaded with factor=${cachedView.loadedWithZoom.toFixed(2)})`)
                 if (this.visualZoomEnabled) {
                     cachedView.setVisualZoomLevel(zoomLevel)
                 } else {
@@ -872,7 +872,7 @@ export class ContentViewPool {
         // Deactivate current view - hide it (with current bounds so size is preserved)
         const currentActive = this.getActiveView()
         if (currentActive && currentActive !== view) {
-            console.log(`[ContentViewPool] Deactivating and hiding ${currentActive.id}`)
+            // console.log(`[ContentViewPool] Deactivating and hiding ${currentActive.id}`)
             currentActive.setActive(false)
             currentActive.setVisible(false, this.visibleBounds)  // Pass bounds to preserve size
         }
@@ -891,7 +891,7 @@ export class ContentViewPool {
             // IMPORTANT: Check if this view is still the active one!
             // User may have navigated to another article while we were loading
             if (this.activeViewId !== view.id) {
-                console.log(`[ContentViewPool] Load complete for ${view.id}, but ${this.activeViewId} is now active - not showing`)
+                // console.log(`[ContentViewPool] Load complete for ${view.id}, but ${this.activeViewId} is now active - not showing`)
                 return true  // Load was successful, just not shown
             }
             
@@ -899,9 +899,9 @@ export class ContentViewPool {
             if (this.isPoolVisible && this.boundsReceived) {
                 view.setVisible(true, this.visibleBounds)
                 view.focus()  // Single focus call after visibility is set
-                console.log(`[ContentViewPool] Load complete, showing ${view.id}`)
+                // console.log(`[ContentViewPool] Load complete, showing ${view.id}`)
             } else if (this.isPoolVisible) {
-                console.log(`[ContentViewPool] Load complete for ${view.id}, waiting for bounds`)
+                // console.log(`[ContentViewPool] Load complete for ${view.id}, waiting for bounds`)
             }
             
             // Notify renderer about view activation with current zoom level
@@ -943,21 +943,21 @@ export class ContentViewPool {
             switch (existingView.status) {
                 case 'ready':
                     // Already loaded - skip
-                    console.log(`[ContentViewPool] Prefetch skip - already ready: ${articleId}`)
+                    // console.log(`[ContentViewPool] Prefetch skip - already ready: ${articleId}`)
                     return
                 case 'loading':
                     // Currently loading - skip, will be ready soon
-                    console.log(`[ContentViewPool] Prefetch skip - already loading: ${articleId}`)
+                    // console.log(`[ContentViewPool] Prefetch skip - already loading: ${articleId}`)
                     return
                 case 'error':
                     // Previous load failed - recycle and try again
-                    console.log(`[ContentViewPool] Prefetch retry - previous load failed: ${articleId}`)
+                    // console.log(`[ContentViewPool] Prefetch retry - previous load failed: ${articleId}`)
                     existingView.recycle()
                     viewToUse = existingView  // Use this view for retry
                     break
                 case 'empty':
                     // View was recycled but still has articleId? Shouldn't happen, but use it
-                    console.log(`[ContentViewPool] Prefetch: view ${existingView.id} is empty with articleId ${articleId}`)
+                    // console.log(`[ContentViewPool] Prefetch: view ${existingView.id} is empty with articleId ${articleId}`)
                     viewToUse = existingView
                     break
             }
@@ -970,17 +970,17 @@ export class ContentViewPool {
         if (!freeView) {
             freeView = this.findRecyclableView()
             if (freeView) {
-                console.log(`[ContentViewPool] Prefetch: recycling ${freeView.id} (was ${freeView.articleId}) for ${articleId}`)
+                // console.log(`[ContentViewPool] Prefetch: recycling ${freeView.id} (was ${freeView.articleId}) for ${articleId}`)
                 freeView.recycle()
             }
         }
         
         if (!freeView) {
-            console.log(`[ContentViewPool] Prefetch skip - no free view for: ${articleId}`)
+            // console.log(`[ContentViewPool] Prefetch skip - no free view for: ${articleId}`)
             return
         }
         
-        console.log(`[ContentViewPool] Prefetch: ${articleId} in ${freeView.id}`)
+        // console.log(`[ContentViewPool] Prefetch: ${articleId} in ${freeView.id}`)
         
         // Recycle the view if it has old content (but not if protected or pending!)
         if (!freeView.isEmpty) {
@@ -988,7 +988,7 @@ export class ContentViewPool {
                 this.protectedArticleIds.has(freeView.articleId) || 
                 this.pendingPrefetchArticleIds.has(freeView.articleId)
             )) {
-                console.log(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds protected/pending article ${freeView.articleId}`)
+                // console.log(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds protected/pending article ${freeView.articleId}`)
                 return
             }
             freeView.recycle()
@@ -1029,7 +1029,7 @@ export class ContentViewPool {
         // Check if article is already in a view
         const existingView = this.getViewByArticleId(articleId)
         if (existingView && (existingView.status === 'ready' || existingView.status === 'loading')) {
-            console.log(`[ContentViewPool] FullContent prefetch skip - already ${existingView.status}: ${articleId}`)
+            // console.log(`[ContentViewPool] FullContent prefetch skip - already ${existingView.status}: ${articleId}`)
             return
         }
         
@@ -1038,17 +1038,17 @@ export class ContentViewPool {
         if (!freeView) {
             freeView = this.findRecyclableView()
             if (freeView) {
-                console.log(`[ContentViewPool] FullContent prefetch: recycling ${freeView.id}`)
+                // console.log(`[ContentViewPool] FullContent prefetch: recycling ${freeView.id}`)
                 freeView.recycle()
             }
         }
         
         if (!freeView) {
-            console.log(`[ContentViewPool] FullContent prefetch skip - no free view for: ${articleId}`)
+            // console.log(`[ContentViewPool] FullContent prefetch skip - no free view for: ${articleId}`)
             return
         }
         
-        console.log(`[ContentViewPool] FullContent prefetch starting: ${articleId} in ${freeView.id}`)
+        // console.log(`[ContentViewPool] FullContent prefetch starting: ${articleId} in ${freeView.id}`)
         
         // Recycle if needed
         if (!freeView.isEmpty) {
@@ -1062,11 +1062,11 @@ export class ContentViewPool {
         
         try {
             // Step 1: Fetch the webpage
-            console.log(`[ContentViewPool] FullContent: fetching ${articleInfo.itemLink}`)
+            // console.log(`[ContentViewPool] FullContent: fetching ${articleInfo.itemLink}`)
             const html = await this.fetchWebpage(articleInfo.itemLink)
             
             // Step 2: Extract article content
-            console.log(`[ContentViewPool] FullContent: extracting content`)
+            // console.log(`[ContentViewPool] FullContent: extracting content`)
             const extracted = await extractFromHtml(html, articleInfo.itemLink)
             
             // Step 3: Use extracted content or fallback to RSS content
@@ -1086,12 +1086,12 @@ export class ContentViewPool {
                 extractorDate: extracted?.published ? new Date(extracted.published) : undefined
             })
             
-            console.log(`[ContentViewPool] FullContent: loading extracted content for ${articleId}`)
+            // console.log(`[ContentViewPool] FullContent: loading extracted content for ${articleId}`)
             
             // Step 5: Load the generated HTML
             await freeView.load(dataUrl, articleId, feedId, settings, false, articleIndex)
             
-            console.log(`[ContentViewPool] FullContent prefetch complete: ${articleId}`)
+            // console.log(`[ContentViewPool] FullContent prefetch complete: ${articleId}`)
             // Remove from pending set after successful load
             this.pendingPrefetchArticleIds.delete(articleId)
         } catch (err) {
@@ -1144,7 +1144,7 @@ export class ContentViewPool {
      */
     setReadingDirection(direction: ReadingDirection): void {
         if (this.readingDirection !== direction) {
-            console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → ${direction}`)
+            // console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → ${direction}`)
             this.readingDirection = direction
         }
     }
@@ -1178,12 +1178,12 @@ export class ContentViewPool {
         // Determine direction from index change
         if (newIndex > oldIndex) {
             if (this.readingDirection !== 'forward') {
-                console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → forward (index ${oldIndex} → ${newIndex})`)
+                // console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → forward (index ${oldIndex} → ${newIndex})`)
                 this.readingDirection = 'forward'
             }
         } else if (newIndex < oldIndex) {
             if (this.readingDirection !== 'backward') {
-                console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → backward (index ${oldIndex} → ${newIndex})`)
+                // console.log(`[ContentViewPool] Reading direction: ${this.readingDirection} → backward (index ${oldIndex} → ${newIndex})`)
                 this.readingDirection = 'backward'
             }
         }
@@ -1196,9 +1196,9 @@ export class ContentViewPool {
      * Schedule prefetch after active view is ready
      */
     private schedulePrefetch(): void {
-        console.log(`[ContentViewPool] schedulePrefetch() called, enabled=${this.config.enabled}`)
+        // console.log(`[ContentViewPool] schedulePrefetch() called, enabled=${this.config.enabled}`)
         if (!this.config.enabled) {
-            console.log(`[ContentViewPool] Prefetch disabled, skipping`)
+            // console.log(`[ContentViewPool] Prefetch disabled, skipping`)
             return
         }
         
@@ -1208,16 +1208,16 @@ export class ContentViewPool {
         // Wait for active view to be ready
         const activeView = this.getActiveView()
         if (!activeView) {
-            console.log(`[ContentViewPool] No active view, skipping prefetch`)
+            // console.log(`[ContentViewPool] No active view, skipping prefetch`)
             return
         }
         
-        console.log(`[ContentViewPool] Active view ${activeView.id} isReady=${activeView.isReady}`)
+        // console.log(`[ContentViewPool] Active view ${activeView.id} isReady=${activeView.isReady}`)
         
         const doPrefetch = () => {
-            console.log(`[ContentViewPool] Starting prefetch timer (${this.config.prefetchDelay}ms)`)
+            // console.log(`[ContentViewPool] Starting prefetch timer (${this.config.prefetchDelay}ms)`)
             this.prefetchTimer = setTimeout(() => {
-                console.log(`[ContentViewPool] Prefetch timer fired, executing...`)
+                // console.log(`[ContentViewPool] Prefetch timer fired, executing...`)
                 this.prefetchTimer = null
                 this.executePrefetch()
             }, this.config.prefetchDelay)
@@ -1225,13 +1225,13 @@ export class ContentViewPool {
         
         if (activeView.isReady) {
             // Already ready - schedule with delay
-            console.log(`[ContentViewPool] View already ready, scheduling prefetch`)
+            // console.log(`[ContentViewPool] View already ready, scheduling prefetch`)
             doPrefetch()
         } else {
             // Wait for ready event
-            console.log(`[ContentViewPool] View not ready, waiting for dom-ready`)
+            // console.log(`[ContentViewPool] View not ready, waiting for dom-ready`)
             activeView.setOnDomReady(() => {
-                console.log(`[ContentViewPool] dom-ready received, scheduling prefetch`)
+                // console.log(`[ContentViewPool] dom-ready received, scheduling prefetch`)
                 activeView.setOnDomReady(null)  // One-shot
                 doPrefetch()
             })
@@ -1263,7 +1263,7 @@ export class ContentViewPool {
             
             // Recycle any view that has content
             if (!view.isEmpty) {
-                console.log(`[ContentViewPool] Recycling ${view.id} (was: ${view.articleId}) on source change`)
+                // console.log(`[ContentViewPool] Recycling ${view.id} (was: ${view.articleId}) on source change`)
                 view.recycle()
                 recycledCount++
             }
@@ -1276,7 +1276,7 @@ export class ContentViewPool {
         // Reset reading direction - new context, unknown direction
         this.readingDirection = 'unknown'
         
-        console.log(`[ContentViewPool] Cache invalidated: ${recycledCount} views recycled`)
+        // console.log(`[ContentViewPool] Cache invalidated: ${recycledCount} views recycled`)
     }
     
     /**
@@ -1291,16 +1291,16 @@ export class ContentViewPool {
      * an article needed by the secondary prefetch.
      */
     private executePrefetch(): void {
-        console.log(`[ContentViewPool] executePrefetch() - index=${this.currentArticleIndex}, listLength=${this.articleListLength}, direction=${this.readingDirection}`)
+        // console.log(`[ContentViewPool] executePrefetch() - index=${this.currentArticleIndex}, listLength=${this.articleListLength}, direction=${this.readingDirection}`)
         if (this.currentArticleIndex < 0) {
-            console.log(`[ContentViewPool] No current article index, skipping prefetch`)
+            // console.log(`[ContentViewPool] No current article index, skipping prefetch`)
             return
         }
         
         // Determine what to prefetch based on direction
         const targets = this.determinePrefetchTargets()
         
-        console.log(`[ContentViewPool] Prefetch targets:`, targets)
+        // console.log(`[ContentViewPool] Prefetch targets:`, targets)
         
         // Update protected articles:
         // Only protect the ACTIVE article. The pending prefetch articleIds will be
@@ -1314,14 +1314,14 @@ export class ContentViewPool {
             this.protectedArticleIds.add(activeView.articleId)
         }
         
-        console.log(`[ContentViewPool] Protected articles:`, Array.from(this.protectedArticleIds))
-        console.log(`[ContentViewPool] Current views:`, this.views.map(v => 
-            `${v.id}: ${v.articleId?.substring(0, 8) || 'empty'} (${v.status}${v.isActive ? ', ACTIVE' : ''})`
-        ).join(', '))
+        // console.log(`[ContentViewPool] Protected articles:`, Array.from(this.protectedArticleIds))
+        // console.log(`[ContentViewPool] Current views:`, this.views.map(v => 
+        //     `${v.id}: ${v.articleId?.substring(0, 8) || 'empty'} (${v.status}${v.isActive ? ', ACTIVE' : ''})`
+        // ).join(', '))
         
         // Request prefetch info from renderer for all targets
         // The renderer knows the article URLs
-        console.log(`[ContentViewPool] Requesting prefetch info for ${targets.length} targets: [${targets.join(', ')}]`)
+        // console.log(`[ContentViewPool] Requesting prefetch info for ${targets.length} targets: [${targets.join(', ')}]`)
         for (const targetIndex of targets) {
             this.sendToRenderer('cvp-request-prefetch-info', targetIndex)
         }
@@ -1456,7 +1456,7 @@ export class ContentViewPool {
         // Sort by lastUsedAt (oldest first = best to recycle)
         candidates.sort((a, b) => a.lastUsedAt - b.lastUsedAt)
         
-        console.log(`[ContentViewPool] findFreeView: Using LRU view ${candidates[0].id} (age=${((Date.now() - candidates[0].lastUsedAt) / 1000).toFixed(1)}s)`)
+        // console.log(`[ContentViewPool] findFreeView: Using LRU view ${candidates[0].id} (age=${((Date.now() - candidates[0].lastUsedAt) / 1000).toFixed(1)}s)`)
         return candidates[0]
     }
     
@@ -1471,12 +1471,12 @@ export class ContentViewPool {
             if (v.isActive) return false
             // Don't recycle if article is protected (needed as prefetch target)
             if (v.articleId && this.protectedArticleIds.has(v.articleId)) {
-                console.log(`[ContentViewPool] Skipping ${v.id} (protected article ${v.articleId})`)
+                // console.log(`[ContentViewPool] Skipping ${v.id} (protected article ${v.articleId})`)
                 return false
             }
             // Don't recycle if article is pending prefetch
             if (v.articleId && this.pendingPrefetchArticleIds.has(v.articleId)) {
-                console.log(`[ContentViewPool] Skipping ${v.id} (pending prefetch article ${v.articleId})`)
+                // console.log(`[ContentViewPool] Skipping ${v.id} (pending prefetch article ${v.articleId})`)
                 return false
             }
             return true
@@ -1520,11 +1520,11 @@ export class ContentViewPool {
         scored.sort((a, b) => a.score - b.score)
         
         // Log scoring for debugging
-        console.log(`[ContentViewPool] Recycle candidates (currentIdx=${this.currentArticleIndex}, dir=${this.readingDirection}):`,
-            scored.map(s => {
-                const age = s.view.lastUsedAt > 0 ? `${((Date.now() - s.view.lastUsedAt) / 1000).toFixed(1)}s` : 'never'
-                return `${s.view.id}[idx=${s.view.articleIndex}, age=${age}]=>${s.score.toFixed(0)}`
-            }).join(', '))
+        // console.log(`[ContentViewPool] Recycle candidates (currentIdx=${this.currentArticleIndex}, dir=${this.readingDirection}):`,
+        //     scored.map(s => {
+        //         const age = s.view.lastUsedAt > 0 ? `${((Date.now() - s.view.lastUsedAt) / 1000).toFixed(1)}s` : 'never'
+        //         return `${s.view.id}[idx=${s.view.articleIndex}, age=${age}]=>${s.score.toFixed(0)}`
+        //     }).join(', '))
         
         return scored[0].view
     }
@@ -1552,13 +1552,13 @@ export class ContentViewPool {
             view.setVisible(true, this.visibleBounds)
             view.focus()  // Single focus call after visibility is set
             if (sameView) {
-                console.log(`[ContentViewPool] Re-activated same ${view.id} - ensuring visible with bounds:`, this.visibleBounds)
+                // console.log(`[ContentViewPool] Re-activated same ${view.id} - ensuring visible with bounds:`, this.visibleBounds)
             } else {
-                console.log(`[ContentViewPool] Activated ${view.id} - visible with bounds:`, this.visibleBounds)
+                // console.log(`[ContentViewPool] Activated ${view.id} - visible with bounds:`, this.visibleBounds)
             }
         } else if (this.isPoolVisible) {
             // Pool is visible but no bounds yet - view will be shown when bounds arrive
-            console.log(`[ContentViewPool] Activated ${view.id} - waiting for bounds before showing`)
+            // console.log(`[ContentViewPool] Activated ${view.id} - waiting for bounds before showing`)
         }
         
         // Notify renderer about view activation with current zoom level
@@ -1614,7 +1614,7 @@ export class ContentViewPool {
         
         // If video is in fullscreen mode, don't apply normal bounds - keep view at full window size
         if (this.videoFullscreenActive) {
-            console.log(`[ContentViewPool] setBounds skipped (video fullscreen active):`, bounds)
+            // console.log(`[ContentViewPool] setBounds skipped (video fullscreen active):`, bounds)
             // Instead, ensure active view stays at full window bounds
             const activeView = this.getActiveView()
             if (activeView && this.parentWindow && !this.parentWindow.isDestroyed()) {
@@ -1624,7 +1624,7 @@ export class ContentViewPool {
             return
         }
         
-        console.log(`[ContentViewPool] setBounds:`, bounds, `real=${isRealBounds}, boundsReceived=${this.boundsReceived}`)
+        // console.log(`[ContentViewPool] setBounds:`, bounds, `real=${isRealBounds}, boundsReceived=${this.boundsReceived}`)
         
         // Apply bounds to ALL views
         for (const view of this.views) {
@@ -1635,7 +1635,7 @@ export class ContentViewPool {
         const active = this.getActiveView()
         if (active && this.isPoolVisible && isRealBounds) {
             if (firstRealBounds) {
-                console.log(`[ContentViewPool] First real bounds received! Showing active view ${active.id} at:`, bounds)
+                // console.log(`[ContentViewPool] First real bounds received! Showing active view ${active.id} at:`, bounds)
             }
             active.setVisible(true, bounds)
             active.focus()
@@ -1656,15 +1656,15 @@ export class ContentViewPool {
                 if (this.boundsReceived) {
                     active.setVisible(true, this.visibleBounds)
                     active.focus()
-                    console.log(`[ContentViewPool] Showing ${active.id} at bounds:`, this.visibleBounds)
+                    // console.log(`[ContentViewPool] Showing ${active.id} at bounds:`, this.visibleBounds)
                 } else {
-                    console.log(`[ContentViewPool] setVisible(true) - waiting for bounds before showing ${active.id}`)
+                    // console.log(`[ContentViewPool] setVisible(true) - waiting for bounds before showing ${active.id}`)
                 }
             } else {
                 active.setVisible(false, this.visibleBounds)  // Pass bounds to preserve size
             }
         } else if (visible && !wasVisible) {
-            console.log(`[ContentViewPool] setVisible(true) - no active view yet`)
+            // console.log(`[ContentViewPool] setVisible(true) - no active view yet`)
         }
     }
     
@@ -1674,7 +1674,7 @@ export class ContentViewPool {
      * Setup IPC handlers for pool operations
      */
     private setupIpcHandlers(): void {
-        console.log('[ContentViewPool] Setting up IPC handlers...')
+        // console.log('[ContentViewPool] Setting up IPC handlers...')
         
         // =====================================================
         // Legacy channel handlers (for code paths that haven't migrated yet)
@@ -1683,7 +1683,7 @@ export class ContentViewPool {
         
         // Legacy: content-view-navigate-with-settings
         ipcMain.handle("content-view-navigate-with-settings", async (event, url: string, settings: NavigationSettings) => {
-            console.log('[ContentViewPool] Legacy channel content-view-navigate-with-settings forwarded to Pool')
+            // console.log('[ContentViewPool] Legacy channel content-view-navigate-with-settings forwarded to Pool')
             const active = this.getActiveView()
             const wc = active?.getWebContents()
             if (!wc || wc.isDestroyed()) {
@@ -1717,7 +1717,7 @@ export class ContentViewPool {
         
         // Legacy: content-view-close-devtools
         ipcMain.handle("content-view-close-devtools", () => {
-            console.log('[ContentViewPool] Legacy channel content-view-close-devtools forwarded to Pool')
+            // console.log('[ContentViewPool] Legacy channel content-view-close-devtools forwarded to Pool')
             const active = this.getActiveView()
             active?.getWebContents()?.closeDevTools()
         })
@@ -1744,11 +1744,11 @@ export class ContentViewPool {
             if (view) {
                 // Return the view's own zoom level
                 const viewZoom = view.getCssZoomLevel()
-                console.log(`[ContentViewPool] get-css-zoom-level from ${view.id}: returning view-specific zoom ${viewZoom}`)
+                // console.log(`[ContentViewPool] get-css-zoom-level from ${view.id}: returning view-specific zoom ${viewZoom}`)
                 event.returnValue = viewZoom
             } else {
                 // Fallback to pool's global zoom if view not found (shouldn't happen)
-                console.log(`[ContentViewPool] get-css-zoom-level: view not found for webContentsId ${senderWebContentsId}, returning pool zoom ${this.cssZoomLevel}`)
+                // console.log(`[ContentViewPool] get-css-zoom-level: view not found for webContentsId ${senderWebContentsId}, returning pool zoom ${this.cssZoomLevel}`)
                 event.returnValue = this.cssZoomLevel
             }
         })
@@ -1764,42 +1764,42 @@ export class ContentViewPool {
         
         // Debug: Log messages from preload scripts
         ipcMain.on('cvp-preload-log', (event, message) => {
-            console.log(message)
+            // console.log(message)
         })
         
         // Navigate to article
         ipcMain.handle('cvp-navigate', async (event, articleId, url, feedId, settings, index, listLength, sourceId) => {
-            console.log(`[ContentViewPool] IPC cvp-navigate received: articleId=${articleId}, index=${index}, source=${sourceId}`)
+            // console.log(`[ContentViewPool] IPC cvp-navigate received: articleId=${articleId}, index=${index}, source=${sourceId}`)
             return this.navigateToArticle(articleId, url, feedId, settings, index, listLength, sourceId)
         })
         
         // Prefetch article
         ipcMain.on('cvp-prefetch', (event, articleId, url, feedId, settings) => {
-            console.log(`[ContentViewPool] IPC cvp-prefetch received: articleId=${articleId}`)
+            // console.log(`[ContentViewPool] IPC cvp-prefetch received: articleId=${articleId}`)
             this.prefetch(articleId, url, feedId, settings)
         })
         
         // Prefetch info response from renderer (extended with articleInfo for FullContent)
         ipcMain.on('cvp-prefetch-info', (event, articleIndex, articleId, url, feedId, settings, articleInfo) => {
-            console.log(`[ContentViewPool] IPC cvp-prefetch-info received: index=${articleIndex}, articleId=${articleId}, url=${url?.substring(0, 50) || 'null'}...`)
+            // console.log(`[ContentViewPool] IPC cvp-prefetch-info received: index=${articleIndex}, articleId=${articleId}, url=${url?.substring(0, 50) || 'null'}...`)
             
             // CRITICAL: Add articleId to pending set BEFORE calling prefetch()
             // This prevents a race condition where one prefetch recycles a view
             // that another concurrent prefetch needs
             if (articleId) {
                 this.pendingPrefetchArticleIds.add(articleId)
-                console.log(`[ContentViewPool] Added ${articleId} to pending prefetch set:`, Array.from(this.pendingPrefetchArticleIds))
+                // console.log(`[ContentViewPool] Added ${articleId} to pending prefetch set:`, Array.from(this.pendingPrefetchArticleIds))
             }
             
             if (articleId && articleInfo?.openTarget === PrefetchOpenTarget.FullContent) {
                 // FullContent mode: fetch and extract in background
-                console.log(`[ContentViewPool] Starting FullContent prefetch for ${articleId} at index ${articleIndex}`)
+                // console.log(`[ContentViewPool] Starting FullContent prefetch for ${articleId} at index ${articleIndex}`)
                 this.prefetchFullContent(articleId, feedId, settings, articleInfo, articleIndex)
             } else if (articleId && url) {
                 // Webpage or RSS mode: use URL directly
                 this.prefetch(articleId, url, feedId, settings, articleIndex)
             } else {
-                console.log(`[ContentViewPool] Prefetch info incomplete, skipping`)
+                // console.log(`[ContentViewPool] Prefetch info incomplete, skipping`)
             }
         })
         
@@ -1867,7 +1867,7 @@ export class ContentViewPool {
             // Special handling for input mode - update pool's tracking
             if (channel === 'set-input-mode') {
                 this.inputModeActive = !!args[0]
-                console.log(`[ContentViewPool] Input mode: ${this.inputModeActive ? 'ACTIVE' : 'inactive'}`)
+                // console.log(`[ContentViewPool] Input mode: ${this.inputModeActive ? 'ACTIVE' : 'inactive'}`)
             }
             
             const active = this.getActiveView()
@@ -2120,7 +2120,7 @@ export class ContentViewPool {
         // Nuke active view (for mode switch: RSS <-> Browser)
         // Recycles the view without reloading - caller should navigate after nuke
         ipcMain.handle("cvp-nuke", async () => {
-            console.log("[ContentViewPool] cvp-nuke: Nuking active view for mode switch")
+            // console.log("[ContentViewPool] cvp-nuke: Nuking active view for mode switch")
             const active = this.getActiveView()
             if (active) {
                 // Recycle (destroys and recreates the WebContentsView)
@@ -2133,10 +2133,10 @@ export class ContentViewPool {
                     active.setVisible(true, this.visibleBounds)
                 }
                 
-                console.log("[ContentViewPool] cvp-nuke: View recycled, ready for new navigation")
+                // console.log("[ContentViewPool] cvp-nuke: View recycled, ready for new navigation")
                 return true
             }
-            console.log("[ContentViewPool] cvp-nuke: No active view to nuke")
+            // console.log("[ContentViewPool] cvp-nuke: No active view to nuke")
             return false
         })
         
@@ -2145,12 +2145,12 @@ export class ContentViewPool {
             const active = this.getActiveView()
             const wc = active?.getWebContents()
             if (!wc || wc.isDestroyed()) {
-                console.log("[ContentViewPool] cvp-get-cookies-for-host: No active view")
+                // console.log("[ContentViewPool] cvp-get-cookies-for-host: No active view")
                 return []
             }
             
             const ses = wc.session
-            console.log(`[ContentViewPool] Getting cookies for host: ${host} from session: ${ses.storagePath}`)
+            // console.log(`[ContentViewPool] Getting cookies for host: ${host} from session: ${ses.storagePath}`)
             
             try {
                 const baseDomain = host.replace(/^www\./, "")
@@ -2169,21 +2169,21 @@ export class ContentViewPool {
                 try {
                     const urlCookies = await ses.cookies.get({ url: `https://${host}` })
                     urlCookies.forEach(addCookie)
-                    console.log(`[ContentViewPool] URL cookies: ${urlCookies.length}`)
+                    // console.log(`[ContentViewPool] URL cookies: ${urlCookies.length}`)
                 } catch (e) { /* ignore */ }
                 
                 // 2. Exact domain
                 try {
                     const exactCookies = await ses.cookies.get({ domain: host })
                     exactCookies.forEach(addCookie)
-                    console.log(`[ContentViewPool] Exact domain cookies: ${exactCookies.length}`)
+                    // console.log(`[ContentViewPool] Exact domain cookies: ${exactCookies.length}`)
                 } catch (e) { /* ignore */ }
                 
                 // 3. .domain
                 try {
                     const dotCookies = await ses.cookies.get({ domain: "." + baseDomain })
                     dotCookies.forEach(addCookie)
-                    console.log(`[ContentViewPool] Dot domain cookies: ${dotCookies.length}`)
+                    // console.log(`[ContentViewPool] Dot domain cookies: ${dotCookies.length}`)
                 } catch (e) { /* ignore */ }
                 
                 // 4. www. subdomain
@@ -2197,7 +2197,7 @@ export class ContentViewPool {
                 // 5. Fallback: All cookies filtered by domain
                 try {
                     const allSessionCookies = await ses.cookies.get({})
-                    console.log(`[ContentViewPool] Total cookies in session: ${allSessionCookies.length}`)
+                    // console.log(`[ContentViewPool] Total cookies in session: ${allSessionCookies.length}`)
                     allSessionCookies.filter(c =>
                         c.domain === host ||
                         c.domain === "." + baseDomain ||
@@ -2206,7 +2206,7 @@ export class ContentViewPool {
                     ).forEach(addCookie)
                 } catch (e) { /* ignore */ }
                 
-                console.log(`[ContentViewPool] Found ${allCookies.length} cookies for ${host}`)
+                // console.log(`[ContentViewPool] Found ${allCookies.length} cookies for ${host}`)
                 return allCookies
             } catch (e) {
                 console.error("[ContentViewPool] Error getting cookies:", e)
@@ -2224,10 +2224,10 @@ export class ContentViewPool {
             
             try {
                 const cookies = await wc.session.cookies.get({})
-                console.log(`[ContentViewPool] All cookies: ${cookies.length}`)
-                cookies.forEach(c => {
-                    console.log(`  - ${c.name} @ ${c.domain}`)
-                })
+                // console.log(`[ContentViewPool] All cookies: ${cookies.length}`)
+                // cookies.forEach(c => {
+                //     console.log(`  - ${c.name} @ ${c.domain}`)
+                // })
                 return cookies
             } catch (e) {
                 console.error("[ContentViewPool] Error getting all cookies:", e)
@@ -2237,7 +2237,7 @@ export class ContentViewPool {
         
         // Debug log from renderer
         ipcMain.on("cvp-debug-log", (_event, message: string) => {
-            console.log(`[Renderer DEBUG] ${message}`)
+            // console.log(`[Renderer DEBUG] ${message}`)
         })
     }
     
@@ -2249,18 +2249,18 @@ export class ContentViewPool {
     private setZoomFactor(factor: number): void {
         // Block new zoom requests during sync or if waiting for view confirmation
         if (this.isSyncingZoom) {
-            console.log(`[ContentViewPool] setZoomFactor: blocked during sync`)
+            // console.log(`[ContentViewPool] setZoomFactor: blocked during sync`)
             return
         }
         if (this.isZoomPending) {
-            console.log(`[ContentViewPool] setZoomFactor: blocked - waiting for view confirmation`)
+            // console.log(`[ContentViewPool] setZoomFactor: blocked - waiting for view confirmation`)
             return
         }
         
         const clampedFactor = Math.max(0.25, Math.min(5.0, factor))
         this.cssZoomLevel = this.roundZoom((clampedFactor - 1.0) / 0.1)
         
-        console.log(`[ContentViewPool] setZoomFactor: factor=${factor.toFixed(2)}, level=${this.cssZoomLevel.toFixed(1)}, activeId=${this.activeViewId}`)
+        // console.log(`[ContentViewPool] setZoomFactor: factor=${factor.toFixed(2)}, level=${this.cssZoomLevel.toFixed(1)}, activeId=${this.activeViewId}`)
         
         const active = this.getActiveView()
         if (active) {
@@ -2268,11 +2268,11 @@ export class ContentViewPool {
             this.isZoomPending = true
             // Safety timeout in case view doesn't respond (100ms)
             this.zoomPendingTimeout = setTimeout(() => {
-                console.log(`[ContentViewPool] setZoomFactor: safety timeout - clearing pending`)
+                // console.log(`[ContentViewPool] setZoomFactor: safety timeout - clearing pending`)
                 this.isZoomPending = false
             }, 100)
             
-            console.log(`[ContentViewPool] setZoomFactor: applying to active view ${active.id}`)
+            // console.log(`[ContentViewPool] setZoomFactor: applying to active view ${active.id}`)
             if (this.visualZoomEnabled) {
                 active.setVisualZoomLevel(this.cssZoomLevel)
             } else {
@@ -2283,7 +2283,7 @@ export class ContentViewPool {
             // Don't round - preserve fine zoom steps (0.1 = 1%)
             const feedId = active.feedId
             const viewId = active.id
-            console.log(`[ContentViewPool] Sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}, viewId=${viewId}`)
+            // console.log(`[ContentViewPool] Sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}, viewId=${viewId}`)
             this.sendToRenderer("content-view-zoom-changed", this.cssZoomLevel, feedId, viewId)
         }
         
@@ -2297,18 +2297,18 @@ export class ContentViewPool {
     private setCssZoom(level: number): void {
         // Block new zoom requests during sync or if waiting for view confirmation
         if (this.isSyncingZoom) {
-            console.log(`[ContentViewPool] setCssZoom: blocked during sync`)
+            // console.log(`[ContentViewPool] setCssZoom: blocked during sync`)
             return
         }
         if (this.isZoomPending) {
-            console.log(`[ContentViewPool] setCssZoom: blocked - waiting for view confirmation`)
+            // console.log(`[ContentViewPool] setCssZoom: blocked - waiting for view confirmation`)
             return
         }
         
         const clampedLevel = Math.max(-6, Math.min(40, level))
         this.cssZoomLevel = this.roundZoom(clampedLevel)
         
-        console.log(`[ContentViewPool] setCssZoom(${level}) -> rounded to ${this.cssZoomLevel}, visualZoomEnabled=${this.visualZoomEnabled}`)
+        // console.log(`[ContentViewPool] setCssZoom(${level}) -> rounded to ${this.cssZoomLevel}, visualZoomEnabled=${this.visualZoomEnabled}`)
 
         const active = this.getActiveView()
         if (active) {
@@ -2316,26 +2316,26 @@ export class ContentViewPool {
             this.isZoomPending = true
             // Safety timeout in case view doesn't respond (100ms)
             this.zoomPendingTimeout = setTimeout(() => {
-                console.log(`[ContentViewPool] setCssZoom: safety timeout - clearing pending`)
+                // console.log(`[ContentViewPool] setCssZoom: safety timeout - clearing pending`)
                 this.isZoomPending = false
             }, 100)
             
             // Use the correct zoom method based on visual zoom mode
             if (this.visualZoomEnabled) {
-                console.log(`[ContentViewPool] setCssZoom: Visual Zoom enabled, calling setVisualZoomLevel`)
+                // console.log(`[ContentViewPool] setCssZoom: Visual Zoom enabled, calling setVisualZoomLevel`)
                 active.setVisualZoomLevel(this.cssZoomLevel)
             } else {
-                console.log(`[ContentViewPool] setCssZoom: CSS Zoom, calling setCssZoom on active view ${active.id}`)
+                // console.log(`[ContentViewPool] setCssZoom: CSS Zoom, calling setCssZoom on active view ${active.id}`)
                 active.setCssZoom(this.cssZoomLevel)
             }
             
             // Send zoom update to renderer with feedId and viewId for correct Redux persistence
             const feedId = active.feedId
             const viewId = active.id
-            console.log(`[ContentViewPool] Sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}, viewId=${viewId}`)
+            // console.log(`[ContentViewPool] Sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}, viewId=${viewId}`)
             this.sendToRenderer("content-view-zoom-changed", this.cssZoomLevel, feedId, viewId)
         } else {
-            console.log(`[ContentViewPool] setCssZoom: no active view!`)
+            // console.log(`[ContentViewPool] setCssZoom: no active view!`)
         }
         
         // Sync to views of the same feed (zoom is feed-specific)
@@ -2351,18 +2351,18 @@ export class ContentViewPool {
     handleZoomRequest(zoomLevel: number): void {
         // Block new zoom requests during sync or if waiting for view confirmation
         if (this.isSyncingZoom) {
-            console.log(`[ContentViewPool] handleZoomRequest: blocked during sync`)
+            // console.log(`[ContentViewPool] handleZoomRequest: blocked during sync`)
             return
         }
         if (this.isZoomPending) {
-            console.log(`[ContentViewPool] handleZoomRequest: blocked - waiting for view confirmation`)
+            // console.log(`[ContentViewPool] handleZoomRequest: blocked - waiting for view confirmation`)
             return
         }
         
         const clampedLevel = Math.max(-6, Math.min(40, zoomLevel))
         this.cssZoomLevel = this.roundZoom(clampedLevel)
         
-        console.log(`[ContentViewPool] handleZoomRequest(${zoomLevel}) -> rounded to ${this.cssZoomLevel}`)
+        // console.log(`[ContentViewPool] handleZoomRequest(${zoomLevel}) -> rounded to ${this.cssZoomLevel}`)
         
         // Note: For handleZoomRequest, the preload has already applied zoom locally,
         // so we don't need to wait for confirmation - just update state and notify renderer
@@ -2370,7 +2370,7 @@ export class ContentViewPool {
         if (active) {
             const feedId = active.feedId
             const viewId = active.id
-            console.log(`[ContentViewPool] handleZoomRequest: sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}, viewId=${viewId}`)
+            // console.log(`[ContentViewPool] handleZoomRequest: sending zoom update to renderer: zoom=${this.cssZoomLevel}, feedId=${feedId}, viewId=${viewId}`)
             this.sendToRenderer("content-view-zoom-changed", this.cssZoomLevel, feedId, viewId)
         }
         
@@ -2396,7 +2396,7 @@ export class ContentViewPool {
     private setMobileMode(enabled: boolean): void {
         this.mobileMode = enabled
         
-        console.log(`[ContentViewPool] setMobileMode(${enabled})`)
+        // console.log(`[ContentViewPool] setMobileMode(${enabled})`)
         
         // Update all views
         for (const view of this.views) {
@@ -2421,17 +2421,17 @@ export class ContentViewPool {
             const activeFeedId = activeView?.feedId
             
             if (!activeFeedId) {
-                console.log('[ContentViewPool] syncZoomToSameFeedViews: no active feed, skipping')
+                // console.log('[ContentViewPool] syncZoomToSameFeedViews: no active feed, skipping')
                 return
             }
             
-            console.log(`[ContentViewPool] syncZoomToSameFeedViews: active=${activeViewId}, feed=${activeFeedId}, zoomLevel=${this.cssZoomLevel}`)
+            // console.log(`[ContentViewPool] syncZoomToSameFeedViews: active=${activeViewId}, feed=${activeFeedId}, zoomLevel=${this.cssZoomLevel}`)
             
             for (const view of this.views) {
                 // Use ID comparison (more robust than object reference comparison)
                 // Skip the active view - it was already updated in setZoomFactor/setCssZoom
                 if (view.id !== activeViewId && view.feedId === activeFeedId) {
-                    console.log(`[ContentViewPool] syncZoomToSameFeedViews: syncing ${view.id} (same feed: ${activeFeedId})`)
+                    // console.log(`[ContentViewPool] syncZoomToSameFeedViews: syncing ${view.id} (same feed: ${activeFeedId})`)
                     if (this.visualZoomEnabled) {
                         view.setVisualZoomLevel(this.cssZoomLevel)
                     } else {
@@ -2492,7 +2492,7 @@ export class ContentViewPool {
         this.activeViewId = null
         this.parentWindow = null
         
-        console.log("[ContentViewPool] Destroyed")
+        // console.log("[ContentViewPool] Destroyed")
     }
 }
 

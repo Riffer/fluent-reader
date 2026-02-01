@@ -355,7 +355,7 @@ export class WindowManager {
                 if (!app.isPackaged) this.mainWindow.webContents.openDevTools()
                 
                 // Initialize ContentViewPool
-                console.log('[WindowManager] Initializing ContentViewPool (Pool mode)...')
+                // console.log('[WindowManager] Initializing ContentViewPool (Pool mode)...')
                 initializeContentViewPool(this.mainWindow)
             })
             this.mainWindow.loadFile(

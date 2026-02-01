@@ -254,7 +254,7 @@ export class CachedContentView {
             // Each view gets a distinct color: red, green, yellow
             const debugColor = this.getBackgroundColor()
             this._view.setBackgroundColor(debugColor)
-            console.log(`[CachedContentView:${this.id}] Background color set to ${debugColor}`)
+            // console.log(`[CachedContentView:${this.id}] Background color set to ${debugColor}`)
             
             // Start hidden (using native visibility)
             this._view.setVisible(false)
@@ -267,7 +267,7 @@ export class CachedContentView {
             // Setup event handlers
             this.setupWebContentsEvents()
             
-            console.log(`[CachedContentView:${this.id}] Created successfully`)
+            // console.log(`[CachedContentView:${this.id}] Created successfully`)
         } catch (e) {
             console.error(`[CachedContentView:${this.id}] Error creating view:`, e)
             this._view = null
@@ -290,7 +290,7 @@ export class CachedContentView {
         
         this._view = null
         this.setStatus('empty')
-        console.log(`[CachedContentView:${this.id}] Destroyed`)
+        // console.log(`[CachedContentView:${this.id}] Destroyed`)
     }
     
     /**
@@ -298,7 +298,7 @@ export class CachedContentView {
      * Destroys the current WebContentsView and resets state
      */
     recycle(): void {
-        console.log(`[CachedContentView:${this.id}] Recycling (was: ${this._articleId})`)
+        // console.log(`[CachedContentView:${this.id}] Recycling (was: ${this._articleId})`)
         
         // Destroy the view (must be recreated due to IPC/preload issues)
         this.destroy()
@@ -368,7 +368,7 @@ export class CachedContentView {
         this._visualZoomLevel = zoomLevel
         this._cssZoomLevel = zoomLevel  // Also set CSS zoom level for get-css-zoom-level IPC
         
-        console.log(`[CachedContentView:${this.id}] Load settings: visualZoom=${settings.visualZoom}, zoomLevel=${zoomLevel}, mobileMode=${settings.mobileMode}`)
+        // console.log(`[CachedContentView:${this.id}] Load settings: visualZoom=${settings.visualZoom}, zoomLevel=${zoomLevel}, mobileMode=${settings.mobileMode}`)
         
         // Reset error state
         this._loadError = null
@@ -384,7 +384,7 @@ export class CachedContentView {
             this._view.webContents.setUserAgent("")
         }
         
-        console.log(`[CachedContentView:${this.id}] Loading: ${articleId} (${url.substring(0, 50)}...)`)
+        // console.log(`[CachedContentView:${this.id}] Loading: ${articleId} (${url.substring(0, 50)}...)`)
         
         // Start navigation and wait for dom-ready
         // loadURL resolves when navigation starts, but we need to wait for dom-ready
@@ -406,7 +406,7 @@ export class CachedContentView {
             
             // Handler for dom-ready
             const onDomReady = () => {
-                console.log(`[CachedContentView:${this.id}] dom-ready received in load()`)
+                // console.log(`[CachedContentView:${this.id}] dom-ready received in load()`)
                 cleanup()
                 resolve()
             }
@@ -493,7 +493,7 @@ export class CachedContentView {
             }
         }
         
-        console.log(`[CachedContentView:${this.id}] Active: ${active}, audioMuted: ${!active}`)
+        // console.log(`[CachedContentView:${this.id}] Active: ${active}, audioMuted: ${!active}`)
     }
     
     // ========== Visibility & Bounds ==========
@@ -559,13 +559,13 @@ export class CachedContentView {
      */
     setVisible(visible: boolean, bounds?: { x: number, y: number, width: number, height: number }): void {
         if (this._view) {
-            console.log(`[CachedContentView:${this.id}] setVisible(${visible}, bounds=${bounds ? `${bounds.width}x${bounds.height}@${bounds.x},${bounds.y}` : 'none'})`)
+            // console.log(`[CachedContentView:${this.id}] setVisible(${visible}, bounds=${bounds ? `${bounds.width}x${bounds.height}@${bounds.x},${bounds.y}` : 'none'})`)
             
             if (visible) {
                 // Move on-screen with provided bounds
                 this._isOffScreen = false
                 if (bounds) {
-                    console.log(`[CachedContentView:${this.id}] Applying bounds: ${bounds.width}x${bounds.height}@${bounds.x},${bounds.y}`)
+                    // console.log(`[CachedContentView:${this.id}] Applying bounds: ${bounds.width}x${bounds.height}@${bounds.x},${bounds.y}`)
                     this._view.setBounds(bounds)
                 } else {
                     console.warn(`[CachedContentView:${this.id}] setVisible(true) called WITHOUT bounds!`)
@@ -616,7 +616,7 @@ export class CachedContentView {
     focus(): void {
         if (this._view?.webContents && !this._view.webContents.isDestroyed()) {
             this._view.webContents.focus()
-            console.log(`[CachedContentView:${this.id}] focused`)
+            // console.log(`[CachedContentView:${this.id}] focused`)
         }
     }
     
@@ -675,14 +675,14 @@ export class CachedContentView {
      */
     setCssZoom(level: number): void {
         if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
-            console.log(`[CachedContentView:${this.id}] setCssZoom(${level}) - view not available`)
+            // console.log(`[CachedContentView:${this.id}] setCssZoom(${level}) - view not available`)
             return
         }
         
         const clampedLevel = Math.max(-6, Math.min(40, level))
         this._cssZoomLevel = clampedLevel
         
-        console.log(`[CachedContentView:${this.id}] setCssZoom: sending 'content-view-set-css-zoom' with level=${clampedLevel}`)
+        // console.log(`[CachedContentView:${this.id}] setCssZoom: sending 'content-view-set-css-zoom' with level=${clampedLevel}`)
         this._view.webContents.send('content-view-set-css-zoom', clampedLevel)
     }
     
@@ -720,7 +720,7 @@ export class CachedContentView {
             return
         }
         
-        console.log(`[CachedContentView:${this.id}] setVideoFullscreen: ${isFullscreen}, visualZoom=${this._visualZoomEnabled}`)
+        // console.log(`[CachedContentView:${this.id}] setVideoFullscreen: ${isFullscreen}, visualZoom=${this._visualZoomEnabled}`)
         
         if (isFullscreen) {
             // Disable Device Emulation to let video take full screen
@@ -748,7 +748,7 @@ export class CachedContentView {
         const scale = 1.0 + (level * 0.1)
         const clampedScale = Math.max(0.25, Math.min(5.0, scale))
         
-        console.log(`[CachedContentView:${this.id}] setVisualZoomLevel: level=${level}, scale=${clampedScale}, status=${this._status}`)
+        // console.log(`[CachedContentView:${this.id}] setVisualZoomLevel: level=${level}, scale=${clampedScale}, status=${this._status}`)
         
         // Apply Device Emulation with new scale - only if ready AND not in video fullscreen
         // For empty/loading views, it will be applied at dom-ready
@@ -852,7 +852,7 @@ export class CachedContentView {
             scale: totalScale
         }
         
-        console.log(`[CachedContentView:${this.id}] Device Emulation: article=${this._articleId}, zoomScale=${zoomScale.toFixed(2)}, totalScale=${totalScale.toFixed(2)}, viewport=${viewWidth}x${viewHeight}, mobileMode=${this._mobileMode}`)
+        // console.log(`[CachedContentView:${this.id}] Device Emulation: article=${this._articleId}, zoomScale=${zoomScale.toFixed(2)}, totalScale=${totalScale.toFixed(2)}, viewport=${viewWidth}x${viewHeight}, mobileMode=${this._mobileMode}`)
         wc.enableDeviceEmulation(emulationParams)
     }
     
@@ -863,7 +863,7 @@ export class CachedContentView {
         const wasEnabled = this._mobileMode
         this._mobileMode = enabled
         
-        console.log(`[CachedContentView:${this.id}] setMobileMode: ${wasEnabled} -> ${enabled}, status=${this._status}`)
+        // console.log(`[CachedContentView:${this.id}] setMobileMode: ${wasEnabled} -> ${enabled}, status=${this._status}`)
         
         if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
             return
@@ -897,7 +897,7 @@ export class CachedContentView {
         const wasEnabled = this._visualZoomEnabled
         this._visualZoomEnabled = enabled
         
-        console.log(`[CachedContentView:${this.id}] setVisualZoomMode: ${wasEnabled} -> ${enabled}, status=${this._status}`)
+        // console.log(`[CachedContentView:${this.id}] setVisualZoomMode: ${wasEnabled} -> ${enabled}, status=${this._status}`)
         
         // Only apply Device Emulation if view exists and has been used
         if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
@@ -940,7 +940,7 @@ export class CachedContentView {
         const oldStatus = this._status
         this._status = status
         
-        console.log(`[CachedContentView:${this.id}] Status: ${oldStatus} -> ${status}`)
+        // console.log(`[CachedContentView:${this.id}] Status: ${oldStatus} -> ${status}`)
         this.onStatusChanged?.(status)
     }
     
@@ -953,7 +953,7 @@ export class CachedContentView {
         wc.on('dom-ready', () => {
             if (this._status === 'loading') {
                 const loadTime = performance.now() - this._loadStartTime
-                console.log(`[CachedContentView:${this.id}] DOM ready (${loadTime.toFixed(0)}ms)`)
+                // console.log(`[CachedContentView:${this.id}] DOM ready (${loadTime.toFixed(0)}ms)`)
                 
                 this.setStatus('ready')
                 this.onDomReady?.()
@@ -962,7 +962,7 @@ export class CachedContentView {
                 // This must happen after content loads to avoid crashes
                 if (this._visualZoomEnabled) {
                     const scale = 1.0 + (this._visualZoomLevel * 0.1)
-                    console.log(`[CachedContentView:${this.id}] Applying Visual Zoom on dom-ready: scale=${scale}`)
+                    // console.log(`[CachedContentView:${this.id}] Applying Visual Zoom on dom-ready: scale=${scale}`)
                     this.applyDeviceEmulation(Math.max(0.25, Math.min(5.0, scale)))
                 }
                 
@@ -994,13 +994,13 @@ export class CachedContentView {
         
         // HTML5 Video Fullscreen - entering
         wc.on('enter-html-full-screen', () => {
-            console.log(`[CachedContentView:${this.id}] Video entering fullscreen`)
+            // console.log(`[CachedContentView:${this.id}] Video entering fullscreen`)
             this.onVideoFullscreen?.(true)
         })
         
         // HTML5 Video Fullscreen - leaving
         wc.on('leave-html-full-screen', () => {
-            console.log(`[CachedContentView:${this.id}] Video leaving fullscreen`)
+            // console.log(`[CachedContentView:${this.id}] Video leaving fullscreen`)
             this.onVideoFullscreen?.(false)
         })
     }
