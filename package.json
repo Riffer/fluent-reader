@@ -1,6 +1,6 @@
 {
   "name": "fluent-reader",
-  "version": "1.4.14",
+  "version": "1.4.15",
   "description": "Modern desktop RSS reader (fork with updated components and extensions)",
   "main": "./dist/electron.js",
   "files": [

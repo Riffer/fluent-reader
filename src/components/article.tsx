@@ -440,9 +440,27 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             : direction === 'backward' ? '← rückwärts' 
             : '↔ unbekannt';
         
+        // Get article title for each target index
+        const getArticleTitle = (idx: number): string => {
+            const { articleIds, items } = this.props;
+            if (articleIds && items && idx >= 0 && idx < articleIds.length) {
+                const articleId = articleIds[idx];
+                const item = items[articleId];
+                if (item?.title) {
+                    // Truncate long titles
+                    const maxLen = 40;
+                    return item.title.length > maxLen 
+                        ? item.title.substring(0, maxLen) + '...' 
+                        : item.title;
+                }
+            }
+            return `(Index ${idx})`;
+        };
+        
         const targetsList = targets.map(idx => {
             const isComplete = completedIndices.includes(idx);
-            return `  ${isComplete ? '✓' : '○'} Index ${idx}`;
+            const title = getArticleTitle(idx);
+            return `  ${isComplete ? '✓' : '○'} #${idx}: ${title}`;
         }).join('\n');
         
         const tooltip = [
