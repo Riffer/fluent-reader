@@ -5,6 +5,7 @@ import performUpdate from "./main/update-scripts"
 import { WindowManager } from "./main/window"
 import { initP2P, registerP2PIpcHandlers } from "./main/p2p-share"
 import { initP2PLan, registerP2PLanIpcHandlers, shutdownP2P, onSystemSuspend, onSystemResume } from "./main/p2p-lan"
+import { registerTranslationIpc } from "./main/translation-service"
 
 // ===== Security Warnings =====
 // Suppress Content-Security-Policy warning for external websites loaded in ContentView
@@ -63,6 +64,9 @@ function init() {
     // Initialize P2P LAN module (for automatic discovery)
     initP2PLan()
     registerP2PLanIpcHandlers()
+    
+    // Initialize Translation service
+    registerTranslationIpc()
 }
 
 init()

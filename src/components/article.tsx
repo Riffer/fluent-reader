@@ -67,6 +67,10 @@ type ArticleProps = {
         source: RSSSource,
         persistCookies: boolean
     ) => void
+    updateTranslateTo: (
+        source: RSSSource,
+        translateTo: string | undefined
+    ) => void
     // ContentViewPool support: article position in feed
     articleIndex?: number
     listLength?: number
@@ -114,6 +118,8 @@ type ArticleState = {
         targets: number[]
         completedIndices: number[]
     } | null
+    // Supported languages for translation (loaded from main process)
+    supportedLanguages: Record<string, string> | null
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -257,7 +263,17 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             videoFullscreen: false,
             activeViewId: null,
             prefetchStatus: null,
+            supportedLanguages: null,
         }
+
+        // Load supported languages for translation menu
+        window.translation?.getSupportedLanguages().then(langs => {
+            if (this._isMounted) {
+                this.setState({ supportedLanguages: langs })
+            }
+        }).catch(err => {
+            console.error('[Article] Failed to load supported languages:', err)
+        })
 
         // IPC listener for zoom changes from preload script or ContentViewPool
         // NOTE: This listener may fire with stale props if user switches articles quickly.
@@ -798,7 +814,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             textDir: source.textDir || 0,
             fontSize: this.state.fontSize,
             fontFamily: this.state.fontFamily || '',
-            locale: locale || 'en-US'
+            locale: locale || 'en-US',
+            translateTo: source.translateTo  // Pass translation target language
         };
         
         if (openTarget === SourceOpenTarget.Webpage) {
@@ -1545,6 +1562,42 @@ a:hover { text-decoration: underline; }
         ],
     })
 
+    updateTranslateTo = (lang: string | undefined) => {
+        this.props.updateTranslateTo(this.props.source, lang)
+    }
+
+    translationMenuProps = (): IContextualMenuProps => {
+        const items: any[] = [
+            {
+                key: "noTranslation",
+                text: intl.get("article.noTranslation"),
+                iconProps: { iconName: "Cancel" },
+                canCheck: true,
+                checked: !this.props.source.translateTo,
+                onClick: () => this.updateTranslateTo(undefined),
+            },
+            {
+                key: "dividerTranslation",
+                itemType: ContextualMenuItemType.Divider,
+            },
+        ]
+        
+        // Add language options if loaded
+        if (this.state.supportedLanguages) {
+            for (const [code, name] of Object.entries(this.state.supportedLanguages)) {
+                items.push({
+                    key: code,
+                    text: name,
+                    canCheck: true,
+                    checked: this.props.source.translateTo === code,
+                    onClick: () => this.updateTranslateTo(code),
+                })
+            }
+        }
+        
+        return { items }
+    }
+
     moreMenuProps = (): IContextualMenuProps => {
         const items: any[] = [
             {
@@ -1596,6 +1649,13 @@ a:hover { text-decoration: underline; }
                 iconProps: { iconName: "ChangeEntitlements" },
                 disabled: this.isWebpageMode,
                 subMenuProps: this.directionMenuProps(),
+            },
+            {
+                key: "translationMenu",
+                text: intl.get("article.translateTo"),
+                iconProps: { iconName: "LocaleLanguage" },
+                // Translation applies to new articles when feed is refreshed
+                subMenuProps: this.translationMenuProps(),
             },
             {
                 key: "toolsMenu",
@@ -2735,6 +2795,26 @@ a:hover { text-decoration: underline; }
                 
                 // Always clean up the content to remove duplicates (both extractor and fallback)
                 contentToUse = this.cleanDuplicateContent(contentToUse)
+                
+                // Translate if source has translation enabled
+                const translateTo = this.props.source.translateTo
+                if (translateTo && window.translation) {
+                    console.log(`[loadFull] Translating to ${translateTo}`)
+                    try {
+                        // Translate title
+                        if (extractorTitle) {
+                            extractorTitle = await window.translation.translateText(extractorTitle, translateTo)
+                        }
+                        // Translate content (HTML-aware)
+                        if (contentToUse) {
+                            contentToUse = await window.translation.translateHtml(contentToUse, translateTo)
+                        }
+                        console.log(`[loadFull] Translation complete`)
+                    } catch (translationError) {
+                        console.error(`[loadFull] Translation failed:`, translationError)
+                        // Keep original content on translation error
+                    }
+                }
                 
                 // Wrap extracted content in semantic <article> structure
                 const escapeHtml = (text: string) => {

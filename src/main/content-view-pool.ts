@@ -19,6 +19,7 @@ import { CachedContentView, NavigationSettings, CachedViewStatus } from "./cache
 import { isMobileUserAgentEnabled, isVisualZoomEnabled } from "./settings"
 import { extractFromHtml } from "@extractus/article-extractor"
 import { generateArticleHtml, generateFullContentHtml, textDirToString, TextDirection } from "./article-html-generator"
+import { translateText, translateHtml } from "./translation-service"
 import https from "https"
 import http from "http"
 import fs from "fs"
@@ -82,6 +83,7 @@ interface PrefetchArticleInfo {
     fontSize: number
     fontFamily: string
     locale: string
+    translateTo?: string  // Target language for translation (e.g., 'de')
 }
 
 /**
@@ -1066,12 +1068,19 @@ export class ContentViewPool {
             return
         }
         
-        // Check if article is already in a view
+        // Check if article is already in a view WITH FullContent mode
+        // If it's cached but NOT in FullContent mode, we need to reload with extracted content
         const existingView = this.getViewByArticleId(articleId)
-        if (existingView && (existingView.status === 'ready' || existingView.status === 'loading')) {
+        if (existingView && existingView.isFullContentMode && (existingView.status === 'ready' || existingView.status === 'loading')) {
             // console.log(`[ContentViewPool] FullContent prefetch skip - already ${existingView.status}: ${articleId}`)
             this.onPrefetchComplete(articleId, articleIndex)
             return
+        }
+        
+        // If view exists but is NOT FullContent mode, recycle it first
+        if (existingView && !existingView.isFullContentMode) {
+            console.log(`[ContentViewPool] FullContent: recycling non-FullContent view for ${articleId}`)
+            existingView.recycle()
         }
         
         // Find a free view
@@ -1113,10 +1122,30 @@ export class ContentViewPool {
             
             // Step 3: Use extracted content or fallback to RSS content
             let contentToUse = extracted?.content || articleInfo.itemContent || ''
+            let titleToUse = extracted?.title || articleInfo.itemTitle
             
-            // Step 4: Generate HTML data URL
+            // Step 4: Translate if source has translation enabled
+            if (articleInfo.translateTo) {
+                console.log(`[ContentViewPool] FullContent: translating to ${articleInfo.translateTo}`)
+                console.log(`[ContentViewPool] FullContent: contentToUse BEFORE length=${contentToUse.length}`)
+                console.log(`[ContentViewPool] FullContent: contentToUse BEFORE first 200 chars: ${contentToUse.substring(0, 200)}`)
+                try {
+                    // Translate title
+                    titleToUse = await translateText(titleToUse, articleInfo.translateTo)
+                    // Translate content (HTML-aware)
+                    contentToUse = await translateHtml(contentToUse, articleInfo.translateTo)
+                    console.log(`[ContentViewPool] FullContent: translation complete`)
+                    console.log(`[ContentViewPool] FullContent: contentToUse AFTER length=${contentToUse.length}`)
+                    console.log(`[ContentViewPool] FullContent: contentToUse AFTER first 200 chars: ${contentToUse.substring(0, 200)}`)
+                } catch (translationError) {
+                    console.error(`[ContentViewPool] FullContent: translation failed:`, translationError)
+                    // Keep original content on translation error
+                }
+            }
+            
+            // Step 5: Generate HTML data URL
             const dataUrl = generateFullContentHtml({
-                title: articleInfo.itemTitle,
+                title: titleToUse,
                 date: new Date(articleInfo.itemDate),
                 content: contentToUse,
                 baseUrl: articleInfo.itemLink,
@@ -1124,14 +1153,15 @@ export class ContentViewPool {
                 fontSize: articleInfo.fontSize,
                 fontFamily: articleInfo.fontFamily,
                 locale: articleInfo.locale,
-                extractorTitle: extracted?.title,
+                extractorTitle: titleToUse,
                 extractorDate: extracted?.published ? new Date(extracted.published) : undefined
             })
             
             // console.log(`[ContentViewPool] FullContent: loading extracted content for ${articleId}`)
             
-            // Step 5: Load the generated HTML
+            // Step 6: Load the generated HTML and mark as FullContent mode
             await freeView.load(dataUrl, articleId, feedId, settings, false, articleIndex)
+            freeView.isFullContentMode = true  // Mark this view as FullContent so it's not recycled for Local mode
             
             // console.log(`[ContentViewPool] FullContent prefetch complete: ${articleId}`)
             // Remove from pending set after successful load

@@ -50,6 +50,7 @@ export class CachedContentView {
     private _feedId: string | null = null
     private _url: string | null = null
     private _articleIndex: number = -1  // Position in feed list for smart recycling
+    private _isFullContentMode: boolean = false  // True if loaded with extracted FullContent (vs Local RSS content)
     
     // === Status ===
     private _status: CachedViewStatus = 'empty'
@@ -157,6 +158,14 @@ export class CachedContentView {
     
     get articleIndex(): number {
         return this._articleIndex
+    }
+    
+    get isFullContentMode(): boolean {
+        return this._isFullContentMode
+    }
+    
+    set isFullContentMode(value: boolean) {
+        this._isFullContentMode = value
     }
     
     get status(): CachedViewStatus {
@@ -323,6 +332,7 @@ export class CachedContentView {
         this._articleId = null
         this._feedId = null
         this._url = null
+        this._isFullContentMode = false
         
         // Reset load state
         this._loadError = null

@@ -6,6 +6,7 @@ import { createArticleExtractorBridge } from "./bridges/article-extractor"
 import { p2pBridge } from "./bridges/p2p"
 import { p2pLanBridge } from "./bridges/p2p-lan"
 import { contentViewPoolBridge } from "./bridges/content-view-pool"
+import translationBridge from "./bridges/translation"
 
 contextBridge.exposeInMainWorld("settings", settingsBridge)
 contextBridge.exposeInMainWorld("db", dbBridge)
@@ -14,6 +15,7 @@ contextBridge.exposeInMainWorld("p2p", p2pBridge)
 contextBridge.exposeInMainWorld("p2pLan", p2pLanBridge)
 // Pool is now the only ContentView implementation
 contextBridge.exposeInMainWorld("contentViewPool", contentViewPoolBridge)
+contextBridge.exposeInMainWorld("translation", translationBridge)
 
 // ipcRenderer for ContentView Pool communication (restricted to required channels)
 const limitedIpcRenderer = {

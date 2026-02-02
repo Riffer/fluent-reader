@@ -45,6 +45,37 @@ setOverlayVisible('p2p-incoming', false)  // Overlay schließt
 
 ## 💡 Offene Ideen
 
+### FullContent: Legacy-Pfad (loadFull) mit Pool-Pfad konsolidieren (01.02.2026)
+
+**Problem:**
+Für FullContent-Modus existieren zwei separate Implementierungen:
+
+1. **Legacy-Pfad (loadFull in article.tsx)**: 
+   - Läuft im Renderer-Prozess
+   - Wird bei direkter Navigation aufgerufen (componentDidUpdate)
+   - Verwendet `fetch()` und `window.articleExtractor.extractFromHtml()`
+
+2. **Pool-Pfad (prefetchFullContent in content-view-pool.ts)**:
+   - Läuft im Main-Prozess
+   - Wird nur für Prefetch verwendet
+   - Verwendet `net.request()` und eigene `extractFromHtml()`
+
+**Konsequenzen:**
+- Doppelter Code für dieselbe Funktionalität
+- Übersetzung musste an beiden Stellen implementiert werden
+- Inkonsistente Fehlerbehandlung
+- Pool-Cache wird bei direkter Navigation nicht genutzt
+
+**Vorgeschlagene Lösung:**
+1. Neuer IPC-Handler `cvp-navigate-fullcontent` im Pool
+2. Handler prüft ob Artikel schon geprefetcht ist (instant) oder lädt on-demand
+3. `loadFull()` in article.tsx entfernen
+4. FullContent-Navigation verwendet Pool wie Webpage/Local
+
+**Branch:** `refactor/consolidate-fullcontent-paths`
+
+---
+
 ### Arrow-Keys bei Artikelwechsel: Event-Blocking in ContentView (30.12.2025)
 
 **Problem:**

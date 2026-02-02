@@ -51,6 +51,7 @@ export class RSSSource {
     rules?: SourceRule[]
     textDir: SourceTextDirection
     hidden: boolean
+    translateTo?: string // Target language code for translation (e.g., 'de', 'en', 'fr')
 
     constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null, defaultZoom = 0, mobileMode = false, persistCookies = false) {
         this.url = url
@@ -63,6 +64,7 @@ export class RSSSource {
         this.fetchFrequency = 0
         this.textDir = SourceTextDirection.LTR
         this.hidden = false
+        this.translateTo = undefined
     }
 
     static async fetchMetaData(source: RSSSource) {
@@ -90,29 +92,25 @@ export class RSSSource {
         if (!exists) {
             RSSItem.parseContent(i, item)
             if (source.rules) SourceRule.applyAll(source.rules, i)
+            
+            // NOTE: Translation is now done on-demand when displaying articles
+            // This reduces API calls since not all articles are read
+            // See card.tsx and article.tsx for on-demand translation
+            
             return i
         } else {
             return null
         }
     }
 
-    static checkItems(
+    static async checkItems(
         source: RSSSource,
         items: MyParserItem[]
     ): Promise<RSSItem[]> {
-        return new Promise<RSSItem[]>((resolve, reject) => {
-            let p = new Array<Promise<RSSItem>>()
-            for (let item of items) {
-                p.push(this.checkItem(source, item))
-            }
-            Promise.all(p)
-                .then(values => {
-                    resolve(values.filter(v => v != null))
-                })
-                .catch(e => {
-                    reject(e)
-                })
-        })
+        // Always process in parallel now since translation is on-demand
+        const promises = items.map(item => this.checkItem(source, item))
+        const results = await Promise.all(promises)
+        return results.filter(v => v != null) as RSSItem[]
     }
 
     static async fetchItems(source: RSSSource) {
@@ -257,6 +255,7 @@ function rowToSource(row: SourceRow): RSSSource {
     source.hidden = row.hidden === 1
     source.mobileMode = row.mobileMode === 1
     source.persistCookies = row.persistCookies === 1
+    source.translateTo = row.translateTo ?? undefined
     source.unreadCount = 0
     return source
 }
@@ -324,7 +323,8 @@ function sourceToRow(source: RSSSource): Omit<SourceRow, "sid"> & { sid?: number
         textDir: source.textDir,
         hidden: source.hidden ? 1 : 0,
         mobileMode: source.mobileMode ? 1 : 0,
-        persistCookies: source.persistCookies ? 1 : 0
+        persistCookies: source.persistCookies ? 1 : 0,
+        translateTo: source.translateTo ?? null
     }
 }
 

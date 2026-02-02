@@ -159,6 +159,14 @@ const mapDispatchToProps = (dispatch: AppDispatch) => {
                 updateSource({ ...source, persistCookies: persistCookies } as RSSSource)
             )
         },
+        updateTranslateTo: (
+            source: RSSSource,
+            translateTo: string | undefined
+        ) => {
+            dispatch(
+                updateSource({ ...source, translateTo: translateTo } as RSSSource)
+            )
+        },
     }
 }
 

@@ -8,6 +8,7 @@ import type { DbBridge } from "../bridges/db"
 import type { P2PBridge } from "../bridges/p2p"
 import type { P2PLanBridge } from "../bridges/p2p-lan"
 import type { contentViewPoolBridge } from "../bridges/content-view-pool"
+import type { TranslationBridge } from "../bridges/translation"
 
 type ArticleExtractorBridge = ReturnType<typeof createArticleExtractorBridge>
 type ContentViewPoolBridge = typeof contentViewPoolBridge
@@ -68,6 +69,11 @@ declare global {
          * This is now the only ContentView implementation (legacy bridge removed)
          */
         contentViewPool: ContentViewPoolBridge
+
+        /**
+         * Translation bridge - translate RSS content
+         */
+        translation: TranslationBridge
 
         /**
          * Limited IPC renderer for specific channels
