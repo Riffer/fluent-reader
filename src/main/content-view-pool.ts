@@ -1986,52 +1986,10 @@ export class ContentViewPool {
         // console.log('[ContentViewPool] Setting up IPC handlers...')
         
         // =====================================================
-        // Legacy channel handlers (for code paths that haven't migrated yet)
-        // These forward to the Pool implementation
+        // Sync handlers for content-preload.js (must remain sync)
         // =====================================================
         
-        // Legacy: content-view-navigate-with-settings
-        ipcMain.handle("content-view-navigate-with-settings", async (event, url: string, settings: NavigationSettings) => {
-            // console.log('[ContentViewPool] Legacy channel content-view-navigate-with-settings forwarded to Pool')
-            const active = this.getActiveView()
-            const wc = active?.getWebContents()
-            if (!wc || wc.isDestroyed()) {
-                console.error("[ContentViewPool] Cannot navigate - no active view")
-                return false
-            }
-            
-            try {
-                // Apply settings
-                this.visualZoomEnabled = settings.visualZoom
-                this.mobileMode = settings.mobileMode
-                const clampedZoom = Math.max(0.25, Math.min(5.0, settings.zoomFactor))
-                this.cssZoomLevel = this.roundZoom((clampedZoom - 1.0) / 0.1)
-                
-                // Apply mobile user agent if enabled
-                const mobileUA = "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36"
-                if (isMobileUserAgentEnabled()) {
-                    wc.setUserAgent(mobileUA)
-                } else {
-                    wc.setUserAgent("")
-                }
-                
-                // Navigate
-                await wc.loadURL(url)
-                return true
-            } catch (e) {
-                console.error("[ContentViewPool] navigateWithSettings error:", e)
-                return false
-            }
-        })
-        
-        // Legacy: content-view-close-devtools
-        ipcMain.handle("content-view-close-devtools", () => {
-            // console.log('[ContentViewPool] Legacy channel content-view-close-devtools forwarded to Pool')
-            const active = this.getActiveView()
-            active?.getWebContents()?.closeDevTools()
-        })
-        
-        // Legacy: get-css-zoom-level (sync - used by content-preload.js)
+        // get-css-zoom-level (sync - used by content-preload.js)
         // IMPORTANT: Return the zoom level for the SPECIFIC view that sent the request,
         // not the global pool zoom. This enables per-feed zoom levels.
         ipcMain.on("get-css-zoom-level", (event) => {
@@ -2062,7 +2020,7 @@ export class ContentViewPool {
             }
         })
         
-        // Legacy: get-mobile-mode (sync - used by content-preload.js)
+        // get-mobile-mode (sync - used by content-preload.js)
         ipcMain.on("get-mobile-mode", (event) => {
             event.returnValue = this.mobileMode
         })
@@ -2289,7 +2247,7 @@ export class ContentViewPool {
             }
         })
         
-        // Legacy channel for settings.ts compatibility
+        // Sync channel for settings.ts (bridges/settings.ts uses this)
         ipcMain.on("get-emulated-viewport-info", (event) => {
             const factor = 1.0 + (this.cssZoomLevel * 0.1)
             event.returnValue = {
