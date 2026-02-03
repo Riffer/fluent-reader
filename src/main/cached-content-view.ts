@@ -12,6 +12,14 @@
 import { WebContentsView, session, app } from "electron"
 import type { BrowserWindow } from "electron"
 import path from "path"
+import { 
+    isVisualZoomEnabled, 
+    isZoomOverlayEnabled, 
+    isNsfwCleanupEnabled, 
+    isAutoCookieConsentEnabled,
+    isRedditGalleryExpandEnabled,
+    isRedditSingleImageExpandEnabled
+} from "./settings"
 
 /**
  * Navigation settings for loading content
@@ -248,6 +256,24 @@ export class CachedContentView {
     // ========== Lifecycle ==========
     
     /**
+     * Build additionalArguments array for preload script
+     * These settings are passed to the preload at creation time,
+     * eliminating the need for sync IPC calls during page load.
+     */
+    private buildPreloadArgs(): string[] {
+        return [
+            `--zoom-level=${this._cssZoomLevel}`,
+            `--mobile-mode=${this._loadedWithMobileMode}`,
+            `--visual-zoom=${isVisualZoomEnabled()}`,
+            `--zoom-overlay=${isZoomOverlayEnabled()}`,
+            `--nsfw-cleanup=${isNsfwCleanupEnabled()}`,
+            `--auto-cookie-consent=${isAutoCookieConsentEnabled()}`,
+            `--reddit-gallery-expand=${isRedditGalleryExpandEnabled()}`,
+            `--reddit-single-image-expand=${isRedditSingleImageExpandEnabled()}`
+        ]
+    }
+    
+    /**
      * Create the underlying WebContentsView
      * Must be called before load()
      */
@@ -263,6 +289,9 @@ export class CachedContentView {
             // Create sandbox session for content isolation
             const sandboxSession = session.fromPartition("sandbox")
             
+            // Build settings arguments for preload script (eliminates sync IPC)
+            const preloadArgs = this.buildPreloadArgs()
+            
             this._view = new WebContentsView({
                 webPreferences: {
                     preload: CachedContentView.preloadPath,
@@ -272,6 +301,7 @@ export class CachedContentView {
                     spellcheck: false,
                     session: sandboxSession,
                     webviewTag: false,
+                    additionalArguments: preloadArgs,
                 }
             })
             
@@ -469,7 +499,14 @@ export class CachedContentView {
                 // ERR_ABORTED can come as err.code === "ERR_ABORTED" or err.errno === -3
                 const isAborted = err.code === "ERR_ABORTED" || err.errno === -3
                 if (!isAborted) {
-                    console.error(`[CachedContentView:${this.id}] Load error:`, err)
+                    // Only log errors for URLs that match the original feed domain
+                    // This filters out blocked ads/trackers (e.g., from Pi-Hole)
+                    const shouldLog = this.shouldLogUrlError(err.url, url)
+                    if (shouldLog) {
+                        // Truncate data: URLs for readable logging
+                        const displayUrl = this.truncateDataUrl(err.url || url)
+                        console.error(`[CachedContentView:${this.id}] Load error: ${err.code || err.errno} - ${displayUrl}`)
+                    }
                     cleanup()
                     this._loadError = err
                     this.setStatus('error')
@@ -482,6 +519,58 @@ export class CachedContentView {
                 }
             })
         })
+    }
+    
+    /**
+     * Truncates data: URLs for readable logging.
+     * data:text/html;base64,... URLs can be huge - only show the prefix.
+     */
+    private truncateDataUrl(url: string | undefined): string {
+        if (!url) return '(no url)'
+        if (url.startsWith('data:')) {
+            const commaIndex = url.indexOf(',')
+            if (commaIndex > 0) {
+                return url.substring(0, commaIndex + 1) + '...(truncated)'
+            }
+        }
+        return url
+    }
+    
+    /**
+     * Determines if a URL error should be logged.
+     * Filters out errors from third-party domains (ads, trackers blocked by Pi-Hole, etc.)
+     * Only logs errors for URLs matching the original feed domain.
+     */
+    private shouldLogUrlError(errorUrl: string | undefined, originalUrl: string): boolean {
+        // Always log if we can't determine the error URL
+        if (!errorUrl) return true
+        
+        // For data: URLs (RSS/Local mode), the original URL is generated HTML.
+        // Any external resource that fails (ads, trackers) should be silently ignored.
+        if (originalUrl.startsWith('data:')) {
+            return false  // Don't log third-party failures for generated HTML content
+        }
+        
+        try {
+            const errorDomain = new URL(errorUrl).hostname
+            const originalDomain = new URL(originalUrl).hostname
+            
+            // Extract base domain (handles subdomains)
+            const getBaseDomain = (hostname: string): string => {
+                const parts = hostname.split('.')
+                // Return last 2 parts (e.g., "example.com" from "www.sub.example.com")
+                return parts.slice(-2).join('.')
+            }
+            
+            const errorBase = getBaseDomain(errorDomain)
+            const originalBase = getBaseDomain(originalDomain)
+            
+            // Only log if domains match (same site's error, not blocked third-party)
+            return errorBase === originalBase
+        } catch {
+            // If URL parsing fails, log the error
+            return true
+        }
     }
     
     // ========== Activity State ==========

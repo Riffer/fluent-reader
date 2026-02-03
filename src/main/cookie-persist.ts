@@ -226,28 +226,38 @@ export async function setCookiesToSession(
     
     for (const cookie of cookies) {
         try {
-            // Construct URL for the cookie
-            const protocol = cookie.secure ? "https" : "http"
+            // Always use HTTPS and secure: true when restoring cookies
+            // This avoids "overwrite secure cookie" errors and is more secure anyway
+            // Modern sites typically use HTTPS, and secure cookies work for both
             const domain = cookie.domain.startsWith(".") 
                 ? cookie.domain.substring(1) 
                 : cookie.domain
-            const url = `${protocol}://${domain}${cookie.path || "/"}`
+            const url = `https://${domain}${cookie.path || "/"}`
             
-            // Cookie setzen
+            // Cookie setzen - always as secure to avoid conflicts
             await ses.cookies.set({
                 url,
                 name: cookie.name,
                 value: cookie.value,
                 domain: cookie.domain,
                 path: cookie.path,
-                secure: cookie.secure,
+                secure: true,  // Always secure - works for HTTPS sites, avoids conflicts
                 httpOnly: cookie.httpOnly,
                 expirationDate: cookie.expirationDate,
                 sameSite: cookie.sameSite,
             })
             successCount++
-        } catch (e) {
-            console.error(`[CookiePersist] Failed to set cookie: ${cookie.name}`, e)
+        } catch (e: any) {
+            // Only log if it's not a secure-overwrite issue (those are harmless)
+            const errorStr = String(e)
+            const errorMsg = e?.message || ''
+            const isSecureOverwrite = errorStr.includes('EXCLUDE_OVERWRITE_SECURE') || 
+                                      errorMsg.includes('EXCLUDE_OVERWRITE_SECURE') ||
+                                      errorStr.includes('overwritten a Secure cookie') ||
+                                      errorMsg.includes('overwritten a Secure cookie')
+            if (!isSecureOverwrite) {
+                console.error(`[CookiePersist] Failed to set cookie: ${cookie.name}`, e)
+            }
         }
     }
     

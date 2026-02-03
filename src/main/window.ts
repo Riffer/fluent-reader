@@ -225,10 +225,10 @@ export class WindowManager {
         // Falls back to session.fromPartition("sandbox") if pool is not available
         // NOTE: We save ALL session cookies because of cross-domain cookies (e.g., .threads.com for threads.net)
         ipcMain.handle("save-persisted-cookies", async (_event, url: string) => {
-            console.log(`[CookiePersist] save-persisted-cookies called for: ${url}`)
+            // console.log(`[CookiePersist] save-persisted-cookies called for: ${url}`)
             const host = extractHost(url)
             if (!host) {
-                console.log(`[CookiePersist] Could not extract host from URL`)
+                // console.log(`[CookiePersist] Could not extract host from URL`)
                 return { success: false }
             }
 
@@ -243,14 +243,14 @@ export class WindowManager {
                 const wc = activeView?.getWebContents()
                 if (wc && !wc.isDestroyed()) {
                     viewSession = wc.session
-                    console.log(`[CookiePersist] Using Pool's active view session`)
+                    // console.log(`[CookiePersist] Using Pool's active view session`)
                 } else {
-                    console.log(`[CookiePersist] Pool active view not available, falling back to sandbox session`)
+                    // console.log(`[CookiePersist] Pool active view not available, falling back to sandbox session`)
                     viewSession = session.fromPartition("sandbox")
                 }
             } else {
                 // Fallback: ContentView verwendet partition="sandbox"
-                console.log(`[CookiePersist] Pool not available, using sandbox session`)
+                // console.log(`[CookiePersist] Pool not available, using sandbox session`)
                 viewSession = session.fromPartition("sandbox")
             }
             
@@ -258,23 +258,23 @@ export class WindowManager {
             // This handles cross-domain cookies (e.g., .threads.com for threads.net)
             try {
                 cookies = await viewSession.cookies.get({})
-                console.log(`[CookiePersist] Total cookies in session: ${cookies.length}`)
-                cookies.forEach(c => {
-                    console.log(`[CookiePersist]   - ${c.name} @ ${c.domain}`)
-                })
+                // console.log(`[CookiePersist] Total cookies in session: ${cookies.length}`)
+                // cookies.forEach(c => {
+                //     console.log(`[CookiePersist]   - ${c.name} @ ${c.domain}`)
+                // })
             } catch (e) {
-                console.log(`[CookiePersist] Error getting cookies:`, e)
+                console.error(`[CookiePersist] Error getting cookies:`, e)
                 return { success: false }
             }
             
             if (cookies.length === 0) {
-                console.log(`[CookiePersist] No cookies to save`)
+                // console.log(`[CookiePersist] No cookies to save`)
                 return { success: true, count: 0 }
             }
 
             // Save ALL cookies under the host key (they will be restored to the session on next visit)
             const success = await saveCookiesForHost(host, cookies)
-            console.log(`[CookiePersist] Saved ${cookies.length} cookies for ${host}, success: ${success}`)
+            // console.log(`[CookiePersist] Saved ${cookies.length} cookies for ${host}, success: ${success}`)
             return { success, count: cookies.length }
         })
 

@@ -222,6 +222,9 @@ ipcMain.on("get-zoom-overlay", event => {
 ipcMain.handle("set-zoom-overlay", (_, flag: boolean) => {
     store.set(ZOOM_OVERLAY_STORE_KEY, flag)
 })
+export function isZoomOverlayEnabled(): boolean {
+    return store.get(ZOOM_OVERLAY_STORE_KEY, false) as boolean
+}
 
 const NSFW_CLEANUP_STORE_KEY = "nsfwCleanupEnabled"
 ipcMain.on("get-nsfw-cleanup", event => {
@@ -230,6 +233,9 @@ ipcMain.on("get-nsfw-cleanup", event => {
 ipcMain.handle("set-nsfw-cleanup", (_, flag: boolean) => {
     store.set(NSFW_CLEANUP_STORE_KEY, flag)
 })
+export function isNsfwCleanupEnabled(): boolean {
+    return store.get(NSFW_CLEANUP_STORE_KEY, false) as boolean
+}
 
 const AUTO_COOKIE_CONSENT_STORE_KEY = "autoCookieConsentEnabled"
 ipcMain.on("get-auto-cookie-consent", event => {
@@ -238,6 +244,9 @@ ipcMain.on("get-auto-cookie-consent", event => {
 ipcMain.handle("set-auto-cookie-consent", (_, flag: boolean) => {
     store.set(AUTO_COOKIE_CONSENT_STORE_KEY, flag)
 })
+export function isAutoCookieConsentEnabled(): boolean {
+    return store.get(AUTO_COOKIE_CONSENT_STORE_KEY, false) as boolean
+}
 
 const REDDIT_GALLERY_EXPAND_STORE_KEY = "redditGalleryExpandEnabled"
 ipcMain.on("get-reddit-gallery-expand", event => {
@@ -246,6 +255,9 @@ ipcMain.on("get-reddit-gallery-expand", event => {
 ipcMain.handle("set-reddit-gallery-expand", (_, flag: boolean) => {
     store.set(REDDIT_GALLERY_EXPAND_STORE_KEY, flag)
 })
+export function isRedditGalleryExpandEnabled(): boolean {
+    return store.get(REDDIT_GALLERY_EXPAND_STORE_KEY, false) as boolean
+}
 
 const REDDIT_SINGLE_IMAGE_EXPAND_STORE_KEY = "redditSingleImageExpandEnabled"
 ipcMain.on("get-reddit-single-image-expand", event => {
@@ -254,6 +266,9 @@ ipcMain.on("get-reddit-single-image-expand", event => {
 ipcMain.handle("set-reddit-single-image-expand", (_, flag: boolean) => {
     store.set(REDDIT_SINGLE_IMAGE_EXPAND_STORE_KEY, flag)
 })
+export function isRedditSingleImageExpandEnabled(): boolean {
+    return store.get(REDDIT_SINGLE_IMAGE_EXPAND_STORE_KEY, false) as boolean
+}
 
 const P2P_COLLECT_LINKS_STORE_KEY = "p2pCollectLinks"
 ipcMain.on("get-p2p-collect-links", event => {

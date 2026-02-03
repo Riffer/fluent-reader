@@ -1466,9 +1466,9 @@ a:hover { text-decoration: underline; }
      * Saves current cookies for the article (if persistCookies is enabled)
      */
     private savePersistedCookies = async () => {
-        console.log(`[CookiePersist] savePersistedCookies called, persistCookies=${this.props.source.persistCookies}, url=${this.props.item?.link}`)
+        // console.log(`[CookiePersist] savePersistedCookies called, persistCookies=${this.props.source.persistCookies}, url=${this.props.item?.link}`)
         if (!this.props.source.persistCookies) {
-            console.log(`[CookiePersist] Skipping - persistCookies not enabled for this source`)
+            // console.log(`[CookiePersist] Skipping - persistCookies not enabled for this source`)
             return
         }
         
@@ -1476,7 +1476,7 @@ a:hover { text-decoration: underline; }
         
         try {
             const result = await window.utils.savePersistedCookies(url)
-            console.log(`[CookiePersist] Saved cookies for ${url}:`, result)
+            // console.log(`[CookiePersist] Saved cookies for ${url}:`, result)
             this.lastCookieSaveTime = Date.now()
         } catch (e) {
             console.error("[CookiePersist] Error saving cookies:", e)

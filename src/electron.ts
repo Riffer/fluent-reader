@@ -152,6 +152,14 @@ if (process.platform === "darwin") {
 
 const winManager = new WindowManager()
 
+// ===== Log Timestamp Marker =====
+// Print a timestamp every 25 seconds for easier log navigation
+setInterval(() => {
+    const now = new Date()
+    const timeStr = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    console.log(`========================= ${timeStr} =========================`)
+}, 25000)
+
 // GPU Rendering: Previously disabled due to crash problems (exit_code=-1073740791)
 // Now re-enabled for smoother scrolling - comment out if issues occur
 // if (process.platform === "win32") {

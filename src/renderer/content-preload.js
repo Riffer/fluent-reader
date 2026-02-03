@@ -6,6 +6,29 @@ try {
   const { ipcRenderer, contextBridge } = require('electron');
   console.log('[ContentPreload] ipcRenderer loaded successfully');
   
+  // ===== Parse settings from additionalArguments =====
+  // These are passed at WebContentsView creation time to eliminate sync IPC calls.
+  // Format: --key=value (where value is parsed as number, boolean, or string)
+  const preloadSettings = {};
+  const args = process.argv || [];
+  for (const arg of args) {
+    if (arg.startsWith('--')) {
+      const [key, value] = arg.slice(2).split('=');
+      if (value === 'true') preloadSettings[key] = true;
+      else if (value === 'false') preloadSettings[key] = false;
+      else if (!isNaN(Number(value))) preloadSettings[key] = Number(value);
+      else preloadSettings[key] = value;
+    }
+  }
+  
+  // Check if settings were passed via additionalArguments
+  const hasArgsSettings = Object.keys(preloadSettings).length > 0;
+  if (hasArgsSettings) {
+    console.log('[ContentPreload] ✅ Settings loaded from additionalArguments (no sync IPC needed):', preloadSettings);
+  } else {
+    console.log('[ContentPreload] ⚠️ No additionalArguments found - will use sync IPC fallback');
+  }
+  
   // Debug: Send logs to main process so they appear in terminal
   function logToMain(message) {
     console.log(message);
@@ -139,28 +162,14 @@ try {
   const MIN_ZOOM_LEVEL = -6;  // 40% minimum zoom (100% - 6*10%)
   const MAX_ZOOM_LEVEL = 40;  // 500% maximum zoom (100% + 40*10%)
 
-  // Load initial zoom level synchronously (to prevent 100% flash)
-  try {
-    zoomLevel = ipcRenderer.sendSync('get-css-zoom-level') || 0;
-  } catch (e) {
-    console.warn('[ContentPreload] Could not load initial zoom level:', e);
-  }
+  // Load initial zoom level from additionalArguments (passed at view creation)
+  zoomLevel = preloadSettings['zoom-level'] ?? 0;
 
-  // Zoom-Overlay Einstellung - load synchronously to show overlay on first load
-  let showZoomOverlayEnabled = false;
-  try {
-    showZoomOverlayEnabled = ipcRenderer.sendSync('get-zoom-overlay');
-  } catch (e) {
-    console.warn('[ContentPreload] Could not load Zoom Overlay state:', e);
-  }
+  // Zoom-Overlay Einstellung from additionalArguments
+  let showZoomOverlayEnabled = preloadSettings['zoom-overlay'] ?? false;
   
-  // Mobile Mode Status - load synchronously to prevent wrong overlay display
-  let mobileMode = false;
-  try {
-    mobileMode = ipcRenderer.sendSync('get-mobile-mode');
-  } catch (e) {
-    console.warn('[ContentPreload] Could not load Mobile Mode state:', e);
-  }
+  // Mobile Mode Status from additionalArguments
+  let mobileMode = preloadSettings['mobile-mode'] ?? false;
   
   // Original viewport width - stored when zoom container is created
   // Used to prevent responsive styles from compensating zoom effect
@@ -168,13 +177,7 @@ try {
   
   // Visual Zoom Mode: When enabled, touch events are NOT intercepted
   // so that native browser pinch-zoom works
-  // Load initial value synchronously to prevent CSS zoom flash
-  let visualZoomEnabled = false;
-  try {
-    visualZoomEnabled = ipcRenderer.sendSync('get-visual-zoom');
-  } catch (e) {
-    console.warn('[ContentPreload] Could not load Visual Zoom state:', e);
-  }
+  let visualZoomEnabled = preloadSettings['visual-zoom'] ?? false;
 
   // Overlay for debug display (Zoom, NSFW-Cleanup, etc.)
   let infoOverlay = null;
@@ -672,37 +675,17 @@ try {
     window.location.href = url;
   });
 
-  // NSFW-Cleanup setting - load synchronously at start
-  let nsfwCleanupEnabled = false;
-  try {
-    nsfwCleanupEnabled = ipcRenderer.sendSync('get-nsfw-cleanup');
-  } catch (e) {
-    console.warn('[ContentPreload] Could not load NSFW-Cleanup setting:', e);
-  }
+  // NSFW-Cleanup setting from additionalArguments
+  let nsfwCleanupEnabled = preloadSettings['nsfw-cleanup'] ?? false;
 
-  // Auto Cookie-Consent setting - load synchronously at start
-  let autoCookieConsentEnabled = false;
-  try {
-    autoCookieConsentEnabled = ipcRenderer.sendSync('get-auto-cookie-consent');
-  } catch (e) {
-    console.warn('[ContentPreload] Could not load Auto Cookie-Consent setting:', e);
-  }
+  // Auto Cookie-Consent setting from additionalArguments
+  let autoCookieConsentEnabled = preloadSettings['auto-cookie-consent'] ?? false;
 
-  // Reddit Gallery Expand setting - load synchronously at start
-  let redditGalleryExpandEnabled = false;
-  try {
-    redditGalleryExpandEnabled = ipcRenderer.sendSync('get-reddit-gallery-expand');
-  } catch (e) {
-    console.warn('[ContentPreload] Could not load Reddit Gallery Expand setting:', e);
-  }
+  // Reddit Gallery Expand setting from additionalArguments
+  let redditGalleryExpandEnabled = preloadSettings['reddit-gallery-expand'] ?? false;
 
-  // Reddit Single Image Expand setting - load synchronously at start
-  let redditSingleImageExpandEnabled = false;
-  try {
-    redditSingleImageExpandEnabled = ipcRenderer.sendSync('get-reddit-single-image-expand');
-  } catch (e) {
-    console.warn('[ContentPreload] Could not load Reddit Single Image Expand setting:', e);
-  }
+  // Reddit Single Image Expand setting from additionalArguments
+  let redditSingleImageExpandEnabled = preloadSettings['reddit-single-image-expand'] ?? false;
 
   // Ctrl+Wheel Zoom (Touchpad) - zooms from cursor position
   window.addEventListener('wheel', (e) => {

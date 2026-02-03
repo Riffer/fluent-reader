@@ -99,7 +99,7 @@ export class ContentViewPool {
     
     // === Configuration ===
     private config: PoolConfig = {
-        size: 5,
+        size: 7,  // 1 active + 4 prefetch targets + 2 buffer for parallel feeds
         prefetchDelay: 1,  // Reduced for testing (was 400ms)
         enabled: true
     }
@@ -149,6 +149,29 @@ export class ContentViewPool {
      */
     private roundZoom(level: number): number {
         return Math.round(level * 10) / 10
+    }
+    
+    /**
+     * Truncate data: URLs for logging (they can be huge base64 content)
+     */
+    private truncateDataUrl(url: string | undefined): string {
+        if (!url) return '(no url)'
+        if (url.startsWith('data:')) {
+            const commaIndex = url.indexOf(',')
+            if (commaIndex > 0) {
+                return url.substring(0, commaIndex + 1) + '...(truncated)'
+            }
+        }
+        return url
+    }
+    
+    /**
+     * Format error for logging - only show code and truncated URL
+     */
+    private formatErrorForLog(err: any): string {
+        const code = err?.code || err?.errno || 'UNKNOWN'
+        const url = this.truncateDataUrl(err?.url)
+        return `${code} - ${url}`
     }
     
     /**
@@ -885,6 +908,17 @@ export class ContentViewPool {
         const currentActive = this.getActiveView()
         if (currentActive && currentActive !== view) {
             // console.log(`[ContentViewPool] Deactivating and hiding ${currentActive.id}`)
+            
+            // Stop any ongoing load on the old active view to free it immediately
+            // This ensures the view is available for prefetch on the next navigation
+            if (currentActive.isLoading) {
+                const wc = currentActive.getWebContents()
+                if (wc && !wc.isDestroyed()) {
+                    // console.log(`[ContentViewPool] Stopping load on old active ${currentActive.id}`)
+                    wc.stop()
+                }
+            }
+            
             currentActive.setActive(false)
             currentActive.setVisible(false, this.visibleBounds)  // Pass bounds to preserve size
         }
@@ -939,7 +973,11 @@ export class ContentViewPool {
      * Prefetch an article in the background
      */
     prefetch(articleId: string, url: string, feedId: string | null, settings: NavigationSettings, articleIndex: number = -1): void {
-        if (!this.config.enabled) return
+        if (!this.config.enabled) {
+            // CRITICAL: Remove from pending set to prevent blocking future prefetches!
+            this.pendingPrefetchArticleIds.delete(articleId)
+            return
+        }
         
         // Add this articleId to protected set - it's a prefetch target
         // This prevents another concurrent prefetch from recycling a view
@@ -956,6 +994,8 @@ export class ContentViewPool {
                 case 'ready':
                     // Already loaded - mark complete and continue cascade
                     // console.log(`[ContentViewPool] Prefetch skip - already ready: ${articleId}`)
+                    // CRITICAL: Remove from pending set to prevent blocking future prefetches!
+                    this.pendingPrefetchArticleIds.delete(articleId)
                     this.onPrefetchComplete(articleId, articleIndex)
                     return
                 case 'loading':
@@ -967,6 +1007,7 @@ export class ContentViewPool {
                     } else {
                         // Still loading normally - the load's completion will trigger onPrefetchComplete
                         // Don't call onPrefetchComplete here - wait for the load to finish
+                        // NOTE: Keep in pendingPrefetchArticleIds - the load completion will delete it
                         // console.log(`[ContentViewPool] Prefetch skip - already loading: ${articleId}`)
                         return
                     }
@@ -999,6 +1040,8 @@ export class ContentViewPool {
         
         if (!freeView) {
             // No free view - mark as complete anyway so cascade continues
+            // CRITICAL: Remove from pending set to prevent blocking future prefetches!
+            this.pendingPrefetchArticleIds.delete(articleId)
             console.warn(`[ContentViewPool] Prefetch skip - no free view for: ${articleId}`)
             this.onPrefetchComplete(articleId, articleIndex)
             return
@@ -1013,6 +1056,8 @@ export class ContentViewPool {
                 this.pendingPrefetchArticleIds.has(freeView.articleId)
             )) {
                 // View holds protected article - mark as complete so cascade continues
+                // CRITICAL: Remove from pending set to prevent blocking future prefetches!
+                this.pendingPrefetchArticleIds.delete(articleId)
                 console.warn(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds protected/pending article ${freeView.articleId}`)
                 this.onPrefetchComplete(articleId, articleIndex)
                 return
@@ -1020,6 +1065,8 @@ export class ContentViewPool {
             // Don't recycle if view holds ready content for a current prefetch target
             if (freeView.hasLoadedOnce && freeView.articleIndex >= 0 && this.prefetchTargets.includes(freeView.articleIndex)) {
                 // View holds target content - mark as complete so cascade continues
+                // CRITICAL: Remove from pending set to prevent blocking future prefetches!
+                this.pendingPrefetchArticleIds.delete(articleId)
                 console.warn(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds ready target index ${freeView.articleIndex}`)
                 this.onPrefetchComplete(articleId, articleIndex)
                 return
@@ -1043,7 +1090,11 @@ export class ContentViewPool {
                 this.onPrefetchComplete(articleId, articleIndex)
             })
             .catch(err => {
-                console.error(`[ContentViewPool] Prefetch failed for ${articleId}:`, err)
+                // ERR_FAILED (-2) is expected when prefetch is cancelled (view stopped for new navigation)
+                // Only log unexpected errors
+                if (err?.code !== 'ERR_FAILED') {
+                    console.error(`[ContentViewPool] Prefetch failed for ${articleId}: ${this.formatErrorForLog(err)}`)
+                }
                 // Remove from pending set on failure too
                 this.pendingPrefetchArticleIds.delete(articleId)
                 
@@ -1064,6 +1115,8 @@ export class ContentViewPool {
         articleIndex: number = -1
     ): Promise<void> {
         if (!this.config.enabled) {
+            // CRITICAL: Remove from pending set to prevent blocking future prefetches!
+            this.pendingPrefetchArticleIds.delete(articleId)
             this.onPrefetchComplete(articleId, articleIndex)
             return
         }
@@ -1073,6 +1126,8 @@ export class ContentViewPool {
         const existingView = this.getViewByArticleId(articleId)
         if (existingView && existingView.isFullContentMode && (existingView.status === 'ready' || existingView.status === 'loading')) {
             // console.log(`[ContentViewPool] FullContent prefetch skip - already ${existingView.status}: ${articleId}`)
+            // CRITICAL: Remove from pending set to prevent blocking future prefetches!
+            this.pendingPrefetchArticleIds.delete(articleId)
             this.onPrefetchComplete(articleId, articleIndex)
             return
         }
@@ -1095,6 +1150,8 @@ export class ContentViewPool {
         
         if (!freeView) {
             // console.log(`[ContentViewPool] FullContent prefetch skip - no free view for: ${articleId}`)
+            // CRITICAL: Remove from pending set to prevent blocking future prefetches!
+            this.pendingPrefetchArticleIds.delete(articleId)
             this.onPrefetchComplete(articleId, articleIndex)
             return
         }
@@ -1169,8 +1226,12 @@ export class ContentViewPool {
             
             // Cascaded prefetch: trigger next item (with index for status tracking)
             this.onPrefetchComplete(articleId, articleIndex)
-        } catch (err) {
-            console.error(`[ContentViewPool] FullContent prefetch failed for ${articleId}:`, err)
+        } catch (err: any) {
+            // ERR_FAILED (-2) is expected when prefetch is cancelled (view stopped for new navigation)
+            // Only log unexpected errors
+            if (err?.code !== 'ERR_FAILED') {
+                console.error(`[ContentViewPool] FullContent prefetch failed for ${articleId}: ${this.formatErrorForLog(err)}`)
+            }
             // Remove from pending set on failure too
             this.pendingPrefetchArticleIds.delete(articleId)
             // On error, the view stays empty/error state
@@ -1363,6 +1424,27 @@ export class ContentViewPool {
         // Cancel cascaded prefetch queue
         this.prefetchQueue = []
         this.prefetchInProgress = null
+        
+        // CRITICAL: Clear pending/protected article tracking!
+        // Without this, articles from previous prefetch cycles stay "locked"
+        // and prevent views from being used for new prefetches.
+        this.pendingPrefetchArticleIds.clear()
+        this.protectedArticleIds.clear()
+        
+        // Stop loading on non-active views to free them for new prefetches
+        // This is necessary because we no longer recycle loading views,
+        // so they would stay "stuck" loading old content forever.
+        for (const view of this.views) {
+            if (!view.isActive && view.isLoading) {
+                const wc = view.getWebContents()
+                if (wc && !wc.isDestroyed()) {
+                    // console.log(`[ContentViewPool] Stopping load on ${view.id} (was loading ${view.articleId})`)
+                    wc.stop()
+                }
+                // Recycle the view to make it available
+                view.recycle()
+            }
+        }
     }
     
     /**
@@ -1772,6 +1854,12 @@ export class ContentViewPool {
         // Don't recycle active view or views with protected/pending articles
         const candidates = this.views.filter(v => {
             if (v.isActive) return false
+            // NEVER recycle loading views - they will complete soon
+            // Recycling them causes ERR_FAILED errors
+            if (v.isLoading) {
+                // console.log(`[ContentViewPool] Skipping ${v.id} (currently loading)`)
+                return false
+            }
             // Don't recycle if article is protected (needed as prefetch target)
             if (v.articleId && this.protectedArticleIds.has(v.articleId)) {
                 // console.log(`[ContentViewPool] Skipping ${v.id} (protected article ${v.articleId})`)
@@ -1795,6 +1883,7 @@ export class ContentViewPool {
         
         // Score each candidate using LRU (Least Recently Used) strategy
         // Lower score = better candidate for recycling
+        // Note: Loading views are already filtered out above
         const scored = candidates.map(view => {
             // Empty views are best to recycle
             if (view.isEmpty || !view.articleId) {
@@ -1804,11 +1893,6 @@ export class ContentViewPool {
             // Views with errors should be recycled
             if (view.status === 'error') {
                 return { view, score: -900 }
-            }
-            
-            // Loading views - prefer to recycle these over ready views
-            if (view.isLoading) {
-                return { view, score: -500 }
             }
             
             // Ready views - use LRU (age-based scoring)
@@ -1986,47 +2070,9 @@ export class ContentViewPool {
         // console.log('[ContentViewPool] Setting up IPC handlers...')
         
         // =====================================================
-        // Sync handlers for content-preload.js (must remain sync)
-        // =====================================================
-        
-        // get-css-zoom-level (sync - used by content-preload.js)
-        // IMPORTANT: Return the zoom level for the SPECIFIC view that sent the request,
-        // not the global pool zoom. This enables per-feed zoom levels.
-        ipcMain.on("get-css-zoom-level", (event) => {
-            // Find the view that sent this request by matching webContentsId
-            const senderWebContentsId = event.sender.id
-            
-            // First try the map (fast path)
-            let view = this.viewsByWebContentsId.get(senderWebContentsId)
-            
-            // If not found in map, search directly in views array (map might be stale)
-            if (!view) {
-                view = this.views.find(v => v.webContentsId === senderWebContentsId) ?? null
-                // Update the map if we found it
-                if (view) {
-                    this.viewsByWebContentsId.set(senderWebContentsId, view)
-                }
-            }
-            
-            if (view) {
-                // Return the view's own zoom level
-                const viewZoom = view.getCssZoomLevel()
-                // console.log(`[ContentViewPool] get-css-zoom-level from ${view.id}: returning view-specific zoom ${viewZoom}`)
-                event.returnValue = viewZoom
-            } else {
-                // Fallback to pool's global zoom if view not found (shouldn't happen)
-                // console.log(`[ContentViewPool] get-css-zoom-level: view not found for webContentsId ${senderWebContentsId}, returning pool zoom ${this.cssZoomLevel}`)
-                event.returnValue = this.cssZoomLevel
-            }
-        })
-        
-        // get-mobile-mode (sync - used by content-preload.js)
-        ipcMain.on("get-mobile-mode", (event) => {
-            event.returnValue = this.mobileMode
-        })
-        
-        // =====================================================
         // Pool-specific handlers (cvp-* prefix)
+        // Note: Preload settings are now passed via additionalArguments
+        // at WebContentsView creation time (no sync IPC needed)
         // =====================================================
         
         // Debug: Log messages from preload scripts
