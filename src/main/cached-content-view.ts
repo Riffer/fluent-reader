@@ -302,6 +302,7 @@ export class CachedContentView {
                     session: sandboxSession,
                     webviewTag: false,
                     additionalArguments: preloadArgs,
+                    backgroundThrottling: false, // Prevent Chromium from throttling offscreen views
                 }
             })
             

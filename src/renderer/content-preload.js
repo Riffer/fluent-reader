@@ -49,6 +49,33 @@ try {
     isActiveView = active;
     console.log('[ContentPreload] Active state changed:', active);
   });
+
+  // ===== Page Visibility API Override =====
+  // Reddit and other sites may not respond to clicks when the page is "hidden"
+  // Override the visibility API so the page always thinks it's visible
+  // This allows prefetch operations (like gallery expand) to work offscreen
+  try {
+    Object.defineProperty(document, 'hidden', {
+      get: () => false,
+      configurable: true
+    });
+    Object.defineProperty(document, 'visibilityState', {
+      get: () => 'visible',
+      configurable: true
+    });
+    // Also handle the webkit prefix for older compatibility
+    Object.defineProperty(document, 'webkitHidden', {
+      get: () => false,
+      configurable: true
+    });
+    Object.defineProperty(document, 'webkitVisibilityState', {
+      get: () => 'visible',
+      configurable: true
+    });
+    console.log('[ContentPreload] Page Visibility API overridden (always visible)');
+  } catch (e) {
+    console.log('[ContentPreload] Could not override Page Visibility API:', e);
+  }
   
   // Helper: Only send IPC if this view is active
   function sendIfActive(channel, ...args) {
@@ -1241,6 +1268,27 @@ try {
       // Space = next gallery image (Reddit) OR next image scroll, Shift+Space = previous
       e.preventDefault();
       const direction = e.shiftKey ? 'prev' : 'next';
+      
+      // Check if lightbox is REALLY open by looking for the close button
+      // The close button has aria-label "Lightbox schließen" (German) or similar
+      const closeButton = document.querySelector(
+        'button[aria-label*="Lightbox" i],' +
+        'button[aria-label*="lightbox" i],' +
+        'button[aria-label*="schließen" i],' +
+        'button[aria-label*="close" i]'
+      );
+      
+      const lightboxReallyOpen = closeButton !== null;
+      
+      console.log('[ContentPreload] Space pressed, closeButton:', !!closeButton, 'lightboxOpen:', lightboxReallyOpen);
+      
+      // If lightbox not open but gallery exists, expand first
+      if (!lightboxReallyOpen && document.querySelector('gallery-carousel')) {
+        console.log('[ContentPreload] Space pressed, lightbox not open - expanding gallery first');
+        expandRedditGallery();
+        return; // Don't navigate yet, let the lightbox open first
+      }
+      
       // Try Reddit gallery navigation first, fallback to image scrolling
       if (!navigateRedditGallery(direction)) {
         scrollToImage(direction === 'next' ? 1 : -1);
@@ -1480,18 +1528,45 @@ try {
   function expandRedditGallery() {
     let clicked = false;
     
-    document.querySelectorAll('gallery-carousel').forEach(carousel => {
-      const clickTarget = carousel.querySelector('figure img.media-lightbox-img') ||
-                          carousel.querySelector('img.media-lightbox-img') ||
-                          carousel.querySelector('figure') ||
-                          carousel;
+    const carousels = document.querySelectorAll('gallery-carousel');
+    console.log('[ContentPreload] expandRedditGallery: Found', carousels.length, 'gallery-carousel elements');
+    
+    carousels.forEach((carousel, index) => {
+      // The click handler is on shreddit-post, not on the image/figure
+      // We need to find the shreddit-post parent and dispatch the click there
+      const shredditPost = carousel.closest('shreddit-post');
+      const img = carousel.querySelector('figure img.media-lightbox-img') ||
+                  carousel.querySelector('img.media-lightbox-img');
       
-      if (clickTarget) {
-        clickTarget.click();
+      if (img) {
+        console.log('[ContentPreload] expandRedditGallery: Found img, shreddit-post:', !!shredditPost);
+        
+        // Get coordinates of the image center for the click event
+        const rect = img.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        
+        // Create a click event that will bubble up to shreddit-post
+        // but with the img as the target
+        const clickEvent = new MouseEvent('click', {
+          view: window,
+          bubbles: true,
+          cancelable: true,
+          clientX: centerX,
+          clientY: centerY,
+          button: 0,
+          buttons: 1
+        });
+        
+        console.log('[ContentPreload] expandRedditGallery: Dispatching click at', centerX, centerY);
+        img.dispatchEvent(clickEvent);
         clicked = true;
+      } else {
+        console.log('[ContentPreload] expandRedditGallery: No img found in carousel', index);
       }
     });
     
+    console.log('[ContentPreload] expandRedditGallery: Result =', clicked);
     return clicked;
   }
 
@@ -1638,12 +1713,17 @@ try {
     const url = window.location.href;
     if (!/reddit\.com/.test(url)) return;
     
+    console.log('[ContentPreload] applyRedditExpands: galleryExpandPending=', galleryExpandPending, 'galleryExpandComplete=', galleryExpandComplete, 'enabled=', redditGalleryExpandEnabled);
+    
     // Gallery carousel expand
     if (redditGalleryExpandEnabled && galleryExpandPending && !galleryExpandComplete) {
       if (expandRedditGallery()) {
         galleryExpandComplete = true;
         galleryExpandPending = false;
         showOverlayMessage('Gallery expanded', 1500);
+        console.log('[ContentPreload] applyRedditExpands: Gallery expand SUCCESS');
+      } else {
+        console.log('[ContentPreload] applyRedditExpands: Gallery expand FAILED (expandRedditGallery returned false)');
       }
     }
     
@@ -1664,11 +1744,14 @@ try {
 
   // Called when view becomes active (visible)
   function onViewBecameActive() {
+    console.log('[ContentPreload] onViewBecameActive: galleryExpandPending=', galleryExpandPending, 'singleImageExpandPending=', singleImageExpandPending);
+    
     if ((galleryExpandPending || singleImageExpandPending) && hasRedditExpandPatterns()) {
-      // Delay slightly to ensure page is fully rendered
+      // Small delay to ensure page is fully rendered after becoming visible
       setTimeout(() => {
+        console.log('[ContentPreload] onViewBecameActive: Executing expand after delay');
         applyRedditExpands();
-      }, 500);
+      }, 200);
     }
   }
 
@@ -1690,12 +1773,63 @@ try {
       singleImageExpandPending = true;
     }
     
-    // Apply immediately after delay - works both active and offscreen (prefetch)
-    // DOM clicks work offscreen, so we can expand galleries during prefetch
+    console.log('[ContentPreload] startRedditExpands: galleryExpandPending=', galleryExpandPending, 'singleImageExpandPending=', singleImageExpandPending, 'isActiveView=', isActiveView);
+    
+    // Only expand if view is active (visible)
+    // Offscreen clicks don't work reliably with Reddit's JavaScript
     if (galleryExpandPending || singleImageExpandPending) {
-      setTimeout(() => {
-        applyRedditExpands();
-      }, 2000);  // 2 seconds to let page render
+      let expandAttempts = 0;
+      const maxAttempts = 10;
+      
+      const tryExpand = () => {
+        expandAttempts++;
+        console.log('[ContentPreload] tryExpand attempt', expandAttempts, 'isActiveView=', isActiveView);
+        
+        // Check if the elements we need exist
+        const hasGalleryCarousel = document.querySelector('gallery-carousel');
+        const hasLightboxListener = document.querySelector('shreddit-media-lightbox-listener');
+        
+        let elementsReady = false;
+        
+        if (galleryExpandPending && hasGalleryCarousel) {
+          const img = hasGalleryCarousel.querySelector('figure img.media-lightbox-img') ||
+                      hasGalleryCarousel.querySelector('img.media-lightbox-img');
+          if (img) {
+            elementsReady = true;
+            console.log('[ContentPreload] Reddit Gallery Expand: Element found');
+          }
+        }
+        
+        if (singleImageExpandPending && hasLightboxListener && !hasGalleryCarousel) {
+          const img = hasLightboxListener.querySelector('img');
+          if (img) {
+            elementsReady = true;
+            console.log('[ContentPreload] Reddit Single Image Expand: Element found');
+          }
+        }
+        
+        if (elementsReady) {
+          // Only click if view is active
+          if (isActiveView) {
+            console.log('[ContentPreload] View is active, attempting expand now');
+            applyRedditExpands();
+          } else {
+            console.log('[ContentPreload] View is NOT active, waiting for activation');
+            // Don't stop retrying - onViewBecameActive will handle it
+          }
+          return; // Elements found, stop looking
+        }
+        
+        // Retry if we haven't found the elements yet
+        if (expandAttempts < maxAttempts) {
+          setTimeout(tryExpand, 500); // Retry every 500ms
+        } else {
+          console.log('[ContentPreload] Reddit Expand: Max attempts reached, elements not found');
+        }
+      };
+      
+      // Start after initial delay to let Reddit's JavaScript fully initialize
+      setTimeout(tryExpand, 2000);
     }
   }
 
