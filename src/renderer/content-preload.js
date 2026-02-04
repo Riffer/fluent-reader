@@ -1238,10 +1238,21 @@ try {
         }
       }
     } else if (e.key === ' ' || e.key === 'Spacebar') {
-      // Space = next image, Shift+Space = previous image
+      // Space = next gallery image (Reddit) OR next image scroll, Shift+Space = previous
       e.preventDefault();
-      const direction = e.shiftKey ? -1 : 1;
-      scrollToImage(direction);
+      const direction = e.shiftKey ? 'prev' : 'next';
+      // Try Reddit gallery navigation first, fallback to image scrolling
+      if (!navigateRedditGallery(direction)) {
+        scrollToImage(direction === 'next' ? 1 : -1);
+      }
+    } else if (e.key === ',' || e.key === '<') {
+      // < (comma/less-than) = previous gallery image
+      e.preventDefault();
+      navigateRedditGallery('prev');
+    } else if (e.key === '.' || e.key === '>') {
+      // > (period/greater-than) = next gallery image
+      e.preventDefault();
+      navigateRedditGallery('next');
     }
   });
   
@@ -1482,6 +1493,112 @@ try {
     });
     
     return clicked;
+  }
+
+  // ============================================
+  // Reddit Gallery Navigation - Navigate between images with keyboard
+  // ============================================
+  
+  // Helper: Search for elements in Shadow DOM recursively
+  function querySelectorDeep(selector, root = document) {
+    // First try normal querySelector
+    let result = root.querySelector(selector);
+    if (result) return result;
+    
+    // Search in shadow roots
+    const allElements = root.querySelectorAll('*');
+    for (const el of allElements) {
+      if (el.shadowRoot) {
+        result = querySelectorDeep(selector, el.shadowRoot);
+        if (result) return result;
+      }
+    }
+    return null;
+  }
+  
+  // Helper: Get all elements matching selector including Shadow DOM
+  function querySelectorAllDeep(selector, root = document) {
+    const results = [...root.querySelectorAll(selector)];
+    
+    const allElements = root.querySelectorAll('*');
+    for (const el of allElements) {
+      if (el.shadowRoot) {
+        results.push(...querySelectorAllDeep(selector, el.shadowRoot));
+      }
+    }
+    return results;
+  }
+  
+  function navigateRedditGallery(direction) {
+    // direction: 'next' or 'prev'
+    const url = window.location.href;
+    if (!/reddit\.com/.test(url)) return false;
+    
+    console.log('[ContentPreload] navigateRedditGallery called:', direction);
+    
+    // Method 1: Try direct aria-label selectors first (exact matches for German/English)
+    const ariaLabels = direction === 'next' 
+      ? ['Nächste Seite', 'Next page', 'Next']
+      : ['Vorherige Seite', 'Previous page', 'Previous'];
+    
+    for (const label of ariaLabels) {
+      const btn = document.querySelector(`button[aria-label="${label}"]`);
+      if (btn) {
+        console.log('[ContentPreload] Found button with aria-label:', label);
+        btn.click();
+        return true;
+      }
+    }
+    
+    // Method 2: Try button-media class buttons (Reddit gallery nav buttons)
+    const mediaButtons = document.querySelectorAll('button.button-media');
+    console.log('[ContentPreload] Found button-media buttons:', mediaButtons.length);
+    for (const btn of mediaButtons) {
+      const label = btn.getAttribute('aria-label') || '';
+      console.log('[ContentPreload] button-media aria-label:', label);
+      
+      const isNext = label.includes('Nächste') || label.toLowerCase().includes('next');
+      const isPrev = label.includes('Vorherige') || label.toLowerCase().includes('previous') || label.includes('Zurück');
+      
+      if ((direction === 'next' && isNext) || (direction === 'prev' && isPrev)) {
+        console.log('[ContentPreload] Clicking button-media:', label);
+        btn.click();
+        return true;
+      }
+    }
+    
+    // Method 3: Find gallery-carousel and search inside (including shadow DOM)
+    const carousel = document.querySelector('gallery-carousel');
+    if (carousel) {
+      console.log('[ContentPreload] Found gallery-carousel, searching for nav buttons');
+      
+      // Try querySelectorDeep for shadow DOM
+      const slotSelector = direction === 'next' ? '[slot="nextButton"]' : '[slot="previousButton"]';
+      const slotElement = querySelectorDeep(slotSelector);
+      if (slotElement) {
+        console.log('[ContentPreload] Found slot element:', slotSelector);
+        const button = slotElement.querySelector('button') || slotElement;
+        button.click();
+        return true;
+      }
+      
+      // Try aria-label with partial match (deep search)
+      const ariaSelectors = direction === 'next' 
+        ? ['button[aria-label*="Nächste"]', 'button[aria-label*="next" i]']
+        : ['button[aria-label*="Vorherige"]', 'button[aria-label*="previous" i]'];
+      
+      for (const sel of ariaSelectors) {
+        const btn = querySelectorDeep(sel);
+        if (btn) {
+          console.log('[ContentPreload] Found button via deep search:', sel);
+          btn.click();
+          return true;
+        }
+      }
+    }
+    
+    console.log('[ContentPreload] No gallery navigation found');
+    return false;
   }
 
   // ============================================
