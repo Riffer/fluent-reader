@@ -149,7 +149,10 @@
         "badUrl": "Ungültige URL",
         "deleteWarning": "Der Feed und alle gespeicherten Artikel werden entfernt.",
         "selected": "Ausgewählter Feed",
-        "selectedMulti": "Ausgewählte Feeds"
+        "selectedMulti": "Ausgewählte Feeds",
+        "sortAscending": "Chronologisch aufsteigend (älteste zuerst)",
+        "sortAscendingHint": "Nur aktiv wenn Filter \"Nur ungelesene\" gesetzt ist",
+        "hidden": "In \"Alle Artikel\" ausblenden"
     },
     "groups": {
         "exist": "Diese Gruppe existiert bereits.",

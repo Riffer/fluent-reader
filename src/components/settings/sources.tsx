@@ -50,6 +50,7 @@ type SourcesTabProps = {
     importOPML: () => void
     exportOPML: () => void
     toggleSourceHidden: (source: RSSSource) => void
+    updateSourceSortAscending: (source: RSSSource, sortAscending: boolean) => void
 }
 
 type SourcesTabState = {
@@ -236,6 +237,17 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
             selectedSource: {
                 ...this.state.selectedSource,
                 hidden: !this.state.selectedSource.hidden,
+            } as RSSSource,
+        })
+    }
+
+    onToggleSortAscending = () => {
+        const newValue = !this.state.selectedSource.sortAscending
+        this.props.updateSourceSortAscending(this.state.selectedSource, newValue)
+        this.setState({
+            selectedSource: {
+                ...this.state.selectedSource,
+                sortAscending: newValue,
             } as RSSSource,
         })
     }
@@ -440,6 +452,17 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
                             <Toggle
                                 checked={this.state.selectedSource.hidden}
                                 onChange={this.onToggleHidden}
+                            />
+                        </Stack.Item>
+                    </Stack>
+                    <Stack horizontal verticalAlign="baseline">
+                        <Stack.Item grow>
+                            <Label>{intl.get("sources.sortAscending")}</Label>
+                        </Stack.Item>
+                        <Stack.Item>
+                            <Toggle
+                                checked={this.state.selectedSource.sortAscending}
+                                onChange={this.onToggleSortAscending}
                             />
                         </Stack.Item>
                     </Stack>

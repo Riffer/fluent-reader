@@ -3694,7 +3694,7 @@ window.__articleData = ${JSON.stringify({
                             )}
                             {/* Prefetch Status Indicator (Traffic Light) */}
                             {this.renderPrefetchIndicator()}
-                            {/* Zoom Badge with viewport tooltip */}
+                            {/* Zoom Badge with viewport tooltip - clickable to reset to 100% */}
                             {(this.state.zoom !== undefined && this.state.zoom !== 0) && (
                                 <span 
                                     className="zoom-badge"
@@ -3707,9 +3707,10 @@ window.__articleData = ${JSON.stringify({
                                         fontSize: 11,
                                         fontWeight: 600,
                                         whiteSpace: 'nowrap',
-                                        cursor: 'default',
+                                        cursor: 'pointer',
                                     }}
-                                    title={this.getViewportTooltip()}
+                                    title={this.getViewportTooltip() + '\n\nKlicken zum Zurücksetzen auf 100%'}
+                                    onClick={() => this.applyZoom(0)}
                                 >
                                     🔍 {this.getZoomDisplayText()}
                                 </span>

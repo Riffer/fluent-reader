@@ -15,7 +15,7 @@ import path from "path"
 let db: Database.Database | null = null
 
 // Schema version for migrations
-const SCHEMA_VERSION = 5
+const SCHEMA_VERSION = 6
 
 // Types matching the Lovefield models
 export interface SourceRow {
@@ -34,6 +34,7 @@ export interface SourceRow {
     mobileMode: number  // SQLite boolean (0/1)
     persistCookies: number  // SQLite boolean (0/1)
     translateTo: string | null  // Target language code for translation
+    sortAscending: number  // SQLite boolean (0/1) - sort oldest first when unread filter active
 }
 
 export interface ItemRow {
@@ -115,7 +116,8 @@ function createTables(): void {
             hidden INTEGER NOT NULL DEFAULT 0,
             mobileMode INTEGER NOT NULL DEFAULT 0,
             persistCookies INTEGER NOT NULL DEFAULT 0,
-            translateTo TEXT
+            translateTo TEXT,
+            sortAscending INTEGER NOT NULL DEFAULT 0
         )
     `)
 
@@ -260,6 +262,17 @@ function runMigrations(): void {
             
             if (!columnNames.includes("translateTo")) {
                 db.exec(`ALTER TABLE sources ADD COLUMN translateTo TEXT`)
+            }
+        }
+
+        // Migration to v6: Add sortAscending column to sources for per-feed sort order
+        if (currentVersion < 6) {
+            console.log("[db-sqlite] Migration v6: Adding sortAscending column to sources")
+            const tableInfo = db.prepare("PRAGMA table_info(sources)").all() as Array<{ name: string }>
+            const columnNames = tableInfo.map(c => c.name)
+            
+            if (!columnNames.includes("sortAscending")) {
+                db.exec(`ALTER TABLE sources ADD COLUMN sortAscending INTEGER NOT NULL DEFAULT 0`)
             }
         }
 

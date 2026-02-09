@@ -156,6 +156,8 @@
         "deleteWarning": "The source and all saved articles will be removed.",
         "selected": "Selected source",
         "selectedMulti": "Selected multiple sources",
+        "sortAscending": "Sort chronologically ascending (oldest first)",
+        "sortAscendingHint": "Only active when \"Unread only\" filter is set",
         "hidden": "Hide in \"all articles\""
     },
     "groups": {

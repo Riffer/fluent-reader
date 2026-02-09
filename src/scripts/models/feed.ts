@@ -6,6 +6,7 @@ import {
     DELETE_SOURCE,
     UNHIDE_SOURCE,
     HIDE_SOURCE,
+    SourceState,
 } from "./source"
 import {
     ItemActionTypes,
@@ -16,6 +17,21 @@ import {
 } from "./item"
 import { ActionStatus, AppThunk, mergeSortedArrays } from "../utils"
 import { PageActionTypes, SELECT_PAGE, PageType, APPLY_FILTER } from "./page"
+
+// Helper: Check if feed should sort ascending (oldest first)
+// Only applies when: 1) unread filter active, 2) single source, 3) source has sortAscending enabled
+export function shouldSortAscending(feed: RSSFeed, sources: SourceState): boolean {
+    // Only for single-source feeds
+    if (feed.sids.length !== 1) return false
+    
+    // Only when unread filter is active (not showing all articles)
+    const isUnreadOnly = !(feed.filter.type & FilterType.ShowRead)
+    if (!isUnreadOnly) return false
+    
+    // Check if the source has sortAscending enabled
+    const source = sources[feed.sids[0]]
+    return source?.sortAscending ?? false
+}
 
 export enum FilterType {
     None,
@@ -47,12 +63,12 @@ export class FeedFilter {
     }
 
     // Convert FeedFilter to SQLite ItemQueryOptions
-    static toQueryOptions(filter: FeedFilter, sids: number[]): ItemQueryOptions {
+    static toQueryOptions(filter: FeedFilter, sids: number[], sortAscending = false): ItemQueryOptions {
         let type = filter.type
         const options: ItemQueryOptions = {
             sourceIds: sids,
             orderBy: "date",
-            orderDir: "DESC"
+            orderDir: sortAscending ? "ASC" : "DESC"
         }
         
         if (!(type & FilterType.ShowRead)) {
@@ -129,6 +145,7 @@ export class RSSFeed {
     sids: number[]
     iids: number[]
     filter: FeedFilter
+    sortAscending: boolean  // Whether this feed is sorted oldest-first
 
     constructor(id: string = null, sids = [], filter = null) {
         this._id = id
@@ -137,11 +154,12 @@ export class RSSFeed {
         this.loaded = false
         this.allLoaded = false
         this.filter = filter === null ? new FeedFilter() : filter
+        this.sortAscending = false
     }
 
-    static async loadFeed(feed: RSSFeed, skip = 0): Promise<RSSItem[]> {
+    static async loadFeed(feed: RSSFeed, skip = 0, sortAscending = false): Promise<RSSItem[]> {
         // Use SQLite for feed loading via window.db bridge
-        const options = FeedFilter.toQueryOptions(feed.filter, feed.sids)
+        const options = FeedFilter.toQueryOptions(feed.filter, feed.sids, sortAscending)
         options.limit = LOAD_QUANTITY
         options.offset = skip
         
@@ -179,6 +197,7 @@ interface initFeedAction {
     status: ActionStatus
     feed?: RSSFeed
     items?: RSSItem[]
+    sortAscending?: boolean
     err?
 }
 
@@ -237,13 +256,15 @@ export function initFeedsSuccess(): FeedActionTypes {
 
 export function initFeedSuccess(
     feed: RSSFeed,
-    items: RSSItem[]
+    items: RSSItem[],
+    sortAscending = false
 ): FeedActionTypes {
     return {
         type: INIT_FEED,
         status: ActionStatus.Success,
         items: items,
         feed: feed,
+        sortAscending: sortAscending,
     }
 }
 
@@ -259,11 +280,13 @@ export function initFeeds(force = false): AppThunk<Promise<void>> {
     return (dispatch, getState) => {
         dispatch(initFeedsRequest())
         let promises = new Array<Promise<void>>()
-        for (let feed of Object.values(getState().feeds)) {
+        const state = getState()
+        for (let feed of Object.values(state.feeds)) {
             if (!feed.loaded || force) {
-                let p = RSSFeed.loadFeed(feed)
+                const sortAsc = shouldSortAscending(feed, state.sources)
+                let p = RSSFeed.loadFeed(feed, 0, sortAsc)
                     .then(items => {
-                        dispatch(initFeedSuccess(feed, items))
+                        dispatch(initFeedSuccess(feed, items, sortAsc))
                     })
                     .catch(err => {
                         console.error(err)
@@ -315,7 +338,8 @@ export function loadMore(feed: RSSFeed): AppThunk<Promise<void>> {
             const skipNum = feed.iids.filter(i =>
                 FeedFilter.testItem(feed.filter, state.items[i])
             ).length
-            return RSSFeed.loadFeed(feed, skipNum)
+            const sortAsc = shouldSortAscending(feed, state.sources)
+            return RSSFeed.loadFeed(feed, skipNum, sortAsc)
                 .then(items => {
                     dispatch(loadMoreSuccess(feed, items))
                 })
@@ -435,8 +459,12 @@ export function feedReducer(
                                     itemsWithData.push(item)
                                 }
                                 
-                                // Sort items that have data
-                                itemsWithData.sort((a, b) => b.date.getTime() - a.date.getTime())
+                                // Sort items that have data (respect feed's sortAscending setting)
+                                if (feed.sortAscending) {
+                                    itemsWithData.sort((a, b) => a.date.getTime() - b.date.getTime())
+                                } else {
+                                    itemsWithData.sort((a, b) => b.date.getTime() - a.date.getTime())
+                                }
                                 
                                 // Final iids: sorted items with data, then items without data (at the end)
                                 // Items without data are older (from pagination) so they go at the end
@@ -477,6 +505,7 @@ export function feedReducer(
                             loaded: true,
                             allLoaded: action.items.length < LOAD_QUANTITY,
                             iids: action.items.map(i => i._id),
+                            sortAscending: action.sortAscending ?? false,
                         },
                     }
                 default:

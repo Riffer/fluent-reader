@@ -23,6 +23,7 @@ export interface SourceRow {
     hidden: number
     mobileMode: number
     persistCookies: number
+    sortAscending: number  // Sort oldest first when unread filter active
 }
 
 export interface ItemRow {

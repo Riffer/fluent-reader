@@ -63,6 +63,14 @@ const mapDispatchToProps = (dispatch: AppDispatch) => {
                 } as RSSSource)
             )
         },
+        updateSourceSortAscending: (source: RSSSource, sortAscending: boolean) => {
+            dispatch(
+                updateSource({
+                    ...source,
+                    sortAscending: sortAscending,
+                } as RSSSource)
+            )
+        },
         deleteSource: (source: RSSSource) => dispatch(deleteSource(source)),
         deleteSources: (sources: RSSSource[]) =>
             dispatch(deleteSources(sources)),

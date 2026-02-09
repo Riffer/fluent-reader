@@ -52,6 +52,7 @@ export class RSSSource {
     textDir: SourceTextDirection
     hidden: boolean
     translateTo?: string // Target language code for translation (e.g., 'de', 'en', 'fr')
+    sortAscending: boolean // Sort oldest first when unread filter is active
 
     constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null, defaultZoom = 0, mobileMode = false, persistCookies = false) {
         this.url = url
@@ -65,6 +66,7 @@ export class RSSSource {
         this.textDir = SourceTextDirection.LTR
         this.hidden = false
         this.translateTo = undefined
+        this.sortAscending = false
     }
 
     static async fetchMetaData(source: RSSSource) {
@@ -256,6 +258,7 @@ function rowToSource(row: SourceRow): RSSSource {
     source.mobileMode = row.mobileMode === 1
     source.persistCookies = row.persistCookies === 1
     source.translateTo = row.translateTo ?? undefined
+    source.sortAscending = row.sortAscending === 1
     source.unreadCount = 0
     return source
 }
@@ -324,7 +327,8 @@ function sourceToRow(source: RSSSource): Omit<SourceRow, "sid"> & { sid?: number
         hidden: source.hidden ? 1 : 0,
         mobileMode: source.mobileMode ? 1 : 0,
         persistCookies: source.persistCookies ? 1 : 0,
-        translateTo: source.translateTo ?? null
+        translateTo: source.translateTo ?? null,
+        sortAscending: source.sortAscending ? 1 : 0
     }
 }
 
