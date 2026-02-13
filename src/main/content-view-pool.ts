@@ -128,6 +128,11 @@ export class ContentViewPool {
     // === Cascaded Prefetch ===
     private prefetchQueue: number[] = []  // Queue of article indices to prefetch (prioritized)
     private prefetchInProgress: string | null = null  // Currently prefetching articleId
+    
+    // === Render Position ===
+    // The view at the "render position" has 1 pixel visible to force Chromium to render it
+    // This is used for the "next" article in reading direction to ensure instant navigation
+    private renderPositionViewId: string | null = null
     private cascadedPrefetchEnabled: boolean = true  // Enable/disable cascaded mode
     
     // === Prefetch Status Tracking ===
@@ -944,6 +949,7 @@ export class ContentViewPool {
             // Show view when ready (only if still active AND bounds are available)
             if (this.isPoolVisible && this.boundsReceived) {
                 view.setVisible(true, this.visibleBounds)
+                view.bringToFront()  // Ensure active view is on top (covers render-position views)
                 view.focus()  // Single focus call after visibility is set
                 // console.log(`[ContentViewPool] Load complete, showing ${view.id}`)
             } else if (this.isPoolVisible) {
@@ -1677,8 +1683,78 @@ export class ContentViewPool {
         
         // console.log(`[ContentViewPool] Sending prefetch status:`, status)
         this.sendToRenderer('cvp-prefetch-status', status)
+        
+        // Update render position for the "next" article
+        this.updateRenderPosition()
     }
     
+    /**
+     * Update which view is at the "render position"
+     * 
+     * The render position has 1 pixel visible to force Chromium to render the content.
+     * Only the "next" article in reading direction gets this position.
+     * This ensures instant navigation when the user moves to the next article.
+     */
+    private updateRenderPosition(): void {
+        if (!this.boundsReceived) return
+        
+        // Determine the "next" article index based on reading direction
+        let nextIndex = -1
+        if (this.readingDirection === 'forward' && this.currentArticleIndex < this.articleListLength - 1) {
+            nextIndex = this.currentArticleIndex + 1
+        } else if (this.readingDirection === 'backward' && this.currentArticleIndex > 0) {
+            nextIndex = this.currentArticleIndex - 1
+        } else if (this.readingDirection === 'unknown') {
+            // For unknown direction, prefer forward
+            if (this.currentArticleIndex < this.articleListLength - 1) {
+                nextIndex = this.currentArticleIndex + 1
+            } else if (this.currentArticleIndex > 0) {
+                nextIndex = this.currentArticleIndex - 1
+            }
+        }
+        
+        if (nextIndex < 0) {
+            // No next article - clear render position
+            if (this.renderPositionViewId) {
+                const oldView = this.getViewById(this.renderPositionViewId)
+                if (oldView && oldView.isAtRenderPosition) {
+                    oldView.moveOffScreen(this.visibleBounds)
+                    console.log(`[ContentViewPool] Cleared render position from ${this.renderPositionViewId}`)
+                }
+                this.renderPositionViewId = null
+            }
+            return
+        }
+        
+        // Find view for the next article
+        const nextView = this.views.find(v => v.articleIndex === nextIndex && v.hasLoadedOnce)
+        if (!nextView) {
+            // Next article not loaded yet - nothing to do
+            return
+        }
+        
+        // Already at render position?
+        if (nextView.id === this.renderPositionViewId && nextView.isAtRenderPosition) {
+            return
+        }
+        
+        // Move old view from render position to offscreen
+        if (this.renderPositionViewId && this.renderPositionViewId !== nextView.id) {
+            const oldView = this.getViewById(this.renderPositionViewId)
+            if (oldView && oldView.isAtRenderPosition && !oldView.isActive) {
+                oldView.moveOffScreen(this.visibleBounds)
+                console.log(`[ContentViewPool] Moved ${this.renderPositionViewId} from render position to offscreen`)
+            }
+        }
+        
+        // Set new view to render position (if not active)
+        if (!nextView.isActive) {
+            nextView.setRenderPosition(this.visibleBounds)
+            this.renderPositionViewId = nextView.id
+            console.log(`[ContentViewPool] Set ${nextView.id} (index ${nextIndex}) to render position`)
+        }
+    }
+
     /**
      * Check if an article at given index is ready in the pool
      * Uses hasLoadedOnce instead of isReady to ignore temporary "loading" states
@@ -1943,6 +2019,7 @@ export class ContentViewPool {
         // IMPORTANT: Always ensure visibility is set, even for same view (it might have been hidden)
         if (this.isPoolVisible && this.boundsReceived) {
             view.setVisible(true, this.visibleBounds)
+            view.bringToFront()  // Ensure active view is on top (covers render-position views)
             view.focus()  // Single focus call after visibility is set
             if (sameView) {
                 // console.log(`[ContentViewPool] Re-activated same ${view.id} - ensuring visible with bounds:`, this.visibleBounds)
@@ -2031,6 +2108,7 @@ export class ContentViewPool {
                 // console.log(`[ContentViewPool] First real bounds received! Showing active view ${active.id} at:`, bounds)
             }
             active.setVisible(true, bounds)
+            active.bringToFront()  // Cover render-position views
             active.focus()
         }
     }
@@ -2048,6 +2126,7 @@ export class ContentViewPool {
                 // Only show if we have real bounds, otherwise wait for setBounds
                 if (this.boundsReceived) {
                     active.setVisible(true, this.visibleBounds)
+                    active.bringToFront()  // Cover render-position views
                     active.focus()
                     // console.log(`[ContentViewPool] Showing ${active.id} at bounds:`, this.visibleBounds)
                 } else {
@@ -2423,14 +2502,14 @@ export class ContentViewPool {
         })
         
         // Capture screen of a prefetched view by article ID (for preview tooltip)
-        // With offscreen rendering enabled (useSharedTexture: true), views should render
-        // even when not visible. The temporary visibility code is kept as fallback.
+        // Views at render position (1-pixel visible) will render and capture directly.
+        // Other prefetched views need temporary visibility as fallback.
         ipcMain.handle("cvp-capture-prefetched", async (_event, articleId: string) => {
             // Debug: Log all views and their articleIds
             console.log(`[ContentViewPool] cvp-capture-prefetched: Looking for articleId=${articleId}`)
             console.log(`[ContentViewPool] cvp-capture-prefetched: Available views:`)
             for (const v of this.views) {
-                console.log(`  - ${v.id}: articleId=${v.articleId || 'null'}, isActive=${v.isActive}, hasLoadedOnce=${v.hasLoadedOnce}`)
+                console.log(`  - ${v.id}: articleId=${v.articleId || 'null'}, isActive=${v.isActive}, hasLoadedOnce=${v.hasLoadedOnce}, atRenderPos=${v.isAtRenderPosition}`)
             }
             
             const view = this.getViewByArticleId(articleId)
@@ -2452,14 +2531,15 @@ export class ContentViewPool {
             }
             
             try {
-                // First attempt: Direct capture (should work with offscreen rendering enabled)
+                // First attempt: Direct capture (works for render-position views with 1-pixel visibility)
                 let image = await wc.capturePage()
                 let dataUrl = image.toDataURL()
                 
                 // Check if we got a valid image (not empty)
                 // An empty PNG is about 200-300 bytes, a real screenshot is much larger
                 if (dataUrl.length < 500) {
-                    console.log(`[ContentViewPool] cvp-capture-prefetched: Direct capture returned empty, trying temporary visibility`)
+                    const isRenderPos = view.isAtRenderPosition
+                    console.log(`[ContentViewPool] cvp-capture-prefetched: Direct capture returned empty (isRenderPos=${isRenderPos}), trying temporary visibility`)
                     
                     // Fallback: Temporarily make visible for rendering
                     if (this.boundsReceived) {
@@ -2469,7 +2549,12 @@ export class ContentViewPool {
                         image = await wc.capturePage()
                         dataUrl = image.toDataURL()
                         
+                        // Hide and ensure active view is on top
                         view.setVisible(false, this.visibleBounds)
+                        const activeView = this.getActiveView()
+                        if (activeView) {
+                            activeView.bringToFront()
+                        }
                         console.log(`[ContentViewPool] cvp-capture-prefetched: After temp visibility, size=${dataUrl.length} bytes`)
                     }
                 }
@@ -2519,6 +2604,7 @@ export class ContentViewPool {
                 active.setActive(true)
                 if (this.isPoolVisible && this.boundsReceived) {
                     active.setVisible(true, this.visibleBounds)
+                    active.bringToFront()  // Cover render-position views
                 }
                 
                 // console.log("[ContentViewPool] cvp-nuke: View recycled, ready for new navigation")

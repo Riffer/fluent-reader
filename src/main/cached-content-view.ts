@@ -630,6 +630,18 @@ export class CachedContentView {
     private _isOffScreen: boolean = true
     
     /**
+     * Whether the view is at the "render position" (1 pixel visible for background rendering)
+     */
+    private _isAtRenderPosition: boolean = false
+    
+    /**
+     * Check if view is at render position
+     */
+    get isAtRenderPosition(): boolean {
+        return this._isAtRenderPosition
+    }
+    
+    /**
      * Set the bounds of this view
      * 
      * For on-screen views: applies bounds directly
@@ -716,10 +728,69 @@ export class CachedContentView {
                     height
                 })
                 // Note: We don't call setVisible(false) to preserve rendering
+                this._isAtRenderPosition = false
             }
         }
     }
     
+    /**
+     * Set this view to the "render position" - 1 pixel visible for background rendering
+     * 
+     * This positions the view so that exactly 1 pixel overlaps with the visible area,
+     * which triggers Chromium to render the content even though it appears offscreen.
+     * The active view should overlay this pixel so the user sees nothing.
+     * 
+     * This is used for the "next" article in reading direction to ensure it renders
+     * before the user navigates to it.
+     * 
+     * @param bounds - The reference bounds (from active view area)
+     */
+    setRenderPosition(bounds: { x: number, y: number, width: number, height: number }): void {
+        if (!this._view) return
+        
+        // Position so 1 pixel overlaps with the visible area at the top-left corner
+        // x = bounds.x - width + 1 means the rightmost pixel of this view is at bounds.x
+        this._view.setBounds({
+            x: bounds.x - bounds.width + 1,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height
+        })
+        
+        this._isOffScreen = false  // Technically 1 pixel is on-screen
+        this._isAtRenderPosition = true
+        this._view.setVisible(true)
+        
+        console.log(`[CachedContentView:${this.id}] Set to render position (1px visible at x=${bounds.x})`)
+    }
+    
+    /**
+     * Move this view from render position to fully off-screen
+     */
+    moveOffScreen(bounds?: { x: number, y: number, width: number, height: number }): void {
+        if (!this._view) return
+        
+        let width: number, height: number
+        if (bounds) {
+            width = bounds.width
+            height = bounds.height
+        } else {
+            const currentBounds = this._view.getBounds()
+            width = currentBounds.width > 0 ? currentBounds.width : 800
+            height = currentBounds.height > 0 ? currentBounds.height : 600
+        }
+        
+        this._view.setBounds({
+            x: CachedContentView.OFF_SCREEN_POSITION,
+            y: CachedContentView.OFF_SCREEN_POSITION,
+            width,
+            height
+        })
+        
+        this._isOffScreen = true
+        this._isAtRenderPosition = false
+    }
+
     /**
      * Focus this view's webContents
      * Important for keyboard input to be captured
@@ -736,6 +807,24 @@ export class CachedContentView {
         if (this._view?.webContents && !this._view.webContents.isDestroyed()) {
             this._view.webContents.focus()
             // console.log(`[CachedContentView:${this.id}] focused`)
+        }
+    }
+    
+    /**
+     * Bring this view to the front (top of Z-order)
+     * Used to ensure active view overlays render-position views
+     */
+    bringToFront(): void {
+        if (!this._view || !this.parentWindow || this.parentWindow.isDestroyed()) return
+        
+        // Remove and re-add to bring to front
+        // In Electron, the last added child is on top
+        try {
+            this.parentWindow.contentView.removeChildView(this._view)
+            this.parentWindow.contentView.addChildView(this._view)
+            // console.log(`[CachedContentView:${this.id}] brought to front`)
+        } catch (e) {
+            console.error(`[CachedContentView:${this.id}] Failed to bring to front:`, e)
         }
     }
     
