@@ -746,22 +746,23 @@ export class CachedContentView {
      * @param bounds - The reference bounds (from active view area)
      */
     setRenderPosition(bounds: { x: number, y: number, width: number, height: number }): void {
-        if (!this._view) return
+        if (!this._view || !this.parentWindow || this.parentWindow.isDestroyed()) return
         
-        // Position so 1 pixel overlaps with the visible area at the top-left corner
-        // x = bounds.x - width + 1 means the rightmost pixel of this view is at bounds.x
+        // Position so only 3 pixels (rightmost columns of view) are at x=0-2, for testing visibility
+        // x = -width + 3 means 3 rightmost pixel columns are visible
+        // y = 50 keeps us away from rounded corners (both top and bottom)
         this._view.setBounds({
-            x: bounds.x - bounds.width + 1,
-            y: bounds.y,
+            x: -bounds.width + 3,  // 3 rightmost pixels visible at x=0,1,2
+            y: 50,  // Safe distance from rounded corners
             width: bounds.width,
             height: bounds.height
         })
         
-        this._isOffScreen = false  // Technically 1 pixel is on-screen
+        this._isOffScreen = false  // Technically some pixels are on-screen
         this._isAtRenderPosition = true
         this._view.setVisible(true)
         
-        console.log(`[CachedContentView:${this.id}] Set to render position (1px visible at x=${bounds.x})`)
+        console.log(`[CachedContentView:${this.id}] Set to render position (3px visible at left edge, y=50)`)
     }
     
     /**
