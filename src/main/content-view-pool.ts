@@ -2423,7 +2423,16 @@ export class ContentViewPool {
         })
         
         // Capture screen of a prefetched view by article ID (for preview tooltip)
+        // With offscreen rendering enabled (useSharedTexture: true), views should render
+        // even when not visible. The temporary visibility code is kept as fallback.
         ipcMain.handle("cvp-capture-prefetched", async (_event, articleId: string) => {
+            // Debug: Log all views and their articleIds
+            console.log(`[ContentViewPool] cvp-capture-prefetched: Looking for articleId=${articleId}`)
+            console.log(`[ContentViewPool] cvp-capture-prefetched: Available views:`)
+            for (const v of this.views) {
+                console.log(`  - ${v.id}: articleId=${v.articleId || 'null'}, isActive=${v.isActive}, hasLoadedOnce=${v.hasLoadedOnce}`)
+            }
+            
             const view = this.getViewByArticleId(articleId)
             if (!view) {
                 console.log(`[ContentViewPool] cvp-capture-prefetched: No view found for article ${articleId}`)
@@ -2443,8 +2452,30 @@ export class ContentViewPool {
             }
             
             try {
-                const image = await wc.capturePage()
-                return { loading: false, screenshot: image.toDataURL() }
+                // First attempt: Direct capture (should work with offscreen rendering enabled)
+                let image = await wc.capturePage()
+                let dataUrl = image.toDataURL()
+                
+                // Check if we got a valid image (not empty)
+                // An empty PNG is about 200-300 bytes, a real screenshot is much larger
+                if (dataUrl.length < 500) {
+                    console.log(`[ContentViewPool] cvp-capture-prefetched: Direct capture returned empty, trying temporary visibility`)
+                    
+                    // Fallback: Temporarily make visible for rendering
+                    if (this.boundsReceived) {
+                        view.setVisible(true, this.visibleBounds)
+                        await new Promise(resolve => setTimeout(resolve, 100))
+                        
+                        image = await wc.capturePage()
+                        dataUrl = image.toDataURL()
+                        
+                        view.setVisible(false, this.visibleBounds)
+                        console.log(`[ContentViewPool] cvp-capture-prefetched: After temp visibility, size=${dataUrl.length} bytes`)
+                    }
+                }
+                
+                console.log(`[ContentViewPool] cvp-capture-prefetched: Screenshot captured, size=${dataUrl.length} bytes`)
+                return { loading: false, screenshot: dataUrl }
             } catch (error) {
                 console.error(`[ContentViewPool] cvp-capture-prefetched: Failed to capture ${articleId}:`, error)
                 return null

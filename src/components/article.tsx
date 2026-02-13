@@ -2504,7 +2504,7 @@ a:hover { text-decoration: underline; }
         if (!item) return null
         
         return {
-            articleId,
+            articleId: String(articleId),  // Convert to string to match Pool storage
             title: item.title || `Artikel #${primaryIndex}`
         }
     }
@@ -2544,9 +2544,11 @@ a:hover { text-decoration: underline; }
      */
     private showPrefetchPreview = async () => {
         const target = this.getNextArticleIdForPreview()
+        console.log('[Article] showPrefetchPreview: target=', target)
         if (!target) return
         
         const { articleId, title } = target
+        console.log(`[Article] showPrefetchPreview: Requesting screenshot for articleId=${articleId}, title=${title}`)
         
         // Set loading state and trigger overlay
         this.setState({
