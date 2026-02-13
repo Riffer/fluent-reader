@@ -402,6 +402,14 @@ export const contentViewPoolBridge = {
     },
     
     /**
+     * Capture screen of a prefetched view by article ID (for preview tooltip)
+     * Returns { loading: boolean, screenshot: string | null } or null if view not found
+     */
+    capturePrefetched: (articleId: string): Promise<{ loading: boolean, screenshot: string | null } | null> => {
+        return ipcRenderer.invoke("cvp-capture-prefetched", articleId)
+    },
+    
+    /**
      * Recreate active view (for visual zoom toggle)
      */
     recreate: (): Promise<boolean> => {

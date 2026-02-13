@@ -45,6 +45,7 @@ export type OverlaySource =
     | 'fluent-dropdown'     // Fluent UI dropdown menus (Tools menu, etc.)
     | 'p2p-incoming'        // P2P incoming article notification dialog
     | 'p2p-share'           // P2P share dialog
+    | 'prefetch-preview'    // Prefetch preview tooltip (hover on prefetch badge)
     | 'local-dialog'        // Generic local dialog (fallback)
 
 /**

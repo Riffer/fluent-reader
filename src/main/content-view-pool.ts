@@ -2422,6 +2422,35 @@ export class ContentViewPool {
             return null
         })
         
+        // Capture screen of a prefetched view by article ID (for preview tooltip)
+        ipcMain.handle("cvp-capture-prefetched", async (_event, articleId: string) => {
+            const view = this.getViewByArticleId(articleId)
+            if (!view) {
+                console.log(`[ContentViewPool] cvp-capture-prefetched: No view found for article ${articleId}`)
+                return null
+            }
+            
+            const wc = view.getWebContents()
+            if (!wc || wc.isDestroyed()) {
+                console.log(`[ContentViewPool] cvp-capture-prefetched: WebContents not available for ${articleId}`)
+                return null
+            }
+            
+            // Check if the view is still loading
+            if (wc.isLoading()) {
+                console.log(`[ContentViewPool] cvp-capture-prefetched: View still loading for ${articleId}`)
+                return { loading: true, screenshot: null }
+            }
+            
+            try {
+                const image = await wc.capturePage()
+                return { loading: false, screenshot: image.toDataURL() }
+            } catch (error) {
+                console.error(`[ContentViewPool] cvp-capture-prefetched: Failed to capture ${articleId}:`, error)
+                return null
+            }
+        })
+        
         // Recreate active view (for visual zoom toggle)
         ipcMain.handle("cvp-recreate", async () => {
             const active = this.getActiveView()

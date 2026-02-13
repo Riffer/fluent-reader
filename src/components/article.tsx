@@ -120,6 +120,12 @@ type ArticleState = {
     } | null
     // Supported languages for translation (loaded from main process)
     supportedLanguages: Record<string, string> | null
+    // Prefetch preview tooltip state
+    showPrefetchPreview: boolean
+    prefetchPreviewScreenshot: string | null
+    prefetchPreviewLoading: boolean
+    prefetchPreviewArticleId: string | null
+    prefetchPreviewTitle: string | null
 }
 
 class Article extends React.Component<ArticleProps, ArticleState> {
@@ -264,6 +270,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             activeViewId: null,
             prefetchStatus: null,
             supportedLanguages: null,
+            showPrefetchPreview: false,
+            prefetchPreviewScreenshot: null,
+            prefetchPreviewLoading: false,
+            prefetchPreviewArticleId: null,
+            prefetchPreviewTitle: null,
         }
 
         // Load supported languages for translation menu
@@ -475,6 +486,9 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         // Use circle (○) for unknown direction, dot (●) for known
         const symbol = direction === 'unknown' ? '○' : '●';
         
+        // Check if preview is available (next article is ready)
+        const hasPreview = nextArticleReady && completedIndices.length > 0;
+        
         return (
             <span
                 className="prefetch-indicator"
@@ -482,10 +496,12 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                     marginLeft: 8,
                     fontSize: 12,
                     color: color,
-                    cursor: 'default',
+                    cursor: hasPreview ? 'pointer' : 'default',
                     userSelect: 'none',
                 }}
                 title={tooltip}
+                onMouseEnter={hasPreview ? this.handlePrefetchBadgeMouseEnter : undefined}
+                onMouseLeave={this.handlePrefetchBadgeMouseLeave}
             >
                 {symbol}
             </span>
@@ -2459,6 +2475,215 @@ a:hover { text-decoration: underline; }
         }, 16)  // One frame delay
     }
     
+    // ========== Prefetch Preview Tooltip ==========
+    private prefetchPreviewTimer: NodeJS.Timeout | null = null
+    private readonly PREFETCH_PREVIEW_DELAY = 400  // ms before showing preview
+    
+    /**
+     * Get the next article ID in reading direction for preview
+     */
+    private getNextArticleIdForPreview = (): { articleId: string, title: string } | null => {
+        const { prefetchStatus } = this.state
+        const { articleIds, items } = this.props
+        
+        if (!prefetchStatus || !articleIds || !items) return null
+        
+        // Find the primary prefetch target (next in reading direction)
+        const { direction, targets, completedIndices } = prefetchStatus
+        if (targets.length === 0) return null
+        
+        // Primary target is the first one in the targets list
+        const primaryIndex = targets[0]
+        if (primaryIndex < 0 || primaryIndex >= articleIds.length) return null
+        
+        // Only show preview if the article is already prefetched (ready)
+        if (!completedIndices.includes(primaryIndex)) return null
+        
+        const articleId = articleIds[primaryIndex]
+        const item = items[articleId]
+        if (!item) return null
+        
+        return {
+            articleId,
+            title: item.title || `Artikel #${primaryIndex}`
+        }
+    }
+    
+    /**
+     * Handle mouse enter on prefetch badge - start delay timer
+     */
+    private handlePrefetchBadgeMouseEnter = () => {
+        // Clear any existing timer
+        if (this.prefetchPreviewTimer) {
+            clearTimeout(this.prefetchPreviewTimer)
+        }
+        
+        this.prefetchPreviewTimer = setTimeout(async () => {
+            await this.showPrefetchPreview()
+        }, this.PREFETCH_PREVIEW_DELAY)
+    }
+    
+    /**
+     * Handle mouse leave on prefetch badge - cancel timer or close preview
+     */
+    private handlePrefetchBadgeMouseLeave = () => {
+        // Clear timer
+        if (this.prefetchPreviewTimer) {
+            clearTimeout(this.prefetchPreviewTimer)
+            this.prefetchPreviewTimer = null
+        }
+        
+        // Close preview if open
+        if (this.state.showPrefetchPreview) {
+            this.closePrefetchPreview()
+        }
+    }
+    
+    /**
+     * Show prefetch preview (captures screenshot and opens overlay)
+     */
+    private showPrefetchPreview = async () => {
+        const target = this.getNextArticleIdForPreview()
+        if (!target) return
+        
+        const { articleId, title } = target
+        
+        // Set loading state and trigger overlay
+        this.setState({
+            showPrefetchPreview: true,
+            prefetchPreviewLoading: true,
+            prefetchPreviewArticleId: articleId,
+            prefetchPreviewTitle: title,
+            prefetchPreviewScreenshot: null
+        })
+        
+        // Trigger overlay (hides ContentView)
+        setOverlayVisible('prefetch-preview', true)
+        
+        // Lazy load screenshot
+        try {
+            const result = await window.contentViewPool?.capturePrefetched(articleId)
+            if (!this._isMounted || !this.state.showPrefetchPreview) return
+            
+            if (result && !result.loading && result.screenshot) {
+                this.setState({
+                    prefetchPreviewScreenshot: result.screenshot,
+                    prefetchPreviewLoading: false
+                })
+            } else if (result?.loading) {
+                // Still loading - show message
+                this.setState({ prefetchPreviewLoading: true })
+            } else {
+                // Failed to capture
+                this.setState({ prefetchPreviewLoading: false })
+            }
+        } catch (error) {
+            console.error('[Article] Failed to capture prefetch preview:', error)
+            if (this._isMounted) {
+                this.setState({ prefetchPreviewLoading: false })
+            }
+        }
+    }
+    
+    /**
+     * Close prefetch preview
+     */
+    private closePrefetchPreview = () => {
+        this.setState({
+            showPrefetchPreview: false,
+            prefetchPreviewScreenshot: null,
+            prefetchPreviewLoading: false,
+            prefetchPreviewArticleId: null,
+            prefetchPreviewTitle: null
+        })
+        
+        setOverlayVisible('prefetch-preview', false)
+    }
+    
+    /**
+     * Render prefetch preview tooltip popup
+     */
+    private renderPrefetchPreviewTooltip = () => {
+        if (!this.state.showPrefetchPreview) return null
+        
+        const { prefetchPreviewTitle, prefetchPreviewScreenshot, prefetchPreviewLoading } = this.state
+        
+        return (
+            <div
+                className="prefetch-preview-tooltip"
+                style={{
+                    position: 'absolute',
+                    top: 45,  // Below toolbar
+                    right: 20,
+                    width: 320,
+                    maxHeight: 240,
+                    backgroundColor: 'var(--neutralLighter, #f3f2f1)',
+                    border: '1px solid var(--neutralTertiaryAlt, #c8c6c4)',
+                    borderRadius: 4,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+                    zIndex: 1000,
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                }}
+                onMouseEnter={() => {
+                    // Keep preview open while hovering over it
+                    if (this.prefetchPreviewTimer) {
+                        clearTimeout(this.prefetchPreviewTimer)
+                        this.prefetchPreviewTimer = null
+                    }
+                }}
+                onMouseLeave={() => {
+                    this.closePrefetchPreview()
+                }}
+            >
+                {/* Header */}
+                <div style={{
+                    padding: '8px 12px',
+                    borderBottom: '1px solid var(--neutralTertiaryAlt, #c8c6c4)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--neutralPrimary, #323130)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                }}>
+                    ⏩ Nächster: {prefetchPreviewTitle || 'Lädt...'}
+                </div>
+                
+                {/* Screenshot area */}
+                <div style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: 160,
+                    backgroundColor: '#fff',
+                }}>
+                    {prefetchPreviewLoading ? (
+                        <div style={{ color: '#666', fontSize: 12 }}>
+                            ⏳ Screenshot wird geladen...
+                        </div>
+                    ) : prefetchPreviewScreenshot ? (
+                        <img
+                            src={prefetchPreviewScreenshot}
+                            alt="Preview"
+                            style={{
+                                maxWidth: '100%',
+                                maxHeight: '100%',
+                                objectFit: 'contain',
+                            }}
+                        />
+                    ) : (
+                        <div style={{ color: '#999', fontSize: 12 }}>
+                            Keine Vorschau verfügbar
+                        </div>
+                    )}
+                </div>
+            </div>
+        )
+    }
+
     /**
      * Handle mouse leaving the ContentView area
      * Capture screenshot and hide ContentView to allow overlay interaction
@@ -3873,6 +4098,8 @@ window.__articleData = ${JSON.stringify({
                             title="Klicken oder kurz warten zum Zurückkehren"
                         />
                     )}
+                    {/* Prefetch Preview Tooltip */}
+                    {this.renderPrefetchPreviewTooltip()}
                     {/* Loading spinner for Visual Zoom navigation */}
                     {this.state.isNavigatingWithVisualZoom && (
                         <div
