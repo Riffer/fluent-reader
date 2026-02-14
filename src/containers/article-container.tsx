@@ -45,14 +45,15 @@ const getFeeds = (state: RootState) => state.feeds
 const getItemId = (_state: RootState, props: ArticleContainerProps) => props.itemId
 const getItems = (state: RootState) => state.items
 const getSources = (state: RootState) => state.sources
+const getMenuKey = (state: RootState) => state.app.menuKey  // List identity for prefetch validation
 
 // Import ContextMenuType for comparison
 import { ContextMenuType } from "../scripts/models/app"
 
 const makeMapStateToProps = () => {
     return createSelector(
-        [getItem, getSource, getLocale, getMenuOpen, getSettingsOpen, getLogMenuOpen, getContextMenuType, getFeedId, getFeeds, getItemId, getItems, getSources],
-        (item, source, locale, menuOpen, settingsOpen, logMenuOpen, contextMenuType, feedId, feeds, itemId, items, sources) => {
+        [getItem, getSource, getLocale, getMenuOpen, getSettingsOpen, getLogMenuOpen, getContextMenuType, getFeedId, getFeeds, getItemId, getItems, getSources, getMenuKey],
+        (item, source, locale, menuOpen, settingsOpen, logMenuOpen, contextMenuType, feedId, feeds, itemId, items, sources, menuKey) => {
             // Calculate article position in feed for ContentViewPool
             let articleIndex = -1
             let listLength = 0
@@ -91,6 +92,8 @@ const makeMapStateToProps = () => {
                 articleIds: articleIds,
                 items: items,
                 sources: sources,
+                // List identity for prefetch validation
+                menuKey: menuKey,
             }
         }
     )

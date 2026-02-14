@@ -107,6 +107,13 @@ export class ContentViewPool {
     // === Parent Window ===
     private parentWindow: BrowserWindow | null = null
     
+    // === Pool Generation (incremented on nuke to invalidate stale requests) ===
+    private poolGeneration: number = 0
+    private awaitingFirstNavigationAfterNuke: boolean = false  // Block prefetches until first navigation
+    
+    // === List Identity (menuKey from UI - identifies which article list is active) ===
+    private currentMenuKey: string | null = null
+    
     // === Bounds ===
     private visibleBounds: ContentViewBounds = { x: 0, y: 0, width: 800, height: 600 }
     private boundsReceived: boolean = false  // Track if real bounds have been received from renderer
@@ -833,10 +840,29 @@ export class ContentViewPool {
         settings: NavigationSettings,
         articleIndex: number,
         listLength: number,
-        sourceId: number | null = null
+        sourceId: number | null = null,
+        menuKey: string | null = null
     ): Promise<boolean> {
+        // Clear the nuke flag - this navigation establishes the new list context
+        if (this.awaitingFirstNavigationAfterNuke) {
+            // console.log(`[ContentViewPool] First navigation after nuke - prefetches unblocked`)
+            this.awaitingFirstNavigationAfterNuke = false
+        }
+        
+        // Update the current menuKey - this identifies the active article list
+        if (menuKey) {
+            // if (this.currentMenuKey !== menuKey) {
+            //     console.log(`[ContentViewPool] menuKey changed: ${this.currentMenuKey} -> ${menuKey}`)
+            // }
+            this.currentMenuKey = menuKey
+        }
+        
         // Cancel any pending prefetch
         this.cancelPrefetch()
+        
+        // NOTE: List change detection is now handled by onListChanged() from the UI.
+        // The UI calls window.contentViewPool.onListChanged() before dispatching
+        // selectSources/selectAllArticles, which triggers nukePool().
         
         // NOTE: We no longer invalidate cache on sourceId change.
         // Lists can contain articles from multiple feeds (e.g., "All Articles").
@@ -895,6 +921,10 @@ export class ContentViewPool {
             
             this.activateView(cachedView)
             
+            // Update render position immediately for cache hits
+            // This ensures the "next" article is at render position when available
+            this.updateRenderPosition()
+            
             // Schedule prefetch for next articles
             this.schedulePrefetch()
             
@@ -948,10 +978,22 @@ export class ContentViewPool {
             
             // Show view when ready (only if still active AND bounds are available)
             if (this.isPoolVisible && this.boundsReceived) {
+                // DEFENSIVE: Ensure ALL other views are offscreen before showing
+                // This prevents "orphaned" views from race conditions
+                for (const v of this.views) {
+                    if (v !== view && !v.isAtRenderPosition) {
+                        v.moveOffScreen(this.visibleBounds)
+                    }
+                }
+                
                 view.setVisible(true, this.visibleBounds)
                 view.bringToFront()  // Ensure active view is on top (covers render-position views)
                 view.focus()  // Single focus call after visibility is set
                 // console.log(`[ContentViewPool] Load complete, showing ${view.id}`)
+                
+                // Update render position for the "next" article
+                // Do this after showing the active view so it's properly covered
+                this.updateRenderPosition()
             } else if (this.isPoolVisible) {
                 // console.log(`[ContentViewPool] Load complete for ${view.id}, waiting for bounds`)
             }
@@ -1561,7 +1603,7 @@ export class ContentViewPool {
             // PARALLEL MODE (original): Request only targets that need fetching
             // console.log(`[ContentViewPool] Requesting prefetch info for ${targetsToFetch.length} targets: [${targetsToFetch.join(', ')}]`)
             for (const targetIndex of targetsToFetch) {
-                this.sendToRenderer('cvp-request-prefetch-info', targetIndex)
+                this.sendToRenderer('cvp-request-prefetch-info', targetIndex, this.currentMenuKey)
             }
             // Send initial status
             this.sendPrefetchStatus()
@@ -1590,7 +1632,7 @@ export class ContentViewPool {
         }
         
         // console.log(`[ContentViewPool] Cascaded prefetch: requesting index ${nextTarget} (${this.prefetchQueue.length} remaining)`)
-        this.sendToRenderer('cvp-request-prefetch-info', nextTarget)
+        this.sendToRenderer('cvp-request-prefetch-info', nextTarget, this.currentMenuKey)
     }
     
     /**
@@ -1880,12 +1922,16 @@ export class ContentViewPool {
     private findFreeView(): CachedContentView | null {
         // Prefer empty views
         const empty = this.views.find(v => v.isEmpty && !v.isActive)
-        if (empty) return empty
+        if (empty) {
+            console.log(`[ContentViewPool] findFreeView: Found empty view ${empty.id}`)
+            return empty
+        }
         
         // Can we create a new one?
         if (this.views.length < this.config.size) {
             const newView = new CachedContentView(`view-${this.views.length}`)
             this.views.push(newView)
+            console.log(`[ContentViewPool] findFreeView: Created new view ${newView.id}`)
             return newView
         }
         
@@ -1912,12 +1958,15 @@ export class ContentViewPool {
             return true
         })
         
-        if (candidates.length === 0) return null
+        if (candidates.length === 0) {
+            console.log(`[ContentViewPool] findFreeView: No candidates! Views: ${this.views.map(v => `${v.id}:${v.status}${v.isActive?'[A]':''}${v.isLoading?'[L]':''}`).join(', ')}`)
+            return null
+        }
         
         // Sort by lastUsedAt (oldest first = best to recycle)
         candidates.sort((a, b) => a.lastUsedAt - b.lastUsedAt)
         
-        // console.log(`[ContentViewPool] findFreeView: Using LRU view ${candidates[0].id} (age=${((Date.now() - candidates[0].lastUsedAt) / 1000).toFixed(1)}s)`)
+        console.log(`[ContentViewPool] findFreeView: Using LRU view ${candidates[0].id} (age=${((Date.now() - candidates[0].lastUsedAt) / 1000).toFixed(1)}s)`)
         return candidates[0]
     }
     
@@ -2015,6 +2064,14 @@ export class ContentViewPool {
         this.activeViewId = view.id
         view.setActive(true)
         
+        // DEFENSIVE: Ensure ALL other views are offscreen (except render-position views)
+        // This prevents "orphaned" views from race conditions when navigating
+        for (const v of this.views) {
+            if (v !== view && !v.isAtRenderPosition) {
+                v.moveOffScreen(this.visibleBounds)
+            }
+        }
+        
         // Apply bounds and show if pool is visible AND we have real bounds
         // IMPORTANT: Always ensure visibility is set, even for same view (it might have been hidden)
         if (this.isPoolVisible && this.boundsReceived) {
@@ -2104,8 +2161,16 @@ export class ContentViewPool {
         // If we have an active view that's waiting for real bounds, show it now
         const active = this.getActiveView()
         if (active && this.isPoolVisible && isRealBounds) {
+            // DEFENSIVE: On first real bounds, ensure ALL non-active views are offscreen
+            // This prevents "orphaned" views from remaining visible due to race conditions
+            // (especially important for the very first view which might be in an inconsistent state)
             if (firstRealBounds) {
                 // console.log(`[ContentViewPool] First real bounds received! Showing active view ${active.id} at:`, bounds)
+                for (const view of this.views) {
+                    if (view !== active && !view.isAtRenderPosition) {
+                        view.moveOffScreen(bounds)
+                    }
+                }
             }
             active.setVisible(true, bounds)
             active.bringToFront()  // Cover render-position views
@@ -2123,20 +2188,60 @@ export class ContentViewPool {
         const active = this.getActiveView()
         if (active) {
             if (visible) {
+                // DEFENSIVE: Ensure ALL non-active views are offscreen
+                // This prevents "orphaned" views from remaining visible due to race conditions
+                for (const view of this.views) {
+                    if (view !== active && !view.isAtRenderPosition) {
+                        view.moveOffScreen(this.visibleBounds)
+                    }
+                }
+                
                 // Only show if we have real bounds, otherwise wait for setBounds
                 if (this.boundsReceived) {
                     active.setVisible(true, this.visibleBounds)
                     active.bringToFront()  // Cover render-position views
                     active.focus()
                     // console.log(`[ContentViewPool] Showing ${active.id} at bounds:`, this.visibleBounds)
+                    
+                    // Restore render position for the "next" article
+                    // This is important after the pool was hidden and re-shown
+                    this.updateRenderPosition()
                 } else {
                     // console.log(`[ContentViewPool] setVisible(true) - waiting for bounds before showing ${active.id}`)
                 }
             } else {
-                active.setVisible(false, this.visibleBounds)  // Pass bounds to preserve size
+                // CRITICAL: When hiding, move ALL views offscreen - not just active!
+                // This prevents "orphaned" views when switching article lists:
+                // - Prefetch views that were at render position
+                // - Views that haven't been recycled yet
+                // - Any view that might be onscreen due to race conditions
+                for (const view of this.views) {
+                    view.moveOffScreen(this.visibleBounds)
+                    // Invalidate articleIndex - the next list will have different indices
+                    view.invalidateArticleIndex()
+                }
+                // Also clear the render position tracking
+                this.renderPositionViewId = null
+                // Reset reading direction for the next list
+                this.readingDirection = 'unknown'
+                // Cancel any pending prefetches - they're no longer relevant
+                this.cancelPrefetch()
             }
         } else if (visible && !wasVisible) {
             // console.log(`[ContentViewPool] setVisible(true) - no active view yet`)
+        } else if (!visible) {
+            // No active view but hiding - still ensure ALL views are offscreen
+            // This handles edge cases where views exist but none is marked active
+            for (const view of this.views) {
+                view.moveOffScreen(this.visibleBounds)
+                // Invalidate articleIndex - the next list will have different indices
+                view.invalidateArticleIndex()
+            }
+            this.renderPositionViewId = null
+            // Reset reading direction for the next list
+            this.readingDirection = 'unknown'
+            // Cancel any pending prefetches
+            this.cancelPrefetch()
         }
     }
     
@@ -2160,20 +2265,42 @@ export class ContentViewPool {
         })
         
         // Navigate to article
-        ipcMain.handle('cvp-navigate', async (event, articleId, url, feedId, settings, index, listLength, sourceId) => {
-            // console.log(`[ContentViewPool] IPC cvp-navigate received: articleId=${articleId}, index=${index}, source=${sourceId}`)
-            return this.navigateToArticle(articleId, url, feedId, settings, index, listLength, sourceId)
+        ipcMain.handle('cvp-navigate', async (event, articleId, url, feedId, settings, index, listLength, sourceId, menuKey) => {
+            // console.log(`[ContentViewPool] IPC cvp-navigate received: articleId=${articleId}, index=${index}, source=${sourceId}, menuKey=${menuKey}`)
+            return this.navigateToArticle(articleId, url, feedId, settings, index, listLength, sourceId, menuKey)
         })
         
         // Prefetch article
         ipcMain.on('cvp-prefetch', (event, articleId, url, feedId, settings) => {
+            // Reject prefetch requests after nuke until first navigation
+            if (this.awaitingFirstNavigationAfterNuke) {
+                // console.log(`[ContentViewPool] BLOCKED prefetch for ${articleId} - awaiting first navigation after nuke`)
+                return
+            }
             // console.log(`[ContentViewPool] IPC cvp-prefetch received: articleId=${articleId}`)
             this.prefetch(articleId, url, feedId, settings)
         })
         
         // Prefetch info response from renderer (extended with articleInfo for FullContent)
-        ipcMain.on('cvp-prefetch-info', (event, articleIndex, articleId, url, feedId, settings, articleInfo) => {
-            // console.log(`[ContentViewPool] IPC cvp-prefetch-info received: index=${articleIndex}, articleId=${articleId}, url=${url?.substring(0, 50) || 'null'}...`)
+        ipcMain.on('cvp-prefetch-info', (event, articleIndex, articleId, url, feedId, settings, articleInfo, menuKey) => {
+            // Reject prefetch requests after nuke until first navigation
+            if (this.awaitingFirstNavigationAfterNuke) {
+                // console.log(`[ContentViewPool] BLOCKED prefetch-info for ${articleId} - awaiting first navigation after nuke`)
+                return
+            }
+            
+            // CRITICAL: Validate menuKey - reject stale prefetch responses from previous list
+            if (menuKey && this.currentMenuKey && menuKey !== this.currentMenuKey) {
+                // console.log(`[ContentViewPool] REJECTED stale prefetch-info: menuKey=${menuKey} != current=${this.currentMenuKey}, articleId=${articleId}`)
+                // Continue with next prefetch if in cascaded mode
+                if (this.cascadedPrefetchEnabled && this.prefetchInProgress === articleId) {
+                    this.prefetchInProgress = null
+                    this.processNextPrefetch()
+                }
+                return
+            }
+            
+            // console.log(`[ContentViewPool] IPC cvp-prefetch-info received: index=${articleIndex}, articleId=${articleId}, menuKey=${menuKey}`)
             
             // CRITICAL: Add articleId to pending set BEFORE calling prefetch()
             // This prevents a race condition where one prefetch recycles a view
@@ -2318,6 +2445,11 @@ export class ContentViewPool {
             if (active) {
                 active.getWebContents()?.loadURL("about:blank")
             }
+        })
+        
+        // List changed - NUKE the entire pool and rebuild fresh
+        ipcMain.on("cvp-on-list-changed", () => {
+            this.nukePool()
         })
         
         // === Additional handlers for feature parity with ContentViewManager ===
@@ -3005,6 +3137,66 @@ export class ContentViewPool {
                 webContentsId: v.webContentsId
             }))
         }
+    }
+    
+    /**
+     * NUKE the entire pool - destroy ALL views and reset all state.
+     * Called when the article list changes to ensure no stale content remains.
+     * The pool will be rebuilt fresh on the next navigation.
+     */
+    nukePool(): void {
+        // INCREMENT GENERATION FIRST - this invalidates all pending prefetch requests
+        this.poolGeneration++
+        this.awaitingFirstNavigationAfterNuke = true  // Block prefetches until navigation
+        // console.log(`[ContentViewPool] ========== NUKING POOL (Generation ${this.poolGeneration}) ==========`)
+        // console.log(`[ContentViewPool] Views to destroy: ${this.views.length}`)
+        
+        // Cancel any pending operations FIRST
+        this.cancelPrefetch()
+        if (this.prefetchTimer) {
+            clearTimeout(this.prefetchTimer)
+            this.prefetchTimer = null
+        }
+        
+        // Destroy ALL views completely
+        for (const view of this.views) {
+            const viewId = view.id
+            const wcId = view.view?.webContents?.id
+            // console.log(`[ContentViewPool] Destroying ${viewId} (wcId=${wcId})`)
+            view.destroy()
+        }
+        
+        // Clear all collections
+        this.views = []
+        this.viewsByWebContentsId.clear()
+        this.activeViewId = null
+        
+        // Reset ALL state to initial values
+        this.readingDirection = 'unknown'
+        this.currentArticleIndex = -1
+        this.articleListLength = 0
+        this.currentSourceId = null
+        this.currentMenuKey = null  // Clear list identity on nuke
+        this.renderPositionViewId = null
+        this.protectedArticleIds.clear()
+        this.pendingPrefetchArticleIds.clear()
+        this.prefetchTargets = []
+        this.prefetchCompletedIndices.clear()
+        this.prefetchQueue = []
+        this.prefetchInProgress = null
+        this.pendingPrefetch = []
+        this.cssZoomLevel = 0
+        this.isSyncingZoom = false
+        this.isZoomPending = false
+        if (this.zoomPendingTimeout) {
+            clearTimeout(this.zoomPendingTimeout)
+            this.zoomPendingTimeout = null
+        }
+        this.inputModeActive = false
+        this.contentViewHadFocus = false
+        
+        // console.log(`[ContentViewPool] Pool completely reset - 0 views, all state cleared`)
+        // console.log(`[ContentViewPool] ================================`)
     }
     
     /**

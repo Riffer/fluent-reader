@@ -102,6 +102,7 @@ export const contentViewPoolBridge = {
      * @param articleIndex - Current article index in list
      * @param listLength - Total articles in list
      * @param sourceId - Source/Group ID (to detect feed group changes)
+     * @param menuKey - Menu key identifying the current article list
      */
     navigateToArticle: (
         articleId: string,
@@ -110,9 +111,10 @@ export const contentViewPoolBridge = {
         settings: NavigationSettings,
         articleIndex: number,
         listLength: number,
-        sourceId: number | null = null
+        sourceId: number | null = null,
+        menuKey: string | null = null
     ): Promise<boolean> => {
-        console.log(`[ContentViewPool Bridge] navigateToArticle: ${articleId}, index=${articleIndex}, source=${sourceId}`)
+        // console.log(`[ContentViewPool Bridge] navigateToArticle: ${articleId}, index=${articleIndex}, menuKey=${menuKey}`)
         return ipcRenderer.invoke(
             "cvp-navigate",
             articleId,
@@ -121,7 +123,8 @@ export const contentViewPoolBridge = {
             settings,
             articleIndex,
             listLength,
-            sourceId
+            sourceId,
+            menuKey
         )
     },
     
@@ -153,6 +156,8 @@ export const contentViewPoolBridge = {
      * For Webpage mode: url is the webpage URL
      * For RSS/Local mode: url is the data URL with rendered content
      * For FullContent mode: articleInfo contains data for extraction
+     * 
+     * @param menuKey - Menu key to validate against current list
      */
     providePrefetchInfo: (
         articleIndex: number,
@@ -160,9 +165,10 @@ export const contentViewPoolBridge = {
         url: string | null,
         feedId: string | null,
         settings: NavigationSettings | null,
-        articleInfo?: PrefetchArticleInfo | null
+        articleInfo?: PrefetchArticleInfo | null,
+        menuKey?: string | null
     ): void => {
-        ipcRenderer.send("cvp-prefetch-info", articleIndex, articleId, url, feedId, settings, articleInfo)
+        ipcRenderer.send("cvp-prefetch-info", articleIndex, articleId, url, feedId, settings, articleInfo, menuKey)
     },
     
     /**
@@ -287,6 +293,38 @@ export const contentViewPoolBridge = {
      */
     clear: (): void => {
         ipcRenderer.send("cvp-clear")
+    },
+    
+    /**
+     * Notify pool that the article list has changed (user switched feed/source).
+     * This invalidates all prefetched articleIndex values so stale content
+     * from the old list won't appear in render position.
+     * Blocking is handled differently now - only block if there are actually views.
+     */
+    onListChanged: (): void => {
+        // The nukePool in main will handle view destruction.
+        // We don't need to block prefetch requests here anymore because:
+        // 1. nukePool destroys all views and clears state
+        // 2. The first navigation after nuke creates fresh views
+        // 3. Prefetch requests after nuke will find an empty pool and create new views
+        // console.log('[ContentViewPool] List changed - triggering pool nuke')
+        ipcRenderer.send("cvp-on-list-changed")
+    },
+    
+    /**
+     * Check if prefetch is currently blocked (list change in progress)
+     * @deprecated - no longer used, kept for backwards compatibility
+     */
+    isPrefetchBlocked: (): boolean => {
+        return false  // No longer blocking - nuke handles cleanup
+    },
+    
+    /**
+     * Unblock prefetch (called when React has updated with new list)
+     * @deprecated - no longer used, kept for backwards compatibility
+     */
+    unblockPrefetch: (): void => {
+        // No longer used - nuke handles cleanup
     },
     
     // ========== Additional methods for feature parity ==========

@@ -79,6 +79,8 @@ type ArticleProps = {
     articleIds?: number[]
     items?: { [id: number]: RSSItem }
     sources?: { [id: string]: RSSSource }
+    // List identity for prefetch validation
+    menuKey?: string
 }
 
 type ArticleState = {
@@ -538,11 +540,11 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         }
         
         const settings = this.getNavigationSettings();
-        const { articleIndex = -1, listLength = 0, feedId = null } = this.props;
+        const { articleIndex = -1, listLength = 0, feedId = null, menuKey = null } = this.props;
         const artId = articleId || String(this.props.item?._id) || 'unknown';
         const sourceId = this.props.source?.sid ?? null;  // Current feed group/view ID
         
-        console.log(`[Article] Pool navigate: ${artId} (${articleIndex}/${listLength}, source=${sourceId})`);
+        console.log(`[Article] Pool navigate: ${artId} (${articleIndex}/${listLength})`);
         
         // Set visible first - Pool will apply stored bounds when available
         window.contentViewPool.setVisible(true);
@@ -558,7 +560,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             settings,
             articleIndex,
             listLength,
-            sourceId
+            sourceId,
+            menuKey
         ).catch((err: any) => {
             console.error("[Article] Pool navigation failed:", err);
         });
@@ -781,10 +784,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         ipc.on('cvp-prefetch-status', onPrefetchStatus);
         this.contentViewCleanup.push(() => ipc.removeListener('cvp-prefetch-status', onPrefetchStatus));
         
-        // Prefetch info request from Pool
-        const onPrefetchRequest = (_event: any, articleIndex: number) => {
-            console.log(`[ContentViewPool] Prefetch request for index ${articleIndex}`);
-            this.handlePrefetchRequest(articleIndex);
+        // Prefetch info request from Pool (includes menuKey for validation)
+        const onPrefetchRequest = (_event: any, articleIndex: number, menuKey: string | null) => {
+            // console.log(`[ContentViewPool] Prefetch request for index ${articleIndex}, menuKey=${menuKey}`);
+            this.handlePrefetchRequest(articleIndex, menuKey);
         };
         ipc.on('cvp-request-prefetch-info', onPrefetchRequest);
         this.contentViewCleanup.push(() => ipc.removeListener('cvp-request-prefetch-info', onPrefetchRequest));
@@ -801,19 +804,30 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     /**
      * Handle prefetch request from ContentViewPool
      * Provides article info for a specific index
+     * @param menuKey - The menuKey from the pool, used for validation
      */
-    private handlePrefetchRequest = (articleIndex: number) => {
-        const { articleIds, items, sources, feedId, locale } = this.props;
+    private handlePrefetchRequest = (articleIndex: number, menuKey: string | null = null) => {
+        // console.log(`[ContentViewPool] handlePrefetchRequest(${articleIndex}, menuKey=${menuKey})`)
+        
+        const { articleIds, items, sources, feedId, locale, menuKey: currentMenuKey } = this.props;
+        
+        // CRITICAL: Validate menuKey - if it doesn't match current list, this is a stale request
+        if (menuKey && currentMenuKey && menuKey !== currentMenuKey) {
+            // console.log(`[ContentViewPool] IGNORING stale prefetch request: menuKey=${menuKey} != current=${currentMenuKey}`);
+            // Still send a response so the pool can continue with next prefetch
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null, menuKey);
+            return;
+        }
         
         if (!articleIds || !items || !sources) {
             console.log(`[ContentViewPool] Cannot handle prefetch - missing props`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null, menuKey);
             return;
         }
         
         if (articleIndex < 0 || articleIndex >= articleIds.length) {
             console.log(`[ContentViewPool] Prefetch index ${articleIndex} out of bounds (0-${articleIds.length - 1})`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null, menuKey);
             return;
         }
         
@@ -822,14 +836,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         if (!item) {
             console.log(`[ContentViewPool] Item ${itemId} not found in store`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null, menuKey);
             return;
         }
         
         const source = sources[item.source];
         if (!source) {
             console.log(`[ContentViewPool] Source ${item.source} not found for item ${itemId}`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null, menuKey);
             return;
         }
         
@@ -862,7 +876,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         } else if (openTarget === SourceOpenTarget.External) {
             // External mode: Opens in browser, no prefetch needed
             console.log(`[ContentViewPool] Prefetch skip for index ${articleIndex}: External mode`);
-            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null);
+            window.contentViewPool?.providePrefetchInfo(articleIndex, null, null, null, null, null, menuKey);
             return;
         } else {
             // Local/RSS mode: Generate the article HTML view (content is local, no network needed)
@@ -894,7 +908,8 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             // Use the prefetch article's source ID as feedId, not the current article's
             String(item.source),
             settings,
-            articleInfo
+            articleInfo,
+            menuKey
         );
     }
     
@@ -2096,6 +2111,7 @@ a:hover { text-decoration: underline; }
 
     componentDidMount = () => {
         this._isMounted = true
+        
         // Load app path for ContentView article.html loading
         if (!this.state.appPath && (window as any).ipcRenderer) {
             (window as any).ipcRenderer.invoke('get-app-path').then((path: string) => {

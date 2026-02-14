@@ -168,6 +168,14 @@ export class CachedContentView {
         return this._articleIndex
     }
     
+    /**
+     * Invalidate the articleIndex when the list changes
+     * This ensures the view won't be mistakenly matched to an index in a new list
+     */
+    invalidateArticleIndex(): void {
+        this._articleIndex = -1
+    }
+    
     get isFullContentMode(): boolean {
         return this._isFullContentMode
     }
@@ -331,22 +339,50 @@ export class CachedContentView {
     }
     
     /**
-     * Destroy the underlying WebContentsView
+     * Destroy the underlying WebContentsView completely
      */
     destroy(): void {
-        if (!this._view) return
+        if (!this._view) {
+            // console.log(`[CachedContentView:${this.id}] destroy() called but no view exists`)
+            return
+        }
+        
+        const viewId = this.id
+        const wc = this._view.webContents
+        const wcId = wc?.id
+        
+        // console.log(`[CachedContentView:${viewId}] Destroying view (wcId=${wcId}, url=${wc?.getURL()?.substring(0, 50)}...)`)
         
         try {
+            // First remove from parent window
             if (this.parentWindow && !this.parentWindow.isDestroyed()) {
                 this.parentWindow.contentView.removeChildView(this._view)
+                // console.log(`[CachedContentView:${viewId}] Removed from parent window`)
             }
         } catch (e) {
-            console.error(`[CachedContentView:${this.id}] Error removing from parent:`, e)
+            console.error(`[CachedContentView:${viewId}] Error removing from parent:`, e)
+        }
+        
+        try {
+            // Load blank to clear content first, then close
+            if (wc && !wc.isDestroyed()) {
+                // Force stop any loading
+                wc.stop()
+                // Load blank synchronously to clear renderer
+                wc.loadURL('about:blank')
+                // Now close the webContents
+                wc.close()
+                // console.log(`[CachedContentView:${viewId}] WebContents closed`)
+            }
+        } catch (e) {
+            console.error(`[CachedContentView:${viewId}] Error closing webContents:`, e)
         }
         
         this._view = null
+        this._articleId = null
+        this._articleIndex = -1
+        this._hasLoadedOnce = false
         this.setStatus('empty')
-        // console.log(`[CachedContentView:${this.id}] Destroyed`)
     }
     
     /**
@@ -359,19 +395,19 @@ export class CachedContentView {
         // Destroy the view (must be recreated due to IPC/preload issues)
         this.destroy()
         
-        // Reset article context
+        // Reset article context completely - including index!
+        // This prevents the view from being selected by updateRenderPosition
+        // before new content is loaded.
         this._articleId = null
         this._feedId = null
         this._url = null
         this._isFullContentMode = false
+        this._articleIndex = -1  // CRITICAL: Reset index to prevent stale matches
         
         // Reset load state
         this._loadError = null
         this._loadStartTime = 0
         this._hasLoadedOnce = false  // Reset - this view needs to load fresh
-        // NOTE: Keep _articleIndex - it helps track which index was last loaded
-        // and enables prefetch status to correctly identify already-loaded indices.
-        // It will be overwritten when a new article is loaded.
         
         // Reset settings
         this._loadedWithZoom = 1.0
@@ -762,7 +798,7 @@ export class CachedContentView {
         this._isAtRenderPosition = true
         this._view.setVisible(true)
         
-        console.log(`[CachedContentView:${this.id}] Set to render position (3px visible at left edge, y=50)`)
+        // console.log(`[CachedContentView:${this.id}] Set to render position (3px visible at left edge, y=50)`)
     }
     
     /**

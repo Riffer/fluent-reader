@@ -37,13 +37,16 @@ const mapStateToProps = createSelector(
 const mapDispatchToProps = dispatch => ({
     toggleMenu: () => dispatch(toggleMenu()),
     allArticles: (init = false) => {
+        window.contentViewPool?.onListChanged()
         dispatch(selectAllArticles(init)), dispatch(initFeeds())
     },
     selectSourceGroup: (group: SourceGroup, menuKey: string) => {
+        window.contentViewPool?.onListChanged()
         dispatch(selectSources(group.sids, menuKey, group.name))
         dispatch(initFeeds())
     },
     selectSource: (source: RSSSource) => {
+        window.contentViewPool?.onListChanged()
         dispatch(selectSources([source.sid], "s-" + source.sid, source.name))
         dispatch(initFeeds())
     },
