@@ -702,6 +702,32 @@ try {
     window.location.href = url;
   });
 
+  // Auto-expand Reddit gallery when view enters render position
+  // This allows immediate Space navigation (skip first expand step)
+  ipcRenderer.on('cvp-auto-expand-reddit-gallery', (event) => {
+    console.log('[ContentPreload] cvp-auto-expand-reddit-gallery received');
+    // Only expand if Reddit Gallery Expand is enabled and we're on Reddit
+    if (preloadSettings['reddit-gallery-expand'] && /reddit\.com/.test(window.location.href)) {
+      // Retry logic for larger galleries that take longer to load
+      let attempts = 0;
+      const maxAttempts = 5;
+      const retryDelay = 300; // ms between retries
+      
+      const tryExpand = () => {
+        attempts++;
+        const result = expandRedditGallery();
+        console.log('[ContentPreload] Auto-expand attempt', attempts, 'result:', result);
+        
+        if (!result && attempts < maxAttempts) {
+          // Gallery elements not found yet, retry
+          setTimeout(tryExpand, retryDelay);
+        }
+      };
+      
+      tryExpand();
+    }
+  });
+
   // NSFW-Cleanup setting from additionalArguments
   let nsfwCleanupEnabled = preloadSettings['nsfw-cleanup'] ?? false;
 

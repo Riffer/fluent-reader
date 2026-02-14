@@ -1794,6 +1794,12 @@ export class ContentViewPool {
             nextView.setRenderPosition(this.visibleBounds)
             this.renderPositionViewId = nextView.id
             console.log(`[ContentViewPool] Set ${nextView.id} (index ${nextIndex}) to render position`)
+            
+            // Auto-expand Reddit gallery after initial render delay
+            // content-preload.js handles retry logic for larger galleries
+            setTimeout(() => {
+                nextView.triggerAutoExpandRedditGallery()
+            }, 400)
         }
     }
 
