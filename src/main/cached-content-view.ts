@@ -1134,6 +1134,33 @@ export class CachedContentView {
     getMobileMode(): boolean {
         return this._mobileMode
     }
+
+    // ========== Reddit Gallery Methods ==========
+    
+    /**
+     * Trigger auto-expand of Reddit gallery in the content view.
+     * Called when view enters render position to allow immediate Space navigation.
+     */
+    triggerAutoExpandRedditGallery(): void {
+        if (!this._view?.webContents || this._view.webContents.isDestroyed()) {
+            return
+        }
+        
+        // Only send if reddit-gallery-expand is enabled
+        if (!isRedditGalleryExpandEnabled()) {
+            return
+        }
+        
+        // Only send for Reddit URLs
+        const url = this._url
+        if (!url || !/reddit\.com/.test(url)) {
+            return
+        }
+        
+        console.log(`[CachedContentView:${this.id}] Triggering auto-expand Reddit gallery`)
+        this.send('cvp-auto-expand-reddit-gallery')
+    }
+
     /**
      * Set visual zoom mode flag and enable/disable Device Emulation
      * Note: Device Emulation is only applied when content has been loaded (status !== 'empty')
