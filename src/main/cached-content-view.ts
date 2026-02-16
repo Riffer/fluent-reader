@@ -788,7 +788,7 @@ export class CachedContentView {
         // x = -width + 3 means 3 rightmost pixel columns are visible
         // y = 50 keeps us away from rounded corners (both top and bottom)
         this._view.setBounds({
-            x: -bounds.width + 3,  // 3 rightmost pixels visible at x=0,1,2
+            x: -bounds.width + 1,  // 3 rightmost pixels visible at x=0,1,2
             y: 50,  // Safe distance from rounded corners
             width: bounds.width,
             height: bounds.height
