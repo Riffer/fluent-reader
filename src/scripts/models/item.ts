@@ -356,6 +356,13 @@ export function fetchItems(
                         getState().items
                     )
                 )
+                
+                // Notify pool that article indices may have changed
+                // Only if new items were actually inserted (which changes list order)
+                if (inserted.length > 0) {
+                    window.contentViewPool?.onFeedRefreshed()
+                }
+                
                 if (background) {
                     for (let item of inserted) {
                         if (item.notify) {

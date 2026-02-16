@@ -312,6 +312,16 @@ export const contentViewPoolBridge = {
     },
     
     /**
+     * Notify pool that feeds have been refreshed (new items may have been added).
+     * This invalidates articleIndex values but keeps cached views.
+     * The article list order may have changed, so index-based lookups are invalid.
+     */
+    onFeedRefreshed: (): void => {
+        // console.log('[ContentViewPool] Feed refreshed - invalidating article indices')
+        ipcRenderer.send("cvp-on-feed-refreshed")
+    },
+    
+    /**
      * Check if prefetch is currently blocked (list change in progress)
      * @deprecated - no longer used, kept for backwards compatibility
      */

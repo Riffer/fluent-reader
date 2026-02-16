@@ -2458,6 +2458,11 @@ export class ContentViewPool {
             this.nukePool()
         })
         
+        // Feed refreshed - invalidate article indices but keep cached views
+        ipcMain.on("cvp-on-feed-refreshed", () => {
+            this.invalidateArticleIndices()
+        })
+        
         // === Additional handlers for feature parity with ContentViewManager ===
         
         // Go back in history
@@ -3205,6 +3210,49 @@ export class ContentViewPool {
         // console.log(`[ContentViewPool] ================================`)
     }
     
+    /**
+     * Invalidate all articleIndex values in the pool without destroying views.
+     * Called after feed refresh when the article list order may have changed.
+     * Views keep their loaded content but their position references become invalid.
+     */
+    invalidateArticleIndices(): void {
+        console.log(`[ContentViewPool] Invalidating articleIndices for ${this.views.length} views`)
+        
+        // Invalidate articleIndex on all views EXCEPT the active one
+        // The active view keeps its index for navigation continuity
+        // Note: After refresh, the active article's position may have shifted
+        // but that's handled by the next providePrefetchInfo call from React
+        const activeView = this.getActiveView()
+        for (const view of this.views) {
+            if (view.id !== activeView?.id) {
+                view.invalidateArticleIndex()
+            }
+        }
+        
+        // Reset render position - the index-based view there is no longer valid
+        if (this.renderPositionViewId) {
+            const renderView = this.getViewById(this.renderPositionViewId)
+            if (renderView && !renderView.isActive) {
+                renderView.moveOffScreen(this.visibleBounds)
+                console.log(`[ContentViewPool] Moved ${this.renderPositionViewId} from render position to offscreen (indices invalidated)`)
+            }
+            this.renderPositionViewId = null
+        }
+        
+        // Clear prefetch state since indices are no longer valid
+        this.prefetchTargets = []
+        this.prefetchCompletedIndices.clear()
+        this.prefetchQueue = []
+        this.pendingPrefetch = []
+        
+        // Keep currentArticleIndex - it matches the active view which wasn't invalidated
+        // The next prefetchInfo from React will update our understanding of the list
+        // Reset reading direction to re-detect on next navigation
+        this.readingDirection = 'unknown'
+        
+        console.log(`[ContentViewPool] ArticleIndex invalidation complete - active view preserved at index ${this.currentArticleIndex}`)
+    }
+
     /**
      * Destroy all views and cleanup
      */
