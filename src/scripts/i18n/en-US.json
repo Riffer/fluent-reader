@@ -158,7 +158,11 @@
         "selectedMulti": "Selected multiple sources",
         "sortAscending": "Sort chronologically ascending (oldest first)",
         "sortAscendingHint": "Only active when \"Unread only\" filter is set",
-        "hidden": "Hide in \"all articles\""
+        "hidden": "Hide in \"all articles\"",
+        "defaultZoom": "Default zoom level",
+        "persistCookies": "Remember cookies (for login)",
+        "translateTo": "Auto-translate to",
+        "noTranslation": "No translation"
     },
     "groups": {
         "exist": "This group already exists.",

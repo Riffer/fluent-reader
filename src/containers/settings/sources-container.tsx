@@ -71,6 +71,30 @@ const mapDispatchToProps = (dispatch: AppDispatch) => {
                 } as RSSSource)
             )
         },
+        updateSourceDefaultZoom: (source: RSSSource, defaultZoom: number) => {
+            dispatch(
+                updateSource({
+                    ...source,
+                    defaultZoom: defaultZoom,
+                } as RSSSource)
+            )
+        },
+        updateSourcePersistCookies: (source: RSSSource, persistCookies: boolean) => {
+            dispatch(
+                updateSource({
+                    ...source,
+                    persistCookies: persistCookies,
+                } as RSSSource)
+            )
+        },
+        updateSourceTranslateTo: (source: RSSSource, translateTo: string | undefined) => {
+            dispatch(
+                updateSource({
+                    ...source,
+                    translateTo: translateTo,
+                } as RSSSource)
+            )
+        },
         deleteSource: (source: RSSSource) => dispatch(deleteSource(source)),
         deleteSources: (sources: RSSSource[]) =>
             dispatch(deleteSources(sources)),

@@ -322,6 +322,9 @@ export function exitSettings(): AppThunk<Promise<void>> {
             if (getState().app.settings.changed) {
                 dispatch(saveSettings())
                 dispatch(selectAllArticles(true))
+                // Nuke the content view pool to ensure fresh views with updated settings
+                // This resets zoom levels, cookies, and translation settings
+                window.contentViewPool?.onListChanged()
                 await dispatch(initFeeds(true))
                 dispatch(toggleSettings(false))
                 freeMemory()

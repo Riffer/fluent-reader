@@ -152,7 +152,11 @@
         "selectedMulti": "Ausgewählte Feeds",
         "sortAscending": "Chronologisch aufsteigend (älteste zuerst)",
         "sortAscendingHint": "Nur aktiv wenn Filter \"Nur ungelesene\" gesetzt ist",
-        "hidden": "In \"Alle Artikel\" ausblenden"
+        "hidden": "In \"Alle Artikel\" ausblenden",
+        "defaultZoom": "Standard-Zoomstufe",
+        "persistCookies": "Cookies merken (für Login)",
+        "translateTo": "Automatisch übersetzen nach",
+        "noTranslation": "Keine Übersetzung"
     },
     "groups": {
         "exist": "Diese Gruppe existiert bereits.",

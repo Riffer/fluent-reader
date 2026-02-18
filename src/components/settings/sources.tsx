@@ -51,6 +51,9 @@ type SourcesTabProps = {
     exportOPML: () => void
     toggleSourceHidden: (source: RSSSource) => void
     updateSourceSortAscending: (source: RSSSource, sortAscending: boolean) => void
+    updateSourceDefaultZoom: (source: RSSSource, defaultZoom: number) => void
+    updateSourcePersistCookies: (source: RSSSource, persistCookies: boolean) => void
+    updateSourceTranslateTo: (source: RSSSource, translateTo: string | undefined) => void
 }
 
 type SourcesTabState = {
@@ -58,6 +61,7 @@ type SourcesTabState = {
 } & {
     selectedSource: RSSSource
     selectedSources: RSSSource[]
+    supportedLanguages: Record<string, string> | null
 }
 
 const enum EditDropdownKeys {
@@ -76,6 +80,7 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
             newSourceName: "",
             selectedSource: null,
             selectedSources: null,
+            supportedLanguages: null,
         }
         this.selection = new Selection({
             getKey: s => (s as RSSSource).sid,
@@ -102,6 +107,12 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
             }
             this.props.acknowledgeSIDs()
         }
+        // Load supported languages for translation dropdown
+        window.translation?.getSupportedLanguages().then(langs => {
+            if (langs) {
+                this.setState({ supportedLanguages: langs })
+            }
+        })
     }
 
     columns = (): IColumn[] => [
@@ -154,6 +165,71 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
         { key: "720", text: intl.get("time.hour", { h: 12 }) },
         { key: "1440", text: intl.get("time.day", { d: 1 }) },
     ]
+
+    defaultZoomOptions = (): IDropdownOption[] => [
+        { key: "-6", text: "40%" },
+        { key: "-5", text: "50%" },
+        { key: "-4", text: "60%" },
+        { key: "-3", text: "70%" },
+        { key: "-2", text: "80%" },
+        { key: "-1", text: "90%" },
+        { key: "0", text: "100%" },
+        { key: "1", text: "110%" },
+        { key: "2", text: "120%" },
+        { key: "3", text: "130%" },
+        { key: "4", text: "140%" },
+        { key: "5", text: "150%" },
+        { key: "6", text: "160%" },
+        { key: "7", text: "170%" },
+        { key: "8", text: "180%" },
+        { key: "9", text: "190%" },
+        { key: "10", text: "200%" },
+    ]
+
+    translateToOptions = (): IDropdownOption[] => {
+        const options: IDropdownOption[] = [
+            { key: "", text: intl.get("sources.noTranslation") },
+        ]
+        if (this.state.supportedLanguages) {
+            for (const [code, name] of Object.entries(this.state.supportedLanguages)) {
+                options.push({ key: code, text: name })
+            }
+        }
+        return options
+    }
+
+    onDefaultZoomChange = (_, option: IDropdownOption) => {
+        const zoom = parseInt(option.key as string)
+        this.props.updateSourceDefaultZoom(this.state.selectedSource, zoom)
+        this.setState({
+            selectedSource: {
+                ...this.state.selectedSource,
+                defaultZoom: zoom,
+            } as RSSSource,
+        })
+    }
+
+    onPersistCookiesToggle = () => {
+        const newValue = !this.state.selectedSource.persistCookies
+        this.props.updateSourcePersistCookies(this.state.selectedSource, newValue)
+        this.setState({
+            selectedSource: {
+                ...this.state.selectedSource,
+                persistCookies: newValue,
+            } as RSSSource,
+        })
+    }
+
+    onTranslateToChange = (_, option: IDropdownOption) => {
+        const translateTo = option.key === "" ? undefined : (option.key as string)
+        this.props.updateSourceTranslateTo(this.state.selectedSource, translateTo)
+        this.setState({
+            selectedSource: {
+                ...this.state.selectedSource,
+                translateTo: translateTo,
+            } as RSSSource,
+        })
+    }
 
     onFetchFrequencyChange = (_, option: IDropdownOption) => {
         let frequency = parseInt(option.key as string)
@@ -463,6 +539,43 @@ class SourcesTab extends React.Component<SourcesTabProps, SourcesTabState> {
                             <Toggle
                                 checked={this.state.selectedSource.sortAscending}
                                 onChange={this.onToggleSortAscending}
+                            />
+                        </Stack.Item>
+                    </Stack>
+                    <Stack horizontal verticalAlign="baseline">
+                        <Stack.Item grow>
+                            <Label>{intl.get("sources.defaultZoom")}</Label>
+                        </Stack.Item>
+                        <Stack.Item>
+                            <Dropdown
+                                options={this.defaultZoomOptions()}
+                                selectedKey={String(this.state.selectedSource.defaultZoom || 0)}
+                                onChange={this.onDefaultZoomChange}
+                                style={{ width: 100 }}
+                            />
+                        </Stack.Item>
+                    </Stack>
+                    <Stack horizontal verticalAlign="baseline">
+                        <Stack.Item grow>
+                            <Label>{intl.get("sources.persistCookies")}</Label>
+                        </Stack.Item>
+                        <Stack.Item>
+                            <Toggle
+                                checked={this.state.selectedSource.persistCookies}
+                                onChange={this.onPersistCookiesToggle}
+                            />
+                        </Stack.Item>
+                    </Stack>
+                    <Stack horizontal verticalAlign="baseline">
+                        <Stack.Item grow>
+                            <Label>{intl.get("sources.translateTo")}</Label>
+                        </Stack.Item>
+                        <Stack.Item>
+                            <Dropdown
+                                options={this.translateToOptions()}
+                                selectedKey={this.state.selectedSource.translateTo || ""}
+                                onChange={this.onTranslateToChange}
+                                style={{ width: 150 }}
                             />
                         </Stack.Item>
                     </Stack>
