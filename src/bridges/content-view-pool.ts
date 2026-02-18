@@ -217,6 +217,22 @@ export const contentViewPoolBridge = {
     },
     
     /**
+     * Relative zoom: change zoom level by step.
+     * Uses Pool's internal zoom level as base, avoiding sync issues with article.tsx.
+     * @param step Zoom step (positive = zoom in, negative = zoom out). 1.0 = 10%, 0.1 = 1%
+     */
+    zoomStep: (step: number): void => {
+        ipcRenderer.send("cvp-zoom-step", step)
+    },
+    
+    /**
+     * Reset zoom to 100% (level 0)
+     */
+    zoomReset: (): void => {
+        ipcRenderer.send("cvp-zoom-reset")
+    },
+    
+    /**
      * Get CSS zoom level (async)
      */
     getCssZoomLevel: (): Promise<number> => {

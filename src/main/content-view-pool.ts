@@ -2371,6 +2371,16 @@ export class ContentViewPool {
             this.setCssZoom(level)
         })
         
+        // Relative zoom: increment by step (positive = zoom in, negative = zoom out)
+        ipcMain.on("cvp-zoom-step", (event, step: number) => {
+            this.zoomStep(step)
+        })
+        
+        // Reset zoom to 100% (level 0)
+        ipcMain.on("cvp-zoom-reset", () => {
+            this.zoomReset()
+        })
+        
         // Get CSS zoom level (sync)
         ipcMain.on("cvp-get-css-zoom-level", (event) => {
             event.returnValue = this.cssZoomLevel
@@ -2956,6 +2966,88 @@ export class ContentViewPool {
         }
         
         // Sync to views of the same feed (zoom is feed-specific)
+        this.syncZoomToSameFeedViews()
+    }
+    
+    /**
+     * Relative zoom: increment/decrement current zoom level by step.
+     * This is the preferred method for keyboard zoom (+/-) as it uses the Pool's
+     * authoritative cssZoomLevel rather than relying on out-of-sync values from article.tsx.
+     * @param step Zoom step (positive = zoom in, negative = zoom out). Typically 1.0 for 10% or 0.1 for 1%.
+     */
+    private zoomStep(step: number): void {
+        // Block new zoom requests during sync or if waiting for view confirmation
+        if (this.isSyncingZoom || this.isZoomPending) {
+            return
+        }
+        
+        // Apply step to current level
+        const newLevel = this.cssZoomLevel + step
+        const clampedLevel = Math.max(-6, Math.min(40, newLevel))
+        this.cssZoomLevel = this.roundZoom(clampedLevel)
+        
+        // console.log(`[ContentViewPool] zoomStep(${step}) -> new level: ${this.cssZoomLevel}`)
+        
+        const active = this.getActiveView()
+        if (active) {
+            // Set pending flag - will be cleared when view confirms
+            this.isZoomPending = true
+            this.zoomPendingTimeout = setTimeout(() => {
+                this.isZoomPending = false
+            }, 100)
+            
+            // Apply to active view
+            if (this.visualZoomEnabled) {
+                active.setVisualZoomLevel(this.cssZoomLevel)
+            } else {
+                active.setCssZoom(this.cssZoomLevel)
+            }
+            
+            // Send zoom update to renderer for Redux persistence
+            const feedId = active.feedId
+            const viewId = active.id
+            this.sendToRenderer("content-view-zoom-changed", this.cssZoomLevel, feedId, viewId)
+        }
+        
+        // Sync to views of the same feed
+        this.syncZoomToSameFeedViews()
+    }
+    
+    /**
+     * Reset zoom to 100% (level 0).
+     */
+    private zoomReset(): void {
+        // Block new zoom requests during sync or if waiting for view confirmation
+        if (this.isSyncingZoom || this.isZoomPending) {
+            return
+        }
+        
+        this.cssZoomLevel = 0
+        
+        // console.log(`[ContentViewPool] zoomReset() -> level: 0`)
+        
+        const active = this.getActiveView()
+        if (active) {
+            // Set pending flag - will be cleared when view confirms
+            this.isZoomPending = true
+            this.zoomPendingTimeout = setTimeout(() => {
+                this.isZoomPending = false
+            }, 100)
+            
+            // Apply to active view
+            if (this.visualZoomEnabled) {
+                active.setVisualZoomLevel(0)
+            } else {
+                active.setCssZoom(0)
+            }
+            
+            // Send zoom update to renderer for Redux persistence
+            const feedId = active.feedId
+            const viewId = active.id
+            this.sendToRenderer("content-view-zoom-changed", 0, feedId, viewId)
+        }
+        
+        // Sync to views of the same feed
         this.syncZoomToSameFeedViews()
     }
     

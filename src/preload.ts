@@ -34,6 +34,8 @@ const limitedIpcRenderer = {
             "cvp-set-reading-direction",
             "cvp-set-zoom-factor",
             "cvp-set-css-zoom",
+            "cvp-zoom-step",
+            "cvp-zoom-reset",
             "cvp-set-visual-zoom",
             "cvp-send",
             "cvp-clear",

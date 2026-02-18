@@ -2025,25 +2025,24 @@ a:hover { text-decoration: underline; }
                 case "+":
                 case "=":
                     // Zoom: Ctrl+Plus = fine step (0.1 = 1%), Plus alone = normal step (1 = 10%)
-                    // Allow key repeat for continuous zoom when holding the key
-                    // No debounce needed - zoom is only handled here (not in globalKeydownListener)
+                    // Use relative zoom step - Pool maintains authoritative zoom level
                     {
                         const stepPlus = input.control ? 0.1 : 1
-                        this.applyZoom(this.currentZoom + stepPlus)
+                        window.contentViewPool?.zoomStep(stepPlus)
                     }
                     break
                 case "-":
                 case "_":
                     // Zoom: Ctrl+Minus = fine step (0.1 = 1%), Minus alone = normal step (1 = 10%)
-                    // Allow key repeat for continuous zoom when holding the key
+                    // Use relative zoom step - Pool maintains authoritative zoom level
                     {
                         const stepMinus = input.control ? 0.1 : 1
-                        this.applyZoom(this.currentZoom - stepMinus)
+                        window.contentViewPool?.zoomStep(-stepMinus)
                     }
                     break
                 case "#":
-                    // Reset zoom to 100%
-                    this.applyZoom(0)
+                    // Reset zoom to 100% - Pool handles it
+                    window.contentViewPool?.zoomReset()
                     break
                 case "w":
                 case "W":
