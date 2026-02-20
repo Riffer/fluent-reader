@@ -29,6 +29,7 @@ const limitedIpcRenderer = {
             // Content View Pool channels
             "cvp-prefetch",
             "cvp-prefetch-info",
+            "cvp-toggle-render-preview",
             "cvp-set-bounds",
             "cvp-set-visibility",
             "cvp-set-reading-direction",

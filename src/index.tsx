@@ -50,20 +50,44 @@ window.utils.addPowerResumeListener(() => {
     store.dispatch(fetchItems(true)) // background=true for silent refresh
 })
 
-// Global F12 handler for App Developer Tools
-document.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'F12') {
-        e.preventDefault()
-        if ((window as any).ipcRenderer) {
-            (window as any).ipcRenderer.invoke('toggle-app-devtools')
+// Global keyboard handler - use window flag to prevent duplicate registration
+if (!(window as any)._globalKeydownRegistered) {
+    (window as any)._globalKeydownRegistered = true
+    ;(window as any)._lastToggleTime = 0  // Debounce on sender side too
+    console.log('[index.tsx] Registering global keydown handler')
+    document.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'F12') {
+            e.preventDefault()
+            if ((window as any).ipcRenderer) {
+                (window as any).ipcRenderer.invoke('toggle-app-devtools')
+            }
         }
-    }
-    // Global F11 handler for Fullscreen toggle
-    if (e.key === 'F11') {
-        e.preventDefault()
-        window.utils.toggleFullscreen()
-    }
-})
+        // Global F11 handler for Fullscreen toggle
+        if (e.key === 'F11') {
+            e.preventDefault()
+            window.utils.toggleFullscreen()
+        }
+        // ö key: Toggle render-position view visibility (debug)
+        // Ignore key-repeat to prevent rapid toggling
+        // Also debounce on sender side (300ms) to prevent multiple sends
+        if (e.key === 'ö' && !e.repeat) {
+            e.preventDefault()
+            const now = Date.now()
+            const lastTime = (window as any)._lastToggleTime || 0
+            if (now - lastTime < 300) {
+                console.log(`[index.tsx] ö key DEBOUNCED (${now - lastTime}ms since last)`)
+                return
+            }
+            (window as any)._lastToggleTime = now
+            console.log(`[index.tsx] ö key pressed, timeStamp=${e.timeStamp}, target=${(e.target as HTMLElement)?.tagName}`)
+            if ((window as any).ipcRenderer) {
+                (window as any).ipcRenderer.send('cvp-toggle-render-preview')
+            }
+        }
+    })
+} else {
+    console.log('[index.tsx] Global keydown handler already registered, skipping')
+}
 
 ReactDOM.render(
     <Provider store={store}>

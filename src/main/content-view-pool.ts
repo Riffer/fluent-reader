@@ -140,6 +140,7 @@ export class ContentViewPool {
     // The view at the "render position" has 1 pixel visible to force Chromium to render it
     // This is used for the "next" article in reading direction to ensure instant navigation
     private renderPositionViewId: string | null = null
+    private renderPositionPreviewActive: boolean = false  // Debug: When true, render-position view is fully visible
     private cascadedPrefetchEnabled: boolean = true  // Enable/disable cascaded mode
     
     // === Prefetch Status Tracking ===
@@ -1764,6 +1765,7 @@ export class ContentViewPool {
                     console.log(`[ContentViewPool] Cleared render position from ${this.renderPositionViewId}`)
                 }
                 this.renderPositionViewId = null
+                this.renderPositionPreviewActive = false
             }
             return
         }
@@ -1787,19 +1789,85 @@ export class ContentViewPool {
                 oldView.moveOffScreen(this.visibleBounds)
                 console.log(`[ContentViewPool] Moved ${this.renderPositionViewId} from render position to offscreen`)
             }
+            // Note: Keep renderPositionPreviewActive - will apply to new view
         }
         
         // Set new view to render position (if not active)
         if (!nextView.isActive) {
-            nextView.setRenderPosition(this.visibleBounds)
+            // If preview mode is active, show fully visible instead of 1-pixel position
+            if (this.renderPositionPreviewActive) {
+                const webContentsView = nextView.getView()
+                if (webContentsView) {
+                    webContentsView.setBounds({
+                        x: 0,
+                        y: this.visibleBounds.y,
+                        width: this.visibleBounds.width,
+                        height: this.visibleBounds.height
+                    })
+                    webContentsView.setVisible(true)
+                    console.log(`[ContentViewPool] Set ${nextView.id} (index ${nextIndex}) to PREVIEW position (full visibility)`)
+                }
+            } else {
+                nextView.setRenderPosition(this.visibleBounds)
+                console.log(`[ContentViewPool] Set ${nextView.id} (index ${nextIndex}) to render position`)
+            }
             this.renderPositionViewId = nextView.id
-            console.log(`[ContentViewPool] Set ${nextView.id} (index ${nextIndex}) to render position`)
             
             // Auto-expand Reddit gallery after initial render delay
             // content-preload.js handles retry logic for larger galleries
             setTimeout(() => {
                 nextView.triggerAutoExpandRedditGallery()
             }, 400)
+        }
+    }
+
+    /**
+     * Toggle render-position view visibility for debugging (ö key)
+     * When active, the render-position view is shown at full visibility (0,0)
+     * When inactive, it returns to the normal 1-pixel-visible position
+     */
+    private lastToggleTime: number = 0  // Debounce for toggle
+    private toggleRenderPositionPreview(): void {
+        // Debounce: Ignore calls within 200ms of each other
+        const now = Date.now()
+        if (now - this.lastToggleTime < 200) {
+            console.log(`[ContentViewPool] Toggle debounced (${now - this.lastToggleTime}ms since last)`)
+            return
+        }
+        this.lastToggleTime = now
+        
+        if (!this.renderPositionViewId) {
+            console.log('[ContentViewPool] No view at render position to preview')
+            return
+        }
+        
+        const view = this.getViewById(this.renderPositionViewId)
+        if (!view) {
+            console.log('[ContentViewPool] Render position view not found')
+            return
+        }
+        
+        this.renderPositionPreviewActive = !this.renderPositionPreviewActive
+        
+        const webContentsView = view.getView()
+        if (!webContentsView) {
+            console.log('[ContentViewPool] View has no WebContentsView')
+            return
+        }
+        
+        if (this.renderPositionPreviewActive) {
+            // Show at full visibility (same bounds as active view)
+            webContentsView.setBounds({
+                x: 0,
+                y: this.visibleBounds.y,
+                width: this.visibleBounds.width,
+                height: this.visibleBounds.height
+            })
+            console.log(`[ContentViewPool] PREVIEW ON: ${view.id} (articleId=${view.articleId?.substring(0, 8)}, index=${view.articleIndex})`)
+        } else {
+            // Return to normal render position (1 pixel visible)
+            view.setRenderPosition(this.visibleBounds)
+            console.log(`[ContentViewPool] PREVIEW OFF: ${view.id} returned to render position`)
         }
     }
 
@@ -2228,6 +2296,7 @@ export class ContentViewPool {
                 }
                 // Also clear the render position tracking
                 this.renderPositionViewId = null
+                this.renderPositionPreviewActive = false
                 // Reset reading direction for the next list
                 this.readingDirection = 'unknown'
                 // Cancel any pending prefetches - they're no longer relevant
@@ -2244,6 +2313,7 @@ export class ContentViewPool {
                 view.invalidateArticleIndex()
             }
             this.renderPositionViewId = null
+            this.renderPositionPreviewActive = false
             // Reset reading direction for the next list
             this.readingDirection = 'unknown'
             // Cancel any pending prefetches
@@ -2441,6 +2511,17 @@ export class ContentViewPool {
         ipcMain.handle("cvp-close-devtools", () => {
             const active = this.getActiveView()
             active?.getWebContents()?.closeDevTools()
+        })
+        
+        // Toggle render-position preview (ö key debug feature)
+        // Remove any existing listener first to prevent duplicates
+        ipcMain.removeAllListeners("cvp-toggle-render-preview")
+        ipcMain.on("cvp-toggle-render-preview", (event) => {
+            // Log sender info to debug duplicates
+            const senderId = event.sender?.id
+            const senderUrl = event.sender?.getURL?.() || 'unknown'
+            console.log(`[ContentViewPool] IPC cvp-toggle-render-preview received from webContents ${senderId} (${senderUrl.substring(0, 50)})`)
+            this.toggleRenderPositionPreview()
         })
         
         // Reload
@@ -3281,6 +3362,7 @@ export class ContentViewPool {
         this.currentSourceId = null
         this.currentMenuKey = null  // Clear list identity on nuke
         this.renderPositionViewId = null
+        this.renderPositionPreviewActive = false
         this.protectedArticleIds.clear()
         this.pendingPrefetchArticleIds.clear()
         this.prefetchTargets = []
@@ -3329,6 +3411,7 @@ export class ContentViewPool {
                 console.log(`[ContentViewPool] Moved ${this.renderPositionViewId} from render position to offscreen (indices invalidated)`)
             }
             this.renderPositionViewId = null
+            this.renderPositionPreviewActive = false
         }
         
         // Clear prefetch state since indices are no longer valid
