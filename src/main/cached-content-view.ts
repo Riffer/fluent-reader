@@ -829,6 +829,50 @@ export class CachedContentView {
     }
 
     /**
+     * Check if this view is positioned in the visible area when it shouldn't be
+     * 
+     * A view is at "valid position" if:
+     * - It is offscreen (x <= -1000 or y <= -1000) 
+     * - It is at render position (x is negative but x > -1000, meaning 1-3px visible)
+     * - It matches the expected visible bounds
+     * 
+     * @param expectedVisibleBounds - The bounds that the active view should have
+     * @returns true if view is at an invalid visible position (should be moved offscreen)
+     */
+    isAtInvalidVisiblePosition(expectedVisibleBounds: { x: number, y: number, width: number, height: number }): boolean {
+        if (!this._view) return false
+        
+        const bounds = this._view.getBounds()
+        
+        // View is offscreen (x or y is very negative) - this is valid
+        if (bounds.x <= -1000 || bounds.y <= -1000) {
+            return false
+        }
+        
+        // View is at render position (x is negative but > -1000, y >= 0)
+        // Render position has x = -width + 1 to -width + 3, so x is negative close to -width
+        if (bounds.x < 0 && bounds.x > -1000 && bounds.y >= 0) {
+            return false  // Valid render position
+        }
+        
+        // View is at the expected visible bounds - this is valid for the active view
+        if (bounds.x === expectedVisibleBounds.x && bounds.y === expectedVisibleBounds.y) {
+            return false
+        }
+        
+        // View is at some other visible position (x >= 0) - this is INVALID
+        // (unless it's the active view, which the caller should exclude)
+        if (bounds.x >= 0) {
+            console.warn(`[CachedContentView:${this.id}] At invalid visible position: ` +
+                `bounds=${JSON.stringify(bounds)}, expected=${JSON.stringify(expectedVisibleBounds)}, ` +
+                `isActive=${this._isActive}, isOffScreen=${this._isOffScreen}, isAtRenderPos=${this._isAtRenderPosition}`)
+            return true
+        }
+        
+        return false
+    }
+
+    /**
      * Focus this view's webContents
      * Important for keyboard input to be captured
      * 

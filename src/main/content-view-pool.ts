@@ -990,6 +990,10 @@ export class ContentViewPool {
                 view.setVisible(true, this.visibleBounds)
                 view.bringToFront()  // Ensure active view is on top (covers render-position views)
                 view.focus()  // Single focus call after visibility is set
+                
+                // DEFENSIVE: Validate actual positions to catch any orphaned views
+                this.ensureOnlyActiveViewVisible()
+                
                 // console.log(`[ContentViewPool] Load complete, showing ${view.id}`)
                 
                 // Update render position for the "next" article
@@ -2152,6 +2156,10 @@ export class ContentViewPool {
             view.setVisible(true, this.visibleBounds)
             view.bringToFront()  // Ensure active view is on top (covers render-position views)
             view.focus()  // Single focus call after visibility is set
+            
+            // DEFENSIVE: Validate actual positions to catch any orphaned views
+            this.ensureOnlyActiveViewVisible()
+            
             if (sameView) {
                 // console.log(`[ContentViewPool] Re-activated same ${view.id} - ensuring visible with bounds:`, this.visibleBounds)
             } else {
@@ -2168,6 +2176,42 @@ export class ContentViewPool {
         
         // Notify renderer
         this.sendToRenderer('cvp-navigation-complete', view.articleId)
+    }
+    
+    /**
+     * Ensure only the active view is at a visible position
+     * 
+     * This is a DEFENSIVE check that validates the actual bounds of all views
+     * and moves any view that is at an invalid visible position offscreen.
+     * 
+     * This catches edge cases where flag-based tracking may have failed,
+     * preventing "orphaned" views from remaining visible.
+     */
+    private ensureOnlyActiveViewVisible(): void {
+        const activeView = this.getActiveView()
+        if (!activeView || !this.boundsReceived) return
+        
+        let fixedCount = 0
+        for (const view of this.views) {
+            // Skip the active view - it should be visible
+            if (view === activeView) continue
+            
+            // Skip views at render position (1px visible is intentional)
+            if (view.isAtRenderPosition) continue
+            
+            // Check if this view is at an invalid visible position
+            if (view.isAtInvalidVisiblePosition(this.visibleBounds)) {
+                console.warn(`[ContentViewPool] Moving orphaned view ${view.id} offscreen (articleId=${view.articleId?.substring(0, 8) || 'none'})`)
+                view.moveOffScreen(this.visibleBounds)
+                fixedCount++
+            }
+        }
+        
+        if (fixedCount > 0) {
+            console.log(`[ContentViewPool] ensureOnlyActiveViewVisible: Fixed ${fixedCount} orphaned view(s)`)
+            // Bring active view to front after fixing
+            activeView.bringToFront()
+        }
     }
     
     /**
@@ -2249,6 +2293,9 @@ export class ContentViewPool {
             active.setVisible(true, bounds)
             active.bringToFront()  // Cover render-position views
             active.focus()
+            
+            // DEFENSIVE: Validate actual positions to catch any orphaned views
+            this.ensureOnlyActiveViewVisible()
         }
     }
     
@@ -2280,6 +2327,9 @@ export class ContentViewPool {
                     // Restore render position for the "next" article
                     // This is important after the pool was hidden and re-shown
                     this.updateRenderPosition()
+                    
+                    // DEFENSIVE: Validate actual positions to catch any orphaned views
+                    this.ensureOnlyActiveViewVisible()
                 } else {
                     // console.log(`[ContentViewPool] setVisible(true) - waiting for bounds before showing ${active.id}`)
                 }
