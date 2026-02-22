@@ -1365,6 +1365,12 @@ export class ContentViewPool {
         
         // console.log(`[ContentViewPool] updateReadingDirection: newIndex=${newIndex}, listLength=${listLength}, oldIndex=${oldIndex}, oldListLength=${oldListLength}, isNewList=${isNewList}`)
         
+        // IMPORTANT: If the list length changed, invalidate all cached article indices
+        // This handles background sync adding/removing articles which shifts indices
+        if (isNewList && oldListLength > 0) {
+            this.invalidateArticleIndicesOnListChange(oldListLength, listLength)
+        }
+        
         // First navigation, list change, or index not set yet
         if (oldIndex < 0 || isNewList) {
             // At boundaries, we know the direction
@@ -1528,6 +1534,58 @@ export class ContentViewPool {
         this.readingDirection = 'unknown'
         
         // console.log(`[ContentViewPool] Cache invalidated: ${recycledCount} views recycled`)
+    }
+    
+    /**
+     * Invalidate article indices when the list changes (e.g., due to background sync)
+     * 
+     * This is called when the list length changes, which indicates that articles
+     * may have been added or removed. In this case, the cached articleIndex values
+     * are no longer valid because:
+     * - New articles at the beginning shift all indices up
+     * - Removed articles shift indices down
+     * - The mapping between index and articleId is broken
+     * 
+     * This does NOT recycle views (the content is still valid), but prevents
+     * them from being mistakenly matched by index in updateRenderPosition().
+     * 
+     * @param oldLength - Previous list length
+     * @param newLength - Current list length
+     */
+    private invalidateArticleIndicesOnListChange(oldLength: number, newLength: number): void {
+        // Only invalidate if length actually changed
+        if (oldLength === newLength) return
+        
+        let invalidatedCount = 0
+        
+        for (const view of this.views) {
+            // Don't invalidate the active view - it's being navigated to with the correct index
+            if (view.isActive) continue
+            
+            // Only invalidate views that have a valid articleIndex
+            if (view.articleIndex >= 0) {
+                // console.log(`[ContentViewPool] Invalidating articleIndex for ${view.id} (was: ${view.articleIndex}, articleId: ${view.articleId?.substring(0, 8) || 'none'})`)
+                view.invalidateArticleIndex()
+                invalidatedCount++
+            }
+        }
+        
+        // Clear render position - the "next" article index is now invalid
+        if (this.renderPositionViewId) {
+            const oldView = this.getViewById(this.renderPositionViewId)
+            if (oldView && oldView.isAtRenderPosition) {
+                oldView.moveOffScreen(this.visibleBounds)
+            }
+            this.renderPositionViewId = null
+            this.renderPositionPreviewActive = false
+        }
+        
+        // Cancel pending prefetches - they're based on old indices
+        this.cancelPrefetch()
+        
+        if (invalidatedCount > 0) {
+            console.log(`[ContentViewPool] List length changed (${oldLength} → ${newLength}): Invalidated ${invalidatedCount} article indices, cleared render position`)
+        }
     }
     
     /**
