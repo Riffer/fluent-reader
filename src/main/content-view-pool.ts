@@ -87,6 +87,18 @@ interface PrefetchArticleInfo {
 }
 
 /**
+ * Result of pool alignment validation
+ * Used to detect and fix inconsistencies between pool state and navigation
+ */
+interface PoolAlignmentResult {
+    isAligned: boolean
+    issues: string[]
+    activeViewMismatch: boolean
+    renderPositionMismatch: boolean
+    prefetchMismatch: boolean
+}
+
+/**
  * ContentViewPool - Manages cached WebContentsViews
  */
 export class ContentViewPool {
@@ -880,6 +892,14 @@ export class ContentViewPool {
         // Update reading direction BEFORE updating currentArticleIndex
         // (needs old index to compare)
         this.updateReadingDirection(articleIndex, listLength)
+        
+        // === Pool Alignment Validation ===
+        // Check if pool state is consistent with expected navigation.
+        // This catches edge cases where prefetch/render position got out of sync.
+        const alignmentValidation = this.validatePoolAlignment(articleId, articleIndex)
+        if (!alignmentValidation.isAligned) {
+            this.fixPoolAlignment(alignmentValidation)
+        }
         
         // Update article context
         this.currentArticleIndex = articleIndex
@@ -2089,6 +2109,168 @@ export class ContentViewPool {
         }
         
         return targets
+    }
+    
+    // ========== Pool Alignment Validation ==========
+    
+    /**
+     * Validate that the pool state is correctly aligned with the current navigation.
+     * Called at the start of navigation to detect and fix any inconsistencies.
+     * 
+     * This method checks:
+     * 1. Active view matches the expected article
+     * 2. Render position is on the correct view (+1 in reading direction)
+     * 3. Prefetch targets are correct for current position
+     * 
+     * @param expectedArticleId The article we expect to navigate to
+     * @param expectedIndex The expected article index
+     * @returns AlignmentValidation result with any detected issues
+     */
+    private validatePoolAlignment(expectedArticleId: string, expectedIndex: number): PoolAlignmentResult {
+        const result: PoolAlignmentResult = {
+            isAligned: true,
+            issues: [],
+            activeViewMismatch: false,
+            renderPositionMismatch: false,
+            prefetchMismatch: false
+        }
+        
+        // Skip validation if pool is not visible or no navigation context
+        if (!this.isPoolVisible || !this.boundsReceived) {
+            return result
+        }
+        
+        // --- Check 1: Active View Alignment ---
+        const activeView = this.getActiveView()
+        if (activeView && activeView.articleId && activeView.articleId !== expectedArticleId) {
+            // Check if the active view's article index is inconsistent
+            if (activeView.articleIndex >= 0 && activeView.articleIndex !== this.currentArticleIndex) {
+                result.issues.push(`Active view ${activeView.id} has wrong index: ${activeView.articleIndex} vs current=${this.currentArticleIndex}`)
+                result.activeViewMismatch = true
+            }
+        }
+        
+        // --- Check 2: Render Position Alignment ---
+        if (this.renderPositionViewId) {
+            const renderView = this.getViewById(this.renderPositionViewId)
+            if (renderView) {
+                const expectedNextIndex = this.getNextIndexInReadingDirection()
+                
+                // Render position should be on the +1 article ONLY
+                if (renderView.articleIndex >= 0 && renderView.articleIndex !== expectedNextIndex) {
+                    result.issues.push(`Render position on wrong view: ${renderView.id} has index ${renderView.articleIndex}, expected ${expectedNextIndex}`)
+                    result.renderPositionMismatch = true
+                }
+                
+                // Check if render position view is stale (loaded with old context)
+                if (!renderView.hasLoadedOnce || renderView.isActive) {
+                    result.issues.push(`Render position view ${renderView.id} is in invalid state: hasLoadedOnce=${renderView.hasLoadedOnce}, isActive=${renderView.isActive}`)
+                    result.renderPositionMismatch = true
+                }
+            }
+        }
+        
+        // --- Check 3: Prefetch Target Alignment ---
+        // Check if prefetch targets are still valid for current position
+        if (this.prefetchTargets.length > 0 && this.currentArticleIndex >= 0) {
+            const expectedTargets = this.determinePrefetchTargets()
+            const currentTargetsSet = new Set(this.prefetchTargets)
+            
+            // Check if expected targets match current targets
+            let hasMismatch = expectedTargets.length !== this.prefetchTargets.length
+            if (!hasMismatch) {
+                for (const target of expectedTargets) {
+                    if (!currentTargetsSet.has(target)) {
+                        hasMismatch = true
+                        break
+                    }
+                }
+            }
+            
+            if (hasMismatch) {
+                result.issues.push(`Prefetch targets misaligned: have [${this.prefetchTargets.join(',')}], expected [${expectedTargets.join(',')}]`)
+                result.prefetchMismatch = true
+            }
+        }
+        
+        // --- Check 4: Orphaned Ready Views ---
+        // Views that are ready but not at expected positions
+        const orphanedViews: string[] = []
+        for (const view of this.views) {
+            if (view.hasLoadedOnce && !view.isActive && view.articleIndex >= 0) {
+                const expectedTargets = this.determinePrefetchTargets()
+                if (!expectedTargets.includes(view.articleIndex) && view.articleIndex !== this.currentArticleIndex) {
+                    orphanedViews.push(`${view.id}(idx=${view.articleIndex})`)
+                }
+            }
+        }
+        if (orphanedViews.length > 0) {
+            result.issues.push(`Orphaned ready views: [${orphanedViews.join(', ')}]`)
+        }
+        
+        result.isAligned = result.issues.length === 0
+        
+        return result
+    }
+    
+    /**
+     * Fix alignment issues detected by validatePoolAlignment.
+     * Called when navigation detects misalignment.
+     */
+    private fixPoolAlignment(validation: PoolAlignmentResult): void {
+        if (validation.isAligned) return
+        
+        console.log(`[ContentViewPool] Alignment issues detected:`)
+        for (const issue of validation.issues) {
+            console.log(`  - ${issue}`)
+        }
+        
+        // Log full pool state for debugging
+        this.logPoolState('alignment-fix')
+        
+        // Fix render position mismatch
+        if (validation.renderPositionMismatch && this.renderPositionViewId) {
+            const oldRenderView = this.getViewById(this.renderPositionViewId)
+            if (oldRenderView && !oldRenderView.isActive) {
+                console.log(`[ContentViewPool] Fixing: Clearing wrong render position from ${this.renderPositionViewId}`)
+                oldRenderView.moveOffScreen(this.visibleBounds)
+            }
+            this.renderPositionViewId = null
+            this.renderPositionPreviewActive = false
+        }
+        
+        // Fix prefetch mismatch by canceling and re-scheduling
+        if (validation.prefetchMismatch) {
+            console.log(`[ContentViewPool] Fixing: Canceling stale prefetches and re-scheduling`)
+            this.cancelPrefetch()
+            // Note: schedulePrefetch will be called after navigation completes
+        }
+    }
+    
+    /**
+     * Log the current pool state for debugging.
+     * Called periodically or when alignment issues are suspected.
+     */
+    private logPoolState(context: string): void {
+        const activeView = this.getActiveView()
+        const renderView = this.renderPositionViewId ? this.getViewById(this.renderPositionViewId) : null
+        
+        console.log(`[ContentViewPool] === Pool State (${context}) ===`)
+        console.log(`  Current: idx=${this.currentArticleIndex}/${this.articleListLength}, dir=${this.readingDirection}`)
+        console.log(`  Active: ${activeView?.id || 'none'} (articleIdx=${activeView?.articleIndex ?? 'N/A'})`)
+        console.log(`  RenderPosition: ${renderView?.id || 'none'} (articleIdx=${renderView?.articleIndex ?? 'N/A'})`)
+        console.log(`  Prefetch targets: [${this.prefetchTargets.join(', ')}]`)
+        console.log(`  Prefetch completed: [${Array.from(this.prefetchCompletedIndices).join(', ')}]`)
+        console.log(`  Views:`)
+        for (const v of this.views) {
+            const status = [
+                v.isActive ? 'ACTIVE' : '',
+                v.isAtRenderPosition ? 'RENDER' : '',
+                v.hasLoadedOnce ? 'ready' : 'empty',
+                v.isLoading ? 'loading' : ''
+            ].filter(Boolean).join(',')
+            console.log(`    ${v.id}: idx=${v.articleIndex}, status=[${status}]`)
+        }
     }
     
     // ========== Pool Management ==========
