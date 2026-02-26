@@ -1701,11 +1701,23 @@ export class ContentViewPool {
     /**
      * Called when a prefetch completes (view becomes ready)
      * Triggers the next item in the cascade
+     * 
+     * IMPORTANT: Only the "+1" article in reading direction gets the render position.
+     * All other prefetched articles (+2, +3, -2, -3 etc.) stay offscreen.
      */
     onPrefetchComplete(articleId: string, articleIndex?: number): void {
         // Track completion by index
         if (articleIndex !== undefined && articleIndex >= 0) {
             this.prefetchCompletedIndices.add(articleIndex)
+            
+            // Check if this is the "+1" article in reading direction
+            // Only the immediate next article should be at render position
+            const nextInReadingDirection = this.getNextIndexInReadingDirection()
+            if (articleIndex === nextInReadingDirection) {
+                // This is the next article - set it to render position
+                this.setViewToRenderPosition(articleId, articleIndex)
+            }
+            // All other articles (+2, +3, etc.) stay offscreen - no action needed
         }
         
         if (!this.cascadedPrefetchEnabled) {
@@ -1732,6 +1744,70 @@ export class ContentViewPool {
         
         // console.log(`[ContentViewPool] Status sent, calling processNextPrefetch`)
         this.processNextPrefetch()
+    }
+    
+    /**
+     * Get the index of the next article in reading direction (+1 for forward, -1 for backward)
+     * Returns -1 if no next article exists (at list boundary)
+     */
+    private getNextIndexInReadingDirection(): number {
+        if (this.readingDirection === 'forward' && this.currentArticleIndex < this.articleListLength - 1) {
+            return this.currentArticleIndex + 1
+        } else if (this.readingDirection === 'backward' && this.currentArticleIndex > 0) {
+            return this.currentArticleIndex - 1
+        } else if (this.readingDirection === 'unknown') {
+            // For unknown direction, prefer forward
+            if (this.currentArticleIndex < this.articleListLength - 1) {
+                return this.currentArticleIndex + 1
+            } else if (this.currentArticleIndex > 0) {
+                return this.currentArticleIndex - 1
+            }
+        }
+        return -1
+    }
+    
+    /**
+     * Set a specific view to the render position
+     * Called only for the "+1" article in reading direction
+     */
+    private setViewToRenderPosition(articleId: string, articleIndex: number): void {
+        if (!this.boundsReceived) return
+        
+        const view = this.getViewByArticleId(articleId)
+        if (!view || !view.hasLoadedOnce || view.isActive) return
+        
+        // Clear old render position if different view
+        if (this.renderPositionViewId && this.renderPositionViewId !== view.id) {
+            const oldView = this.getViewById(this.renderPositionViewId)
+            if (oldView && oldView.isAtRenderPosition && !oldView.isActive) {
+                oldView.moveOffScreen(this.visibleBounds)
+                console.log(`[ContentViewPool] Cleared old render position from ${this.renderPositionViewId} (was index ${oldView.articleIndex})`)
+            }
+        }
+        
+        // Set new view to render position
+        if (this.renderPositionPreviewActive) {
+            const webContentsView = view.getView()
+            if (webContentsView) {
+                webContentsView.setBounds({
+                    x: 0,
+                    y: this.visibleBounds.y,
+                    width: this.visibleBounds.width,
+                    height: this.visibleBounds.height
+                })
+                webContentsView.setVisible(true)
+                console.log(`[ContentViewPool] Set ${view.id} (index ${articleIndex}) to PREVIEW position`)
+            }
+        } else {
+            view.setRenderPosition(this.visibleBounds)
+            console.log(`[ContentViewPool] Set ${view.id} (index ${articleIndex}) to render position (+1 in reading direction)`)
+        }
+        this.renderPositionViewId = view.id
+        
+        // Auto-expand Reddit gallery after initial render delay
+        setTimeout(() => {
+            view.triggerAutoExpandRedditGallery()
+        }, 400)
     }
     
     /**
@@ -1789,8 +1865,9 @@ export class ContentViewPool {
         // console.log(`[ContentViewPool] Sending prefetch status:`, status)
         this.sendToRenderer('cvp-prefetch-status', status)
         
-        // Update render position for the "next" article
-        this.updateRenderPosition()
+        // NOTE: Render position is now ONLY set in onPrefetchComplete() for the +1 article.
+        // This prevents race conditions where +2/+3 articles get the render position
+        // before +1 is loaded.
     }
     
     /**
@@ -1799,24 +1876,20 @@ export class ContentViewPool {
      * The render position has 1 pixel visible to force Chromium to render the content.
      * Only the "next" article in reading direction gets this position.
      * This ensures instant navigation when the user moves to the next article.
+     * 
+     * NOTE: This method is now primarily used for:
+     * - Cache hits (navigating to already-loaded article)
+     * - setVisible() calls (showing/hiding the pool)
+     * - Direction changes (clearing wrong render position)
+     * 
+     * The main render position assignment happens in onPrefetchComplete() via
+     * setViewToRenderPosition() to ensure only +1 articles get the position.
      */
     private updateRenderPosition(): void {
         if (!this.boundsReceived) return
         
         // Determine the "next" article index based on reading direction
-        let nextIndex = -1
-        if (this.readingDirection === 'forward' && this.currentArticleIndex < this.articleListLength - 1) {
-            nextIndex = this.currentArticleIndex + 1
-        } else if (this.readingDirection === 'backward' && this.currentArticleIndex > 0) {
-            nextIndex = this.currentArticleIndex - 1
-        } else if (this.readingDirection === 'unknown') {
-            // For unknown direction, prefer forward
-            if (this.currentArticleIndex < this.articleListLength - 1) {
-                nextIndex = this.currentArticleIndex + 1
-            } else if (this.currentArticleIndex > 0) {
-                nextIndex = this.currentArticleIndex - 1
-            }
-        }
+        const nextIndex = this.getNextIndexInReadingDirection()
         
         if (nextIndex < 0) {
             // No next article - clear render position
@@ -1824,7 +1897,7 @@ export class ContentViewPool {
                 const oldView = this.getViewById(this.renderPositionViewId)
                 if (oldView && oldView.isAtRenderPosition) {
                     oldView.moveOffScreen(this.visibleBounds)
-                    console.log(`[ContentViewPool] Cleared render position from ${this.renderPositionViewId}`)
+                    console.log(`[ContentViewPool] Cleared render position from ${this.renderPositionViewId} (no next article)`)
                 }
                 this.renderPositionViewId = null
                 this.renderPositionPreviewActive = false
@@ -1832,10 +1905,24 @@ export class ContentViewPool {
             return
         }
         
+        // Check if current render position view is WRONG (not the +1 article)
+        if (this.renderPositionViewId) {
+            const currentRenderView = this.getViewById(this.renderPositionViewId)
+            if (currentRenderView && currentRenderView.articleIndex !== nextIndex) {
+                // Wrong view at render position - clear it!
+                if (currentRenderView.isAtRenderPosition && !currentRenderView.isActive) {
+                    currentRenderView.moveOffScreen(this.visibleBounds)
+                    console.log(`[ContentViewPool] Cleared WRONG render position: ${this.renderPositionViewId} (index ${currentRenderView.articleIndex}, expected ${nextIndex})`)
+                }
+                this.renderPositionViewId = null
+                // Don't clear renderPositionPreviewActive - will apply to correct view if found
+            }
+        }
+        
         // Find view for the next article
         const nextView = this.views.find(v => v.articleIndex === nextIndex && v.hasLoadedOnce)
         if (!nextView) {
-            // Next article not loaded yet - nothing to do
+            // Next article not loaded yet - render position stays empty until prefetch completes
             return
         }
         
@@ -1844,7 +1931,7 @@ export class ContentViewPool {
             return
         }
         
-        // Move old view from render position to offscreen
+        // Move old view from render position to offscreen (if any)
         if (this.renderPositionViewId && this.renderPositionViewId !== nextView.id) {
             const oldView = this.getViewById(this.renderPositionViewId)
             if (oldView && oldView.isAtRenderPosition && !oldView.isActive) {
