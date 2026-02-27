@@ -1,6 +1,6 @@
 {
   "name": "fluent-reader",
-  "version": "1.4.28",
+  "version": "1.4.29",
   "description": "Modern desktop RSS reader (fork with updated components and extensions)",
   "main": "./dist/electron.js",
   "files": [
@@ -68,6 +68,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.4.6",
+    "electron-log": "^5.4.3",
     "google-translate-api-x": "^10.7.2",
     "node-polyfill-webpack-plugin": "^2.0.1",
     "simple-peer": "^9.11.1"

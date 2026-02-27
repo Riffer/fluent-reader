@@ -20,10 +20,14 @@ import { isMobileUserAgentEnabled, isVisualZoomEnabled } from "./settings"
 import { extractFromHtml } from "@extractus/article-extractor"
 import { generateArticleHtml, generateFullContentHtml, textDirToString, TextDirection } from "./article-html-generator"
 import { translateText, translateHtml } from "./translation-service"
+import { createScopedLogger } from "./logger"
 import https from "https"
 import http from "http"
 import fs from "fs"
 import path from "path"
+
+// Scoped logger for ContentViewPool - logs to file and console
+const log = createScopedLogger('ContentViewPool')
 
 /**
  * Pool configuration
@@ -312,7 +316,7 @@ export class ContentViewPool {
         
         // Ensure minimum size
         if (this.config.size < 2) {
-            console.warn("[ContentViewPool] Pool size must be at least 2, setting to 2")
+            log.warn("Pool size must be at least 2, setting to 2")
             this.config.size = 2
         }
         
@@ -327,7 +331,7 @@ export class ContentViewPool {
      */
     private createViewWithEvents(view: CachedContentView): void {
         if (!this.parentWindow) {
-            console.error("[ContentViewPool] Cannot create view - no parent window")
+            log.error("Cannot create view - no parent window")
             return
         }
         
@@ -760,7 +764,7 @@ export class ContentViewPool {
             
             fs.writeFileSync(result.filePath, response)
         } catch (err) {
-            console.error("[ContentViewPool] Failed to save image:", err)
+            log.error("Failed to save image:", err)
         }
     }
     
@@ -795,7 +799,7 @@ export class ContentViewPool {
             const image = nativeImage.createFromBuffer(response)
             clipboard.writeImage(image)
         } catch (err) {
-            console.error("[ContentViewPool] Failed to copy image:", err)
+            log.error("Failed to copy image:", err)
         }
     }
 
@@ -1035,7 +1039,7 @@ export class ContentViewPool {
             
             return true
         } catch (err) {
-            console.error(`[ContentViewPool] Navigation failed:`, err)
+            log.error(`Navigation failed:`, err)
             this.sendToRenderer('cvp-error', articleId, String(err))
             
             return false
@@ -1074,7 +1078,7 @@ export class ContentViewPool {
                 case 'loading':
                     // Currently loading - check if it's stuck (stale)
                     if (existingView.isStaleLoading) {
-                        console.warn(`[ContentViewPool] Prefetch: view ${existingView.id} is stale loading (> 60s), recycling`)
+                        log.warn(`Prefetch: view ${existingView.id} is stale loading (> 60s), recycling`)
                         existingView.recycle()
                         viewToUse = existingView
                     } else {
@@ -1115,7 +1119,7 @@ export class ContentViewPool {
             // No free view - mark as complete anyway so cascade continues
             // CRITICAL: Remove from pending set to prevent blocking future prefetches!
             this.pendingPrefetchArticleIds.delete(articleId)
-            console.warn(`[ContentViewPool] Prefetch skip - no free view for: ${articleId}`)
+            log.warn(`Prefetch skip - no free view for: ${articleId}`)
             this.onPrefetchComplete(articleId, articleIndex)
             return
         }
@@ -1131,7 +1135,7 @@ export class ContentViewPool {
                 // View holds protected article - mark as complete so cascade continues
                 // CRITICAL: Remove from pending set to prevent blocking future prefetches!
                 this.pendingPrefetchArticleIds.delete(articleId)
-                console.warn(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds protected/pending article ${freeView.articleId}`)
+                log.warn(`Prefetch skip - view ${freeView.id} holds protected/pending article ${freeView.articleId}`)
                 this.onPrefetchComplete(articleId, articleIndex)
                 return
             }
@@ -1140,7 +1144,7 @@ export class ContentViewPool {
                 // View holds target content - mark as complete so cascade continues
                 // CRITICAL: Remove from pending set to prevent blocking future prefetches!
                 this.pendingPrefetchArticleIds.delete(articleId)
-                console.warn(`[ContentViewPool] Prefetch skip - view ${freeView.id} holds ready target index ${freeView.articleIndex}`)
+                log.warn(`Prefetch skip - view ${freeView.id} holds ready target index ${freeView.articleIndex}`)
                 this.onPrefetchComplete(articleId, articleIndex)
                 return
             }
@@ -1166,7 +1170,7 @@ export class ContentViewPool {
                 // ERR_FAILED (-2) is expected when prefetch is cancelled (view stopped for new navigation)
                 // Only log unexpected errors
                 if (err?.code !== 'ERR_FAILED') {
-                    console.error(`[ContentViewPool] Prefetch failed for ${articleId}: ${this.formatErrorForLog(err)}`)
+                    log.error(`Prefetch failed for ${articleId}: ${this.formatErrorForLog(err)}`)
                 }
                 // Remove from pending set on failure too
                 this.pendingPrefetchArticleIds.delete(articleId)
@@ -2220,9 +2224,9 @@ export class ContentViewPool {
     private fixPoolAlignment(validation: PoolAlignmentResult): void {
         if (validation.isAligned) return
         
-        console.log(`[ContentViewPool] Alignment issues detected:`)
+        log.warn(`Alignment issues detected:`)
         for (const issue of validation.issues) {
-            console.log(`  - ${issue}`)
+            log.warn(`  - ${issue}`)
         }
         
         // Log full pool state for debugging
@@ -2232,7 +2236,7 @@ export class ContentViewPool {
         if (validation.renderPositionMismatch && this.renderPositionViewId) {
             const oldRenderView = this.getViewById(this.renderPositionViewId)
             if (oldRenderView && !oldRenderView.isActive) {
-                console.log(`[ContentViewPool] Fixing: Clearing wrong render position from ${this.renderPositionViewId}`)
+                log.info(`Fixing: Clearing wrong render position from ${this.renderPositionViewId}`)
                 oldRenderView.moveOffScreen(this.visibleBounds)
             }
             this.renderPositionViewId = null
@@ -2241,7 +2245,7 @@ export class ContentViewPool {
         
         // Fix prefetch mismatch by canceling and re-scheduling
         if (validation.prefetchMismatch) {
-            console.log(`[ContentViewPool] Fixing: Canceling stale prefetches and re-scheduling`)
+            log.info(`Fixing: Canceling stale prefetches and re-scheduling`)
             this.cancelPrefetch()
             // Note: schedulePrefetch will be called after navigation completes
         }
@@ -2255,13 +2259,13 @@ export class ContentViewPool {
         const activeView = this.getActiveView()
         const renderView = this.renderPositionViewId ? this.getViewById(this.renderPositionViewId) : null
         
-        console.log(`[ContentViewPool] === Pool State (${context}) ===`)
-        console.log(`  Current: idx=${this.currentArticleIndex}/${this.articleListLength}, dir=${this.readingDirection}`)
-        console.log(`  Active: ${activeView?.id || 'none'} (articleIdx=${activeView?.articleIndex ?? 'N/A'})`)
-        console.log(`  RenderPosition: ${renderView?.id || 'none'} (articleIdx=${renderView?.articleIndex ?? 'N/A'})`)
-        console.log(`  Prefetch targets: [${this.prefetchTargets.join(', ')}]`)
-        console.log(`  Prefetch completed: [${Array.from(this.prefetchCompletedIndices).join(', ')}]`)
-        console.log(`  Views:`)
+        log.info(`=== Pool State (${context}) ===`)
+        log.info(`  Current: idx=${this.currentArticleIndex}/${this.articleListLength}, dir=${this.readingDirection}`)
+        log.info(`  Active: ${activeView?.id || 'none'} (articleIdx=${activeView?.articleIndex ?? 'N/A'})`)
+        log.info(`  RenderPosition: ${renderView?.id || 'none'} (articleIdx=${renderView?.articleIndex ?? 'N/A'})`)
+        log.info(`  Prefetch targets: [${this.prefetchTargets.join(', ')}]`)
+        log.info(`  Prefetch completed: [${Array.from(this.prefetchCompletedIndices).join(', ')}]`)
+        log.info(`  Views:`)
         for (const v of this.views) {
             const status = [
                 v.isActive ? 'ACTIVE' : '',
@@ -2269,7 +2273,7 @@ export class ContentViewPool {
                 v.hasLoadedOnce ? 'ready' : 'empty',
                 v.isLoading ? 'loading' : ''
             ].filter(Boolean).join(',')
-            console.log(`    ${v.id}: idx=${v.articleIndex}, status=[${status}]`)
+            log.info(`    ${v.id}: idx=${v.articleIndex}, status=[${status}]`)
         }
     }
     

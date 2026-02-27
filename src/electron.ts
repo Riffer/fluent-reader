@@ -6,6 +6,7 @@ import { WindowManager } from "./main/window"
 import { initP2P, registerP2PIpcHandlers } from "./main/p2p-share"
 import { initP2PLan, registerP2PLanIpcHandlers, shutdownP2P, onSystemSuspend, onSystemResume } from "./main/p2p-lan"
 import { registerTranslationIpc } from "./main/translation-service"
+import { initLogger, logError, logInfo } from "./main/logger"
 
 // ===== Security Warnings =====
 // Suppress Content-Security-Policy warning for external websites loaded in ContentView
@@ -23,12 +24,12 @@ console.log('[Electron] Visual Zoom Chromium flags enabled');
 // ===== Crash Handler and Debugging =====
 // Catch unexpected exceptions
 process.on('uncaughtException', (error) => {
-    console.error('[CRASH] Uncaught Exception:', error)
-    console.error('[CRASH] Stack:', error.stack)
+    logError('[CRASH] Uncaught Exception:', error)
+    logError('[CRASH] Stack:', error.stack)
 })
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('[CRASH] Unhandled Rejection at:', promise, 'reason:', reason)
+    logError('[CRASH] Unhandled Rejection at:', promise, 'reason:', reason)
 })
 
 // Enable Crash Reporter for detailed crash dumps
@@ -54,6 +55,9 @@ else if (process.platform === "win32")
 let restarting = false
 
 function init() {
+    // Initialize file-based logging first
+    initLogger()
+    
     performUpdate(store)
     nativeTheme.themeSource = store.get("theme", ThemeSettings.Default)
     
