@@ -12,6 +12,7 @@
 import { WebContentsView, session, app } from "electron"
 import type { BrowserWindow } from "electron"
 import path from "path"
+import { createScopedLogger } from "./logger"
 import { 
     isVisualZoomEnabled, 
     isZoomOverlayEnabled, 
@@ -20,6 +21,9 @@ import {
     isRedditGalleryExpandEnabled,
     isRedditSingleImageExpandEnabled
 } from "./settings"
+
+// Scoped logger for CachedContentView
+const log = createScopedLogger('CachedContentView')
 
 /**
  * Navigation settings for loading content
@@ -287,7 +291,7 @@ export class CachedContentView {
      */
     create(parentWindow: BrowserWindow): void {
         if (this._view) {
-            console.warn(`[CachedContentView:${this.id}] View already exists, destroying first`)
+            log.warn(`${this.id}: View already exists, destroying first`)
             this.destroy()
         }
         
@@ -331,9 +335,9 @@ export class CachedContentView {
             // Setup event handlers
             this.setupWebContentsEvents()
             
-            // console.log(`[CachedContentView:${this.id}] Created successfully`)
+            log.debug(`${this.id}: Created successfully`)
         } catch (e) {
-            console.error(`[CachedContentView:${this.id}] Error creating view:`, e)
+            log.error(`${this.id}: Error creating view:`, e)
             this._view = null
         }
     }
@@ -360,7 +364,7 @@ export class CachedContentView {
                 // console.log(`[CachedContentView:${viewId}] Removed from parent window`)
             }
         } catch (e) {
-            console.error(`[CachedContentView:${viewId}] Error removing from parent:`, e)
+            log.error(`${viewId}: Error removing from parent:`, e)
         }
         
         try {
@@ -375,7 +379,7 @@ export class CachedContentView {
                 // console.log(`[CachedContentView:${viewId}] WebContents closed`)
             }
         } catch (e) {
-            console.error(`[CachedContentView:${viewId}] Error closing webContents:`, e)
+            log.error(`${viewId}: Error closing webContents:`, e)
         }
         
         this._view = null
@@ -490,7 +494,7 @@ export class CachedContentView {
             
             // Timeout after 30 seconds
             const timeout = setTimeout(() => {
-                console.warn(`[CachedContentView:${this.id}] Load timeout after 30s`)
+                log.warn(`${this.id}: Load timeout after 30s`)
                 cleanup()
                 // Set error status so view can be recycled
                 const err = new Error('Load timeout after 30s')
@@ -542,7 +546,7 @@ export class CachedContentView {
                     if (shouldLog) {
                         // Truncate data: URLs for readable logging
                         const displayUrl = this.truncateDataUrl(err.url || url)
-                        console.error(`[CachedContentView:${this.id}] Load error: ${err.code || err.errno} - ${displayUrl}`)
+                        log.error(`${this.id}: Load error: ${err.code || err.errno} - ${displayUrl}`)
                     }
                     cleanup()
                     this._loadError = err
@@ -735,7 +739,7 @@ export class CachedContentView {
                     // console.log(`[CachedContentView:${this.id}] Applying bounds: ${bounds.width}x${bounds.height}@${bounds.x},${bounds.y}`)
                     this._view.setBounds(bounds)
                 } else {
-                    console.warn(`[CachedContentView:${this.id}] setVisible(true) called WITHOUT bounds!`)
+                    log.warn(`${this.id}: setVisible(true) called WITHOUT bounds!`)
                 }
                 // Keep native visibility on (in case it was ever turned off)
                 this._view.setVisible(true)
@@ -863,7 +867,7 @@ export class CachedContentView {
         // View is at some other visible position (x >= 0) - this is INVALID
         // (unless it's the active view, which the caller should exclude)
         if (bounds.x >= 0) {
-            console.warn(`[CachedContentView:${this.id}] At invalid visible position: ` +
+            log.warn(`${this.id}: At invalid visible position: ` +
                 `bounds=${JSON.stringify(bounds)}, expected=${JSON.stringify(expectedVisibleBounds)}, ` +
                 `isActive=${this._isActive}, isOffScreen=${this._isOffScreen}, isAtRenderPos=${this._isAtRenderPosition}`)
             return true
@@ -905,7 +909,7 @@ export class CachedContentView {
             this.parentWindow.contentView.addChildView(this._view)
             // console.log(`[CachedContentView:${this.id}] brought to front`)
         } catch (e) {
-            console.error(`[CachedContentView:${this.id}] Failed to bring to front:`, e)
+            log.error(`${this.id}: Failed to bring to front:`, e)
         }
     }
     
@@ -1201,7 +1205,7 @@ export class CachedContentView {
             return
         }
         
-        console.log(`[CachedContentView:${this.id}] Triggering auto-expand Reddit gallery`)
+        log.debug(`${this.id}: Triggering auto-expand Reddit gallery`)
         this.send('cvp-auto-expand-reddit-gallery')
     }
 
