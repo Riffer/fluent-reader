@@ -2217,17 +2217,27 @@ export class ContentViewPool {
     /**
      * Fix alignment issues detected by validatePoolAlignment.
      * Called when navigation detects misalignment.
+     * 
+     * OPTIMIZATION: For prefetch misalignment, we don't cancel everything.
+     * Instead, we renumber prefetchCompletedIndices based on what views
+     * are actually loaded, and only prefetch the missing targets.
      */
     private fixPoolAlignment(validation: PoolAlignmentResult): void {
         if (validation.isAligned) return
         
-        log.warn(`Alignment issues detected:`)
-        for (const issue of validation.issues) {
-            log.warn(`  - ${issue}`)
-        }
+        // Prefetch mismatch alone is expected during normal navigation (index shift)
+        // Only log as warning if there are other issues
+        const hasRealIssues = validation.activeViewMismatch || validation.renderPositionMismatch
         
-        // Log full pool state for debugging
-        this.logPoolState('alignment-fix')
+        if (hasRealIssues) {
+            log.warn(`Alignment issues detected:`)
+            for (const issue of validation.issues) {
+                log.warn(`  - ${issue}`)
+            }
+        } else if (validation.prefetchMismatch) {
+            // Prefetch shift is normal - log at debug level
+            log.debug(`Prefetch targets shifted (normal): ${validation.issues.find(i => i.includes('Prefetch')) || 'shift detected'}`)
+        }
         
         // Fix render position mismatch
         if (validation.renderPositionMismatch && this.renderPositionViewId) {
@@ -2240,12 +2250,66 @@ export class ContentViewPool {
             this.renderPositionPreviewActive = false
         }
         
-        // Fix prefetch mismatch by canceling and re-scheduling
+        // Fix prefetch mismatch with RENUMBERING instead of full refetch
         if (validation.prefetchMismatch) {
-            log.info(`Fixing: Canceling stale prefetches and re-scheduling`)
-            this.cancelPrefetch()
-            // Note: schedulePrefetch will be called after navigation completes
+            this.renumberPrefetchState()
         }
+    }
+    
+    /**
+     * Renumber prefetch state based on currently loaded views.
+     * 
+     * When the user navigates forward/backward, the expected prefetch targets shift.
+     * Instead of canceling all prefetches and refetching, we:
+     * 1. Calculate new expected targets based on current position
+     * 2. Check which targets are already satisfied by loaded views
+     * 3. Update prefetch state so only missing targets will be fetched
+     * 
+     * NOTE: This method only updates the state. The actual prefetch is handled
+     * by schedulePrefetch() which is called after navigation completes.
+     * 
+     * Example: User at index 0, prefetched [1,2,3]. Navigates to index 1.
+     * - New expected targets: [2,3,4,0]
+     * - View-2 has index 2 ✓, view-3 has index 3 ✓
+     * - Only index 4 needs to be prefetched
+     */
+    private renumberPrefetchState(): void {
+        const expectedTargets = this.determinePrefetchTargets()
+        const newCompletedIndices = new Set<number>()
+        
+        log.debug(`Renumbering prefetch state: current=${this.currentArticleIndex}, expected targets=[${expectedTargets.join(',')}]`)
+        
+        // Check each view to see if it satisfies any expected target
+        for (const view of this.views) {
+            // Skip active view (that's the current article, not a prefetch target)
+            if (view.isActive) continue
+            
+            // Skip views that haven't loaded
+            if (!view.hasLoadedOnce) continue
+            
+            // Check if this view's articleIndex is in the expected targets
+            if (view.articleIndex >= 0 && expectedTargets.includes(view.articleIndex)) {
+                newCompletedIndices.add(view.articleIndex)
+                log.debug(`  ${view.id} satisfies target index ${view.articleIndex}`)
+            }
+        }
+        
+        // Calculate what's missing
+        const missingTargets = expectedTargets.filter(t => !newCompletedIndices.has(t))
+        
+        log.debug(`Renumber result: already satisfied=[${Array.from(newCompletedIndices).join(',')}], missing=[${missingTargets.join(',')}]`)
+        
+        // Update prefetch state - schedulePrefetch() will use these
+        this.prefetchTargets = expectedTargets
+        this.prefetchCompletedIndices = newCompletedIndices
+        
+        // If nothing is missing, send status immediately
+        if (missingTargets.length === 0) {
+            log.debug(`All targets already satisfied - no additional prefetch needed`)
+            this.sendPrefetchStatus()
+        }
+        // If targets are missing, schedulePrefetch() -> executePrefetch() will handle them
+        // No need to start prefetch here - it's called after navigation completes
     }
     
     /**
@@ -2930,6 +2994,11 @@ export class ContentViewPool {
         // Feed refreshed - invalidate article indices but keep cached views
         ipcMain.on("cvp-on-feed-refreshed", () => {
             this.invalidateArticleIndices()
+        })
+        
+        // Position update from renderer after list change
+        ipcMain.on("cvp-position-update", (event, articleId, newIndex, newListLength, menuKey) => {
+            this.onPositionUpdate(articleId, newIndex, newListLength, menuKey)
         })
         
         // === Additional handlers for feature parity with ContentViewManager ===
@@ -3804,6 +3873,50 @@ export class ContentViewPool {
         this.readingDirection = 'unknown'
         
         log.info(`ArticleIndex invalidation complete - active view preserved at index ${this.currentArticleIndex}`)
+        
+        // Request updated position from renderer and restart prefetch
+        // The renderer will respond with the current article's new position in the list
+        if (activeView?.articleId) {
+            log.debug(`Requesting position update from renderer for articleId=${activeView.articleId.substring(0, 8)}`)
+            this.sendToRenderer('cvp-request-position-update', activeView.articleId)
+        }
+    }
+
+    /**
+     * Handle position update from renderer after list change
+     * Updates currentArticleIndex and restarts prefetch with correct positions
+     */
+    onPositionUpdate(articleId: string, newIndex: number, newListLength: number, menuKey: string | null): void {
+        const activeView = this.getActiveView()
+        
+        // Validate that the position update is for the current active article
+        if (!activeView || activeView.articleId !== articleId) {
+            log.debug(`Position update ignored: articleId mismatch (active=${activeView?.articleId?.substring(0, 8) || 'none'}, received=${articleId.substring(0, 8)})`)
+            return
+        }
+        
+        // Validate menuKey if both are present
+        if (menuKey && this.currentMenuKey && menuKey !== this.currentMenuKey) {
+            log.debug(`Position update ignored: stale menuKey (current=${this.currentMenuKey}, received=${menuKey})`)
+            return
+        }
+        
+        const oldIndex = this.currentArticleIndex
+        const oldLength = this.articleListLength
+        
+        // Update position
+        this.currentArticleIndex = newIndex
+        this.articleListLength = newListLength
+        
+        // Update the active view's articleIndex as well
+        activeView.articleIndex = newIndex
+        
+        log.info(`Position updated: ${articleId.substring(0, 8)} moved from idx=${oldIndex}/${oldLength} to idx=${newIndex}/${newListLength}`)
+        
+        // Restart prefetch with the new positions
+        if (newIndex >= 0) {
+            this.schedulePrefetch()
+        }
     }
 
     /**

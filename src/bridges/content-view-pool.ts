@@ -172,6 +172,25 @@ export const contentViewPoolBridge = {
     },
     
     /**
+     * Provide updated position info after list change
+     * Called in response to 'cvp-request-position-update' event
+     * Allows the pool to recalculate prefetch targets with correct indices
+     * 
+     * @param articleId - The article that was requested
+     * @param newIndex - New position of the article in the current list
+     * @param newListLength - Current length of the article list
+     * @param menuKey - Current menu key for validation
+     */
+    providePositionUpdate: (
+        articleId: string,
+        newIndex: number,
+        newListLength: number,
+        menuKey: string | null
+    ): void => {
+        ipcRenderer.send("cvp-position-update", articleId, newIndex, newListLength, menuKey)
+    },
+    
+    /**
      * Set bounds for the active content view
      */
     setBounds: (bounds: ContentViewBounds): void => {

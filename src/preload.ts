@@ -43,6 +43,7 @@ const limitedIpcRenderer = {
             "cvp-focus",
             "cvp-set-mobile-mode",
             "cvp-set-user-agent",
+            "cvp-position-update",  // Response to cvp-request-position-update
         ]
         if (allowedSendChannels.includes(channel)) {
             ipcRenderer.send(channel, ...args)
@@ -73,6 +74,7 @@ const limitedIpcRenderer = {
             "cvp-request-prefetch-info",
             "cvp-error",
             "cvp-prefetch-status",  // Prefetch status for traffic light indicator
+            "cvp-request-position-update",  // Request current article position after list change
         ]
         if (allowedOnChannels.includes(channel)) {
             ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))

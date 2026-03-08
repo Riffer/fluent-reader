@@ -238,6 +238,10 @@ export function dismissItems(): AppThunk {
             fid: fid,
             iids: iids,
         })
+        // Notify pool that article indices have changed (items removed from list)
+        if (iids.size > 0) {
+            window.contentViewPool?.onFeedRefreshed()
+        }
     }
 }
 
@@ -342,6 +346,10 @@ export function loadMore(feed: RSSFeed): AppThunk<Promise<void>> {
             return RSSFeed.loadFeed(feed, skipNum, sortAsc)
                 .then(items => {
                     dispatch(loadMoreSuccess(feed, items))
+                    // Notify pool that article indices may have changed
+                    if (items.length > 0) {
+                        window.contentViewPool?.onFeedRefreshed()
+                    }
                 })
                 .catch(e => {
                     console.error(e)

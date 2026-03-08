@@ -512,6 +512,8 @@ export function toggleHidden(item: RSSItem): AppThunk {
         // Use SQLite for update via window.db bridge
         window.db.items.toggleHidden(item._id)
         dispatch(toggleHiddenDone(item))
+        // Notify pool that article indices may have changed (item hidden/shown)
+        window.contentViewPool?.onFeedRefreshed()
     }
 }
 

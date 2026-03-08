@@ -799,6 +799,48 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         };
         ipc.on('cvp-request-bounds', onBoundsRequest);
         this.contentViewCleanup.push(() => ipc.removeListener('cvp-request-bounds', onBoundsRequest));
+        
+        // Position update request from Pool - after list changes, pool needs updated position
+        const onPositionRequest = (_event: any, articleId: string) => {
+            this.handlePositionUpdateRequest(articleId);
+        };
+        ipc.on('cvp-request-position-update', onPositionRequest);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-request-position-update', onPositionRequest));
+    }
+    
+    /**
+     * Handle position update request from ContentViewPool
+     * Called after the article list has changed (items added/removed)
+     * Provides the current article's new position in the updated list
+     */
+    private handlePositionUpdateRequest = (articleId: string) => {
+        const { articleIds, menuKey: currentMenuKey, item } = this.props;
+        
+        // Validate that the request is for the current article
+        const currentArticleId = item?._id ? String(item._id) : null;
+        if (currentArticleId !== articleId) {
+            console.log(`[ContentViewPool] Position update ignored: articleId mismatch (current=${currentArticleId}, requested=${articleId})`);
+            return;
+        }
+        
+        if (!articleIds || !item) {
+            console.log(`[ContentViewPool] Cannot provide position update - missing props`);
+            return;
+        }
+        
+        // Find the article's new position in the current list
+        const newIndex = articleIds.indexOf(item._id);
+        const newListLength = articleIds.length;
+        
+        console.log(`[ContentViewPool] Position update: ${articleId} moved to idx=${newIndex}/${newListLength}`);
+        
+        // Send the updated position to the pool
+        window.contentViewPool?.providePositionUpdate(
+            articleId,
+            newIndex,
+            newListLength,
+            currentMenuKey
+        );
     }
     
     /**
