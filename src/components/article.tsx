@@ -110,15 +110,16 @@ type ArticleState = {
     isNavigatingWithVisualZoom: boolean  // Show loading spinner during Visual Zoom navigation
     videoFullscreen: boolean  // Video playing in fullscreen mode (ContentView fills window)
     activeViewId: string | null  // Currently active ContentView ID (for debug badge)
-    // Prefetch status for traffic light indicator
+    // Prefetch status for traffic light indicator (ArticleID-based)
     prefetchStatus: {
         direction: 'forward' | 'backward' | 'unknown'
         nextArticleReady: boolean
+        nextArticleId: string | null
         queueLength: number
         totalTargets: number
         completedCount: number
-        targets: number[]
-        completedIndices: number[]
+        targets: string[]  // ArticleIDs
+        completedIds: string[]  // ArticleIDs
     } | null
     // Supported languages for translation (loaded from main process)
     supportedLanguages: Record<string, string> | null
@@ -423,7 +424,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             return null;
         }
         
-        const { direction, nextArticleReady, queueLength, totalTargets, completedCount, targets, completedIndices } = status;
+        const { direction, nextArticleReady, queueLength, totalTargets, completedCount, targets, completedIds } = status;
         
         // Determine color based on:
         // - Red: Next article not ready (highest priority for user)
@@ -453,11 +454,10 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             : direction === 'backward' ? '← rückwärts' 
             : '↔ unbekannt';
         
-        // Get article title for each target index
-        const getArticleTitle = (idx: number): string => {
-            const { articleIds, items } = this.props;
-            if (articleIds && items && idx >= 0 && idx < articleIds.length) {
-                const articleId = articleIds[idx];
+        // Get article title for each target articleId
+        const getArticleTitle = (articleId: string): string => {
+            const { items } = this.props;
+            if (items && items[articleId]) {
                 const item = items[articleId];
                 if (item?.title) {
                     // Truncate long titles
@@ -467,13 +467,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
                         : item.title;
                 }
             }
-            return `(Index ${idx})`;
+            return `(ID ${articleId.substring(0, 8)}...)`;
         };
         
-        const targetsList = targets.map(idx => {
-            const isComplete = completedIndices.includes(idx);
-            const title = getArticleTitle(idx);
-            return `  ${isComplete ? '✓' : '○'} #${idx}: ${title}`;
+        // targets is now an array of ArticleIDs, completedIds is also ArticleIDs
+        const targetsList = (targets || []).map((articleId: string) => {
+            const isComplete = completedIds?.includes(articleId) ?? false;
+            const title = getArticleTitle(articleId);
+            return `  ${isComplete ? '✓' : '○'} ${title}`;
         }).join('\n');
         
         const tooltip = [
@@ -489,7 +490,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const symbol = direction === 'unknown' ? '○' : '●';
         
         // Check if preview is available (next article is ready)
-        const hasPreview = nextArticleReady && completedIndices.length > 0;
+        const hasPreview = nextArticleReady && (completedIds?.length ?? 0) > 0;
         
         return (
             <span
@@ -2700,28 +2701,27 @@ a:hover { text-decoration: underline; }
      */
     private getNextArticleIdForPreview = (): { articleId: string, title: string } | null => {
         const { prefetchStatus } = this.state
-        const { articleIds, items } = this.props
+        const { items } = this.props
         
-        if (!prefetchStatus || !articleIds || !items) return null
+        if (!prefetchStatus || !items) return null
         
         // Find the primary prefetch target (next in reading direction)
-        const { direction, targets, completedIndices } = prefetchStatus
-        if (targets.length === 0) return null
+        const { nextArticleId, targets, completedIds } = prefetchStatus
+        if (!targets || targets.length === 0) return null
         
-        // Primary target is the first one in the targets list
-        const primaryIndex = targets[0]
-        if (primaryIndex < 0 || primaryIndex >= articleIds.length) return null
+        // Primary target is the first one (nextArticleId or first in targets)
+        const primaryArticleId = nextArticleId || targets[0]
+        if (!primaryArticleId) return null
         
         // Only show preview if the article is already prefetched (ready)
-        if (!completedIndices.includes(primaryIndex)) return null
+        if (!completedIds?.includes(primaryArticleId)) return null
         
-        const articleId = articleIds[primaryIndex]
-        const item = items[articleId]
+        const item = items[primaryArticleId]
         if (!item) return null
         
         return {
-            articleId: String(articleId),  // Convert to string to match Pool storage
-            title: item.title || `Artikel #${primaryIndex}`
+            articleId: primaryArticleId,
+            title: item.title || `Artikel ${primaryArticleId.substring(0, 8)}...`
         }
     }
     
