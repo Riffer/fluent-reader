@@ -23,7 +23,9 @@ export interface SourceRow {
     hidden: number
     mobileMode: number
     persistCookies: number
-    sortAscending: number  // Sort oldest first when unread filter active
+    translateTo: string | null  // Target language code for translation
+    translationMode: number     // 0 = Inline, 1 = GoogleUrl
+    sortAscending: number       // Sort oldest first when unread filter active
 }
 
 export interface ItemRow {

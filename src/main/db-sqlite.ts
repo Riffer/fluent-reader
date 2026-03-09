@@ -15,7 +15,7 @@ import path from "path"
 let db: Database.Database | null = null
 
 // Schema version for migrations
-const SCHEMA_VERSION = 6
+const SCHEMA_VERSION = 7
 
 // Types matching the Lovefield models
 export interface SourceRow {
@@ -34,6 +34,7 @@ export interface SourceRow {
     mobileMode: number  // SQLite boolean (0/1)
     persistCookies: number  // SQLite boolean (0/1)
     translateTo: string | null  // Target language code for translation
+    translationMode: number  // 0 = Inline, 1 = GoogleUrl
     sortAscending: number  // SQLite boolean (0/1) - sort oldest first when unread filter active
 }
 
@@ -117,6 +118,7 @@ function createTables(): void {
             mobileMode INTEGER NOT NULL DEFAULT 0,
             persistCookies INTEGER NOT NULL DEFAULT 0,
             translateTo TEXT,
+            translationMode INTEGER NOT NULL DEFAULT 0,
             sortAscending INTEGER NOT NULL DEFAULT 0
         )
     `)
@@ -276,6 +278,17 @@ function runMigrations(): void {
             }
         }
 
+        // Migration to v7: Add translationMode column to sources (0 = Inline, 1 = GoogleUrl)
+        if (currentVersion < 7) {
+            console.log("[db-sqlite] Migration v7: Adding translationMode column to sources")
+            const tableInfo = db.prepare("PRAGMA table_info(sources)").all() as Array<{ name: string }>
+            const columnNames = tableInfo.map(c => c.name)
+            
+            if (!columnNames.includes("translationMode")) {
+                db.exec(`ALTER TABLE sources ADD COLUMN translationMode INTEGER NOT NULL DEFAULT 0`)
+            }
+        }
+
         // Update schema version
         if (currentVersion === 0) {
             db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(SCHEMA_VERSION)
@@ -324,8 +337,8 @@ export function insertSource(source: Omit<SourceRow, "sid"> & { sid?: number }):
     if (!db) throw new Error("Database not initialized")
     
     const stmt = db.prepare(`
-        INSERT INTO sources (sid, url, iconurl, name, openTarget, defaultZoom, lastFetched, serviceRef, fetchFrequency, rules, textDir, hidden, mobileMode, persistCookies, translateTo)
-        VALUES (@sid, @url, @iconurl, @name, @openTarget, @defaultZoom, @lastFetched, @serviceRef, @fetchFrequency, @rules, @textDir, @hidden, @mobileMode, @persistCookies, @translateTo)
+        INSERT INTO sources (sid, url, iconurl, name, openTarget, defaultZoom, lastFetched, serviceRef, fetchFrequency, rules, textDir, hidden, mobileMode, persistCookies, translateTo, translationMode, sortAscending)
+        VALUES (@sid, @url, @iconurl, @name, @openTarget, @defaultZoom, @lastFetched, @serviceRef, @fetchFrequency, @rules, @textDir, @hidden, @mobileMode, @persistCookies, @translateTo, @translationMode, @sortAscending)
     `)
     
     const result = stmt.run({
@@ -343,7 +356,9 @@ export function insertSource(source: Omit<SourceRow, "sid"> & { sid?: number }):
         hidden: source.hidden,
         mobileMode: source.mobileMode,
         persistCookies: source.persistCookies,
-        translateTo: source.translateTo ?? null
+        translateTo: source.translateTo ?? null,
+        translationMode: source.translationMode ?? 0,
+        sortAscending: source.sortAscending ?? 0
     })
     
     return result.lastInsertRowid as number
@@ -386,8 +401,8 @@ export function bulkInsertSources(sources: SourceRow[]): number[] {
     if (!db) throw new Error("Database not initialized")
     
     const stmt = db.prepare(`
-        INSERT INTO sources (sid, url, iconurl, name, openTarget, defaultZoom, lastFetched, serviceRef, fetchFrequency, rules, textDir, hidden, mobileMode, persistCookies, translateTo)
-        VALUES (@sid, @url, @iconurl, @name, @openTarget, @defaultZoom, @lastFetched, @serviceRef, @fetchFrequency, @rules, @textDir, @hidden, @mobileMode, @persistCookies, @translateTo)
+        INSERT INTO sources (sid, url, iconurl, name, openTarget, defaultZoom, lastFetched, serviceRef, fetchFrequency, rules, textDir, hidden, mobileMode, persistCookies, translateTo, translationMode, sortAscending)
+        VALUES (@sid, @url, @iconurl, @name, @openTarget, @defaultZoom, @lastFetched, @serviceRef, @fetchFrequency, @rules, @textDir, @hidden, @mobileMode, @persistCookies, @translateTo, @translationMode, @sortAscending)
     `)
     
     const insertMany = db.transaction((sources: SourceRow[]) => {
@@ -408,7 +423,9 @@ export function bulkInsertSources(sources: SourceRow[]): number[] {
                 hidden: source.hidden,
                 mobileMode: source.mobileMode,
                 persistCookies: source.persistCookies,
-                translateTo: source.translateTo ?? null
+                translateTo: source.translateTo ?? null,
+                translationMode: source.translationMode ?? 0,
+                sortAscending: source.sortAscending ?? 0
             })
             ids.push(result.lastInsertRowid as number)
         }

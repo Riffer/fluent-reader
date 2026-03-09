@@ -75,7 +75,10 @@
         "font": "Font",
         "translateTo": "Translate to",
         "noTranslation": "No translation",
-        "translationNote": "New articles will be translated"
+        "translationNote": "New articles will be translated",
+        "translationMode": "Translation Mode",
+        "translationModeInline": "Inline (Internal)",
+        "translationModeGoogleUrl": "Google Translate URL"
     },
     "context": {
         "share": "Share",

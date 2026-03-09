@@ -69,7 +69,10 @@
         "dontNotify": "Nicht benachrichtigen",
         "translateTo": "Übersetzen nach",
         "noTranslation": "Keine Übersetzung",
-        "translationNote": "Neue Artikel werden übersetzt"
+        "translationNote": "Neue Artikel werden übersetzt",
+        "translationMode": "Übersetzungsmodus",
+        "translationModeInline": "Intern (eingebettet)",
+        "translationModeGoogleUrl": "Google Translate URL"
     },
     "context": {
         "share": "Teilen",

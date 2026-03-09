@@ -17,6 +17,7 @@ import {
     RSSSource,
     SourceOpenTarget,
     SourceTextDirection,
+    TranslationMode,
 } from "../scripts/models/source"
 import { shareSubmenu } from "./context-menu"
 import { platformCtrl, decodeFetchResponse } from "../scripts/utils"
@@ -70,6 +71,10 @@ type ArticleProps = {
     updateTranslateTo: (
         source: RSSSource,
         translateTo: string | undefined
+    ) => void
+    updateTranslationMode: (
+        source: RSSSource,
+        mode: TranslationMode
     ) => void
     // ContentViewPool support: article position in feed
     articleIndex?: number
@@ -531,6 +536,32 @@ class Article extends React.Component<ArticleProps, ArticleState> {
     }
     
     /**
+     * Get Google Translate URL for a given URL and target language
+     */
+    private getGoogleTranslateUrl(url: string, targetLang: string): string {
+        const encodedUrl = encodeURIComponent(url)
+        return `https://translate.google.com/translate?sl=auto&tl=${targetLang}&u=${encodedUrl}`
+    }
+    
+    /**
+     * Apply translation mode transformation to URL if needed
+     * Returns the original URL or Google Translate URL based on settings
+     */
+    private applyTranslationModeToUrl(url: string): string {
+        const source = this.props.source
+        const translateTo = source?.translateTo
+        const translationMode = source?.translationMode ?? TranslationMode.Inline
+        
+        // Only transform for Webpage URLs (not data: URLs for local/FullContent)
+        // GoogleUrl mode transforms the URL to load through Google Translate
+        if (translateTo && translationMode === TranslationMode.GoogleUrl && !url.startsWith('data:')) {
+            return this.getGoogleTranslateUrl(url, translateTo)
+        }
+        
+        return url
+    }
+    
+    /**
      * Navigate to content using Pool
      * This is the central navigation method that handles Pool prefetching
      */
@@ -540,12 +571,15 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             return;
         }
         
+        // Apply Google Translate URL transformation if configured
+        const effectiveUrl = this.applyTranslationModeToUrl(url);
+        
         const settings = this.getNavigationSettings();
         const { articleIndex = -1, listLength = 0, feedId = null, menuKey = null } = this.props;
         const artId = articleId || String(this.props.item?._id) || 'unknown';
         const sourceId = this.props.source?.sid ?? null;  // Current feed group/view ID
         
-        console.log(`[Article] Pool navigate: ${artId} (${articleIndex}/${listLength})`);
+        console.log(`[Article] Pool navigate: ${artId} (${articleIndex}/${listLength})${url !== effectiveUrl ? ' [GoogleTranslate]' : ''}`);
         
         // Set visible first - Pool will apply stored bounds when available
         window.contentViewPool.setVisible(true);
@@ -556,7 +590,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         
         window.contentViewPool.navigateToArticle(
             artId,
-            url,
+            effectiveUrl,
             feedId,
             settings,
             articleIndex,
@@ -567,7 +601,7 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             console.error("[Article] Pool navigation failed:", err);
         });
         
-        this.contentViewCurrentUrl = url;
+        this.contentViewCurrentUrl = effectiveUrl;
     }
     
     /**
@@ -1817,7 +1851,13 @@ a:hover { text-decoration: underline; }
         this.props.updateTranslateTo(this.props.source, lang)
     }
 
+    updateTranslationMode = (mode: TranslationMode) => {
+        this.props.updateTranslationMode(this.props.source, mode)
+    }
+
     translationMenuProps = (): IContextualMenuProps => {
+        const currentMode = this.props.source.translationMode ?? TranslationMode.Inline
+        
         const items: any[] = [
             {
                 key: "noTranslation",
@@ -1844,6 +1884,35 @@ a:hover { text-decoration: underline; }
                     onClick: () => this.updateTranslateTo(code),
                 })
             }
+        }
+        
+        // Add translation mode section if a language is selected
+        if (this.props.source.translateTo) {
+            items.push({
+                key: "dividerMode",
+                itemType: ContextualMenuItemType.Divider,
+            })
+            items.push({
+                key: "translationModeHeader",
+                itemType: ContextualMenuItemType.Header,
+                text: intl.get("article.translationMode") || "Translation Mode",
+            })
+            items.push({
+                key: "modeInline",
+                text: intl.get("article.translationModeInline") || "Inline (Internal)",
+                iconProps: { iconName: "TextDocument" },
+                canCheck: true,
+                checked: currentMode === TranslationMode.Inline,
+                onClick: () => this.updateTranslationMode(TranslationMode.Inline),
+            })
+            items.push({
+                key: "modeGoogleUrl",
+                text: intl.get("article.translationModeGoogleUrl") || "Google Translate URL",
+                iconProps: { iconName: "Globe" },
+                canCheck: true,
+                checked: currentMode === TranslationMode.GoogleUrl,
+                onClick: () => this.updateTranslationMode(TranslationMode.GoogleUrl),
+            })
         }
         
         return { items }

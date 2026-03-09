@@ -35,6 +35,16 @@ export const enum SourceTextDirection {
     Vertical,
 }
 
+/**
+ * Translation mode for a source
+ * - Inline: Translate content using internal translation service (default)
+ * - GoogleUrl: Load URL through Google Translate (external)
+ */
+export const enum TranslationMode {
+    Inline = 0,
+    GoogleUrl = 1,
+}
+
 export class RSSSource {
     sid: number
     url: string
@@ -52,6 +62,7 @@ export class RSSSource {
     textDir: SourceTextDirection
     hidden: boolean
     translateTo?: string // Target language code for translation (e.g., 'de', 'en', 'fr')
+    translationMode: TranslationMode // How to translate: inline or via Google URL
     sortAscending: boolean // Sort oldest first when unread filter is active
 
     constructor(url: string, name: string = null, openTarget: SourceOpenTarget = null, defaultZoom = 0, mobileMode = false, persistCookies = false) {
@@ -66,6 +77,7 @@ export class RSSSource {
         this.textDir = SourceTextDirection.LTR
         this.hidden = false
         this.translateTo = undefined
+        this.translationMode = TranslationMode.Inline
         this.sortAscending = false
     }
 
@@ -258,6 +270,7 @@ function rowToSource(row: SourceRow): RSSSource {
     source.mobileMode = row.mobileMode === 1
     source.persistCookies = row.persistCookies === 1
     source.translateTo = row.translateTo ?? undefined
+    source.translationMode = row.translationMode ?? TranslationMode.Inline
     source.sortAscending = row.sortAscending === 1
     source.unreadCount = 0
     return source
@@ -328,6 +341,7 @@ function sourceToRow(source: RSSSource): Omit<SourceRow, "sid"> & { sid?: number
         mobileMode: source.mobileMode ? 1 : 0,
         persistCookies: source.persistCookies ? 1 : 0,
         translateTo: source.translateTo ?? null,
+        translationMode: source.translationMode ?? TranslationMode.Inline,
         sortAscending: source.sortAscending ? 1 : 0
     }
 }

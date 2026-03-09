@@ -21,6 +21,7 @@ import {
     RSSSource,
     SourceTextDirection,
     SourceOpenTarget,
+    TranslationMode,
     updateSource,
     updateSourceZoomBySid,
 } from "../scripts/models/source"
@@ -168,6 +169,14 @@ const mapDispatchToProps = (dispatch: AppDispatch) => {
         ) => {
             dispatch(
                 updateSource({ ...source, translateTo: translateTo } as RSSSource)
+            )
+        },
+        updateTranslationMode: (
+            source: RSSSource,
+            mode: TranslationMode
+        ) => {
+            dispatch(
+                updateSource({ ...source, translationMode: mode } as RSSSource)
             )
         },
     }

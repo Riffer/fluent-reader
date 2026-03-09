@@ -1753,6 +1753,10 @@ export class ContentViewPool {
     }
     
     /**
+     * DEAD CODE: This function is defined but never called.
+     * Consider removing if cache invalidation on source change is not needed,
+     * or wire it up to the appropriate event if this behavior is desired.
+     * 
      * Invalidate cache when user switches to a different feed group/source
      * This recycles all non-active views to free memory and ensure
      * fresh prefetch for the new context
@@ -2310,6 +2314,9 @@ export class ContentViewPool {
     }
 
     /**
+     * DEAD CODE: Legacy index-based function, replaced by isArticleIdReady().
+     * Consider removing after confirming ArticleID-based prefetch is stable.
+     * 
      * Check if an article at given index is ready in the pool
      * Uses hasLoadedOnce instead of isReady to ignore temporary "loading" states
      * caused by ads/videos reloading content.
@@ -2597,6 +2604,9 @@ export class ContentViewPool {
     }
     
     /**
+     * DEAD CODE: This debug function is defined but never called.
+     * Kept for manual debugging - can be invoked from console or added to event handlers.
+     * 
      * Log the current pool state for debugging.
      * Called periodically or when alignment issues are suspected.
      */
