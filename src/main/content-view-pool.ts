@@ -1953,7 +1953,7 @@ export class ContentViewPool {
      */
     private isArticleIdReady(articleId: string): boolean {
         const view = this.getViewByArticleId(articleId)
-        return view !== undefined && view.hasLoadedOnce
+        return view !== null && view.hasLoadedOnce
     }
     
     /**
