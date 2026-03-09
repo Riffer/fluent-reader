@@ -29,6 +29,7 @@ const limitedIpcRenderer = {
             // Content View Pool channels
             "cvp-prefetch",
             "cvp-prefetch-info",
+            "cvp-prefetch-info-by-id",  // Response to cvp-request-prefetch-by-id (ArticleID-based)
             "cvp-toggle-render-preview",
             "cvp-set-bounds",
             "cvp-set-visibility",
@@ -44,6 +45,7 @@ const limitedIpcRenderer = {
             "cvp-set-mobile-mode",
             "cvp-set-user-agent",
             "cvp-position-update",  // Response to cvp-request-position-update
+            "cvp-neighbors-response",  // Response to cvp-request-neighbors (ArticleID-based prefetch)
         ]
         if (allowedSendChannels.includes(channel)) {
             ipcRenderer.send(channel, ...args)
@@ -72,9 +74,11 @@ const limitedIpcRenderer = {
             // Content View Pool channels
             "cvp-navigation-complete",
             "cvp-request-prefetch-info",
+            "cvp-request-prefetch-by-id",  // Request prefetch by ArticleID
             "cvp-error",
             "cvp-prefetch-status",  // Prefetch status for traffic light indicator
             "cvp-request-position-update",  // Request current article position after list change
+            "cvp-request-neighbors",  // Request neighbor articleIds for prefetch (ArticleID-based)
         ]
         if (allowedOnChannels.includes(channel)) {
             ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))

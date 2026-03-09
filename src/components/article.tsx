@@ -806,6 +806,20 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         };
         ipc.on('cvp-request-position-update', onPositionRequest);
         this.contentViewCleanup.push(() => ipc.removeListener('cvp-request-position-update', onPositionRequest));
+        
+        // Neighbor request from Pool - provides articleIds for prefetch (ArticleID-based tracking)
+        const onNeighborsRequest = (_event: any, articleId: string, forwardCount: number, backwardCount: number, menuKey: string | null) => {
+            this.handleNeighborsRequest(articleId, forwardCount, backwardCount, menuKey);
+        };
+        ipc.on('cvp-request-neighbors', onNeighborsRequest);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-request-neighbors', onNeighborsRequest));
+        
+        // Prefetch request by ArticleID (new ArticleID-based flow)
+        const onPrefetchByIdRequest = (_event: any, articleId: string, menuKey: string | null) => {
+            this.handlePrefetchRequestById(articleId, menuKey);
+        };
+        ipc.on('cvp-request-prefetch-by-id', onPrefetchByIdRequest);
+        this.contentViewCleanup.push(() => ipc.removeListener('cvp-request-prefetch-by-id', onPrefetchByIdRequest));
     }
     
     /**
@@ -841,6 +855,54 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             newListLength,
             currentMenuKey
         );
+    }
+    
+    /**
+     * Handle neighbors request from ContentViewPool (ArticleID-based prefetch)
+     * Provides neighboring articleIds based on the CURRENT list state
+     * 
+     * This ensures the pool always gets the correct neighbors even if the list
+     * has changed since navigation (items added/removed/reordered).
+     */
+    private handleNeighborsRequest = (articleId: string, forwardCount: number, backwardCount: number, menuKey: string | null) => {
+        const { articleIds, menuKey: currentMenuKey } = this.props;
+        
+        // Validate menuKey
+        if (menuKey && currentMenuKey && menuKey !== currentMenuKey) {
+            console.log(`[ContentViewPool] Neighbors request ignored: stale menuKey`);
+            window.contentViewPool?.provideNeighbors(articleId, [], [], menuKey);
+            return;
+        }
+        
+        if (!articleIds) {
+            console.log(`[ContentViewPool] Cannot provide neighbors - missing articleIds`);
+            window.contentViewPool?.provideNeighbors(articleId, [], [], menuKey);
+            return;
+        }
+        
+        // Find the article in the current list
+        const currentIndex = articleIds.findIndex(id => String(id) === articleId);
+        if (currentIndex === -1) {
+            console.log(`[ContentViewPool] Article ${articleId} not found in current list`);
+            window.contentViewPool?.provideNeighbors(articleId, [], [], menuKey);
+            return;
+        }
+        
+        // Get forward neighbors (articles AFTER current)
+        const forwardIds: string[] = [];
+        for (let i = 1; i <= forwardCount && currentIndex + i < articleIds.length; i++) {
+            forwardIds.push(String(articleIds[currentIndex + i]));
+        }
+        
+        // Get backward neighbors (articles BEFORE current)
+        const backwardIds: string[] = [];
+        for (let i = 1; i <= backwardCount && currentIndex - i >= 0; i++) {
+            backwardIds.push(String(articleIds[currentIndex - i]));
+        }
+        
+        console.log(`[ContentViewPool] Neighbors for ${articleId}: forward=[${forwardIds.join(',')}], backward=[${backwardIds.join(',')}]`);
+        
+        window.contentViewPool?.provideNeighbors(articleId, forwardIds, backwardIds, menuKey);
     }
     
     /**
@@ -894,13 +956,14 @@ class Article extends React.Component<ArticleProps, ArticleState> {
         const openTarget = source.openTarget;
         
         // Build article info for FullContent mode (Main process will do extraction)
+        // Cast openTarget since SourceOpenTarget and PrefetchOpenTarget have same values
         const articleInfo = {
             articleId: String(itemId),
             itemLink: item.link,
             itemContent: item.content || '',
             itemTitle: item.title || '',
             itemDate: item.date.getTime(),
-            openTarget: openTarget,
+            openTarget: openTarget as number,  // Cast to number since both enums have same values
             textDir: source.textDir || 0,
             fontSize: this.state.fontSize,
             fontFamily: this.state.fontFamily || '',
@@ -948,6 +1011,102 @@ class Article extends React.Component<ArticleProps, ArticleState> {
             String(itemId),
             url,
             // Use the prefetch article's source ID as feedId, not the current article's
+            String(item.source),
+            settings,
+            articleInfo,
+            menuKey
+        );
+    }
+    
+    /**
+     * Handle prefetch request by ArticleID (ArticleID-based flow)
+     * Used in the new cascaded ArticleID-based prefetch system
+     */
+    private handlePrefetchRequestById = (articleId: string, menuKey: string | null = null) => {
+        const { articleIds, items, sources, feedId, locale, menuKey: currentMenuKey } = this.props;
+        
+        // CRITICAL: Validate menuKey - if it doesn't match current list, this is a stale request
+        if (menuKey && currentMenuKey && menuKey !== currentMenuKey) {
+            console.log(`[ContentViewPool] IGNORING stale prefetch-by-id request: menuKey=${menuKey} != current=${currentMenuKey}`);
+            // Still send a response so the pool can continue with next prefetch
+            window.contentViewPool?.providePrefetchInfoById(articleId, null, null, null, null, menuKey);
+            return;
+        }
+        
+        if (!articleIds || !items || !sources) {
+            console.log(`[ContentViewPool] Cannot handle prefetch-by-id - missing props`);
+            window.contentViewPool?.providePrefetchInfoById(articleId, null, null, null, null, menuKey);
+            return;
+        }
+        
+        // Look up the article by ID
+        const item = items[articleId];
+        if (!item) {
+            console.log(`[ContentViewPool] Prefetch-by-id: item ${articleId} not found in store`);
+            window.contentViewPool?.providePrefetchInfoById(articleId, null, null, null, null, menuKey);
+            return;
+        }
+        
+        const source = sources[item.source];
+        if (!source) {
+            console.log(`[ContentViewPool] Prefetch-by-id: source ${item.source} not found for item ${articleId}`);
+            window.contentViewPool?.providePrefetchInfoById(articleId, null, null, null, null, menuKey);
+            return;
+        }
+        
+        // Determine URL based on source's openTarget
+        let url: string | null = null;
+        const openTarget = source.openTarget;
+        
+        // Build article info for FullContent mode (Main process will do extraction)
+        // Cast openTarget since SourceOpenTarget and PrefetchOpenTarget have same values
+        const articleInfo = {
+            articleId: String(articleId),
+            itemLink: item.link,
+            itemContent: item.content || '',
+            itemTitle: item.title || '',
+            itemDate: item.date.getTime(),
+            openTarget: openTarget as number,  // Cast to number since both enums have same values
+            textDir: source.textDir || 0,
+            fontSize: this.state.fontSize,
+            fontFamily: this.state.fontFamily || '',
+            locale: locale || 'en-US',
+            translateTo: source.translateTo  // Pass translation target language
+        };
+        
+        if (openTarget === SourceOpenTarget.Webpage) {
+            // Webpage mode: Use the article link
+            url = item.link;
+        } else if (openTarget === SourceOpenTarget.FullContent) {
+            // FullContent mode: Send article info, Main process will fetch & extract
+            console.log(`[ContentViewPool] Prefetch-by-id for FullContent ${articleId}: sending to Main for extraction`);
+            // url stays null - Main will generate it after extraction
+        } else if (openTarget === SourceOpenTarget.External) {
+            // External mode: Opens in browser, no prefetch needed
+            console.log(`[ContentViewPool] Prefetch-by-id skip for ${articleId}: External mode`);
+            window.contentViewPool?.providePrefetchInfoById(articleId, null, null, null, null, menuKey);
+            return;
+        } else {
+            // Local/RSS mode: Generate the article HTML view (content is local, no network needed)
+            url = this.generateArticleHtml(item, source);
+        }
+        
+        // Use CURRENT zoom if same feed, otherwise use TARGET feed's stored default zoom
+        const currentSourceId = this.props.source?.sid;
+        const isSameFeed = currentSourceId !== undefined && item.source === currentSourceId;
+        const targetZoom = isSameFeed ? this.currentZoom : (source.defaultZoom || 0);
+        const targetZoomFactor = 1.0 + (targetZoom * 0.1);
+        const settings = {
+            zoomFactor: targetZoomFactor,
+            visualZoom: this.state.visualZoomEnabled,
+            mobileMode: this.localMobileMode,
+            showZoomOverlay: this.state.showZoomOverlay
+        };
+        
+        console.log(`[ContentViewPool] Providing prefetch-by-id info for ${articleId}: openTarget=${SourceOpenTarget[openTarget]}, isSameFeed=${isSameFeed}, targetZoom=${targetZoom}, url=${url?.substring(0, 50) || 'null (FullContent)'}...`);
+        window.contentViewPool?.providePrefetchInfoById(
+            articleId,
+            url,
             String(item.source),
             settings,
             articleInfo,

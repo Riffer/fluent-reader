@@ -138,8 +138,9 @@ export class ContentViewPool {
     
     // === Reading Direction ===
     private readingDirection: ReadingDirection = 'unknown'
-    private currentArticleIndex: number = -1
-    private articleListLength: number = 0
+    private currentArticleId: string | null = null  // Current article (ArticleID-based tracking)
+    private currentArticleIndex: number = -1  // Current article index (legacy, for navigate() flow)
+    private articleListLength: number = 0  // Total articles in list (legacy, for navigate() flow)
     private currentSourceId: number | null = null  // Current feed group/view ID for cache invalidation
     
     // === Prefetch Timer ===
@@ -148,8 +149,8 @@ export class ContentViewPool {
     private protectedArticleIds: Set<string> = new Set()  // Articles that should not be recycled (prefetch targets)
     private pendingPrefetchArticleIds: Set<string> = new Set()  // ArticleIds being prefetched right now
     
-    // === Cascaded Prefetch ===
-    private prefetchQueue: number[] = []  // Queue of article indices to prefetch (prioritized)
+    // === Cascaded Prefetch (ArticleID-based) ===
+    private prefetchQueue: string[] = []  // Queue of articleIds to prefetch (prioritized)
     private prefetchInProgress: string | null = null  // Currently prefetching articleId
     
     // === Render Position ===
@@ -159,9 +160,14 @@ export class ContentViewPool {
     private renderPositionPreviewActive: boolean = false  // Debug: When true, render-position view is fully visible
     private cascadedPrefetchEnabled: boolean = true  // Enable/disable cascaded mode
     
-    // === Prefetch Status Tracking ===
-    private prefetchTargets: number[] = []  // All prefetch target indices (for status)
-    private prefetchCompletedIndices: Set<number> = new Set()  // Completed prefetch indices
+    // === Prefetch Status Tracking (ArticleID-based) ===
+    private prefetchTargetIds: string[] = []  // All prefetch target ArticleIds (for status)
+    private prefetchCompletedIds: Set<string> = new Set()  // Completed prefetch ArticleIds
+    private nextArticleId: string | null = null  // The "next" article in reading direction (for status)
+    
+    // === Legacy Prefetch Tracking (index-based - for backwards compatibility) ===
+    private prefetchTargets: number[] = []  // All prefetch target indices (legacy)
+    private prefetchCompletedIndices: Set<number> = new Set()  // Completed prefetch indices (legacy)
     
     // === Zoom State ===
     private cssZoomLevel: number = 0
@@ -1353,6 +1359,221 @@ export class ContentViewPool {
         })
     }
     
+    // ========== ArticleID-based Prefetch Methods ==========
+    
+    /**
+     * Prefetch an article by ArticleID (simplified version without index tracking)
+     * Used by the new ArticleID-based prefetch flow
+     */
+    private prefetchById(articleId: string, url: string, feedId: string | null, settings: NavigationSettings): void {
+        if (!this.config.enabled) {
+            this.pendingPrefetchArticleIds.delete(articleId)
+            return
+        }
+        
+        // Add this articleId to protected set
+        this.protectedArticleIds.add(articleId)
+        
+        // Check if article is already in a view
+        const existingView = this.getViewByArticleId(articleId)
+        let viewToUse: CachedContentView | null = null
+        
+        if (existingView) {
+            switch (existingView.status) {
+                case 'ready':
+                    log.debug(`PrefetchById skip - already ready: ${articleId.substring(0, 8)}`)
+                    this.pendingPrefetchArticleIds.delete(articleId)
+                    this.onPrefetchComplete(articleId)
+                    return
+                case 'loading':
+                    if (existingView.isStaleLoading) {
+                        log.warn(`PrefetchById: view ${existingView.id} is stale loading, recycling`)
+                        existingView.recycle()
+                        viewToUse = existingView
+                    } else {
+                        log.debug(`PrefetchById skip - already loading: ${articleId.substring(0, 8)}`)
+                        return
+                    }
+                    break
+                case 'error':
+                    log.debug(`PrefetchById retry - previous load failed: ${articleId.substring(0, 8)}`)
+                    existingView.recycle()
+                    viewToUse = existingView
+                    break
+                case 'empty':
+                    viewToUse = existingView
+                    break
+            }
+        }
+        
+        // Find a free view
+        let freeView = viewToUse || this.findFreeView()
+        if (!freeView) {
+            freeView = this.findRecyclableView()
+            if (freeView) {
+                log.debug(`PrefetchById: recycling ${freeView.id} for ${articleId.substring(0, 8)}`)
+                freeView.recycle()
+            }
+        }
+        
+        if (!freeView) {
+            this.pendingPrefetchArticleIds.delete(articleId)
+            log.warn(`PrefetchById skip - no free view for: ${articleId.substring(0, 8)}`)
+            this.onPrefetchComplete(articleId)
+            return
+        }
+        
+        log.debug(`PrefetchById: ${articleId.substring(0, 8)} in ${freeView.id}`)
+        
+        // Recycle if needed
+        if (!freeView.isEmpty) {
+            if (freeView.articleId && (
+                this.protectedArticleIds.has(freeView.articleId) || 
+                this.pendingPrefetchArticleIds.has(freeView.articleId) ||
+                this.prefetchTargetIds.includes(freeView.articleId)
+            )) {
+                this.pendingPrefetchArticleIds.delete(articleId)
+                log.warn(`PrefetchById skip - view ${freeView.id} holds protected article`)
+                this.onPrefetchComplete(articleId)
+                return
+            }
+            freeView.recycle()
+        }
+        
+        // Ensure view is created
+        if (!freeView.view && this.parentWindow) {
+            this.createViewWithEvents(freeView)
+        }
+        
+        // Load in background (no articleIndex)
+        freeView.load(url, articleId, feedId, settings, isMobileUserAgentEnabled(), -1)
+            .then(() => {
+                this.pendingPrefetchArticleIds.delete(articleId)
+                this.onPrefetchComplete(articleId)
+            })
+            .catch(err => {
+                if (err?.code !== 'ERR_FAILED') {
+                    log.error(`PrefetchById failed for ${articleId}: ${this.formatErrorForLog(err)}`)
+                }
+                this.pendingPrefetchArticleIds.delete(articleId)
+                this.onPrefetchComplete(articleId)
+            })
+    }
+    
+    /**
+     * Prefetch FullContent article by ArticleID (simplified version without index tracking)
+     * Used by the new ArticleID-based prefetch flow
+     */
+    private async prefetchFullContentById(
+        articleId: string,
+        feedId: string | null,
+        settings: NavigationSettings,
+        articleInfo: PrefetchArticleInfo
+    ): Promise<void> {
+        if (!this.config.enabled) {
+            this.pendingPrefetchArticleIds.delete(articleId)
+            this.onPrefetchComplete(articleId)
+            return
+        }
+        
+        // Check if already cached
+        const existingView = this.getViewByArticleId(articleId)
+        if (existingView && existingView.isFullContentMode && (existingView.status === 'ready' || existingView.status === 'loading')) {
+            this.pendingPrefetchArticleIds.delete(articleId)
+            this.onPrefetchComplete(articleId)
+            return
+        }
+        
+        // If view exists but is NOT FullContent mode, recycle it
+        if (existingView && !existingView.isFullContentMode) {
+            log.debug(`FullContentById: recycling non-FullContent view for ${articleId.substring(0, 8)}`)
+            existingView.recycle()
+        }
+        
+        // Find a free view
+        let freeView = this.findFreeView()
+        if (!freeView) {
+            freeView = this.findRecyclableView()
+            if (freeView) {
+                log.debug(`FullContentById prefetch: recycling ${freeView.id}`)
+                freeView.recycle()
+            }
+        }
+        
+        if (!freeView) {
+            log.debug(`FullContentById prefetch skip - no free view for: ${articleId.substring(0, 8)}`)
+            this.pendingPrefetchArticleIds.delete(articleId)
+            this.onPrefetchComplete(articleId)
+            return
+        }
+        
+        log.debug(`FullContentById prefetch starting: ${articleId.substring(0, 8)} in ${freeView.id}`)
+        
+        // Recycle if needed
+        if (!freeView.isEmpty) {
+            freeView.recycle()
+        }
+        
+        // Ensure view is created
+        if (!freeView.view && this.parentWindow) {
+            this.createViewWithEvents(freeView)
+        }
+        
+        try {
+            // Same extraction logic as prefetchFullContent
+            log.debug(`FullContentById: fetching ${articleInfo.itemLink}`)
+            const html = await this.fetchWebpage(articleInfo.itemLink)
+            
+            log.debug(`FullContentById: extracting content`)
+            const extracted = await extractFromHtml(html, articleInfo.itemLink)
+            
+            // Use extracted content or fallback to RSS content
+            let contentToUse = extracted?.content || articleInfo.itemContent || ''
+            let titleToUse = extracted?.title || articleInfo.itemTitle
+            
+            // Apply translation if configured
+            if (articleInfo.translateTo) {
+                log.debug(`FullContentById: translating to ${articleInfo.translateTo}`)
+                try {
+                    titleToUse = await translateText(titleToUse, articleInfo.translateTo)
+                    contentToUse = await translateHtml(contentToUse, articleInfo.translateTo)
+                    log.debug(`FullContentById: translation complete`)
+                } catch (translationError) {
+                    log.error(`FullContentById: translation failed:`, translationError)
+                    // Keep original content on translation error
+                }
+            }
+            
+            const dataUrl = generateFullContentHtml({
+                title: titleToUse,
+                date: new Date(articleInfo.itemDate),
+                content: contentToUse,
+                baseUrl: articleInfo.itemLink,
+                textDir: textDirToString(articleInfo.textDir),
+                fontSize: articleInfo.fontSize,
+                fontFamily: articleInfo.fontFamily,
+                locale: articleInfo.locale,
+                extractorTitle: titleToUse,
+                extractorDate: extracted?.published ? new Date(extracted.published) : undefined
+            })
+            
+            log.debug(`FullContentById: loading extracted content for ${articleId.substring(0, 8)}`)
+            
+            await freeView.load(dataUrl, articleId, feedId, settings, false, -1)
+            freeView.isFullContentMode = true
+            
+            log.debug(`FullContentById prefetch complete: ${articleId.substring(0, 8)}`)
+            this.pendingPrefetchArticleIds.delete(articleId)
+            this.onPrefetchComplete(articleId)
+        } catch (err: any) {
+            if (err?.code !== 'ERR_FAILED') {
+                log.error(`FullContentById prefetch failed for ${articleId.substring(0, 8)}: ${this.formatErrorForLog(err)}`)
+            }
+            this.pendingPrefetchArticleIds.delete(articleId)
+            this.onPrefetchComplete(articleId)
+        }
+    }
+    
     // ========== Reading Direction ==========
     
     /**
@@ -1616,136 +1837,177 @@ export class ContentViewPool {
      * Execute prefetch based on reading direction
      */
     /**
-     * Execute prefetch for adjacent articles
+     * Execute prefetch for adjacent articles (ArticleID-based)
      * 
-     * IMPORTANT: Before requesting prefetch info from renderer, we protect
-     * the current article and its neighbors from being recycled. This prevents
-     * a race condition where the primary prefetch recycles a view that holds
-     * an article needed by the secondary prefetch.
+     * Instead of calculating indices locally, we ask the renderer for the
+     * neighboring articleIds. This ensures we always get the correct articles
+     * even if the list has changed since navigation.
      * 
-     * CASCADED MODE: Instead of requesting all targets in parallel, we queue them
-     * and process one at a time. This prioritizes the most likely next article
-     * and reduces network/CPU load.
+     * FLOW:
+     * 1. Send cvp-request-neighbors with currentArticleId and counts
+     * 2. Renderer responds with forwardIds and backwardIds
+     * 3. onNeighborsReceived() processes and queues the prefetches
      */
     private executePrefetch(): void {
-        // console.log(`[ContentViewPool] executePrefetch() - index=${this.currentArticleIndex}, listLength=${this.articleListLength}, direction=${this.readingDirection}`)
-        if (this.currentArticleIndex < 0) {
-            // console.log(`[ContentViewPool] No current article index, skipping prefetch`)
+        if (!this.currentArticleId) {
+            log.debug(`No current articleId, skipping prefetch`)
             return
         }
         
-        // Determine what to prefetch based on direction
-        const targets = this.determinePrefetchTargets()
+        // Clear previous prefetch state
+        this.prefetchTargetIds = []
+        this.prefetchCompletedIds.clear()
+        this.prefetchQueue = []
+        this.prefetchInProgress = null
+        this.nextArticleId = null
         
-        // console.log(`[ContentViewPool] Prefetch targets:`, targets)
-        
-        // Track targets for status reporting
-        this.prefetchTargets = [...targets]
-        this.prefetchCompletedIndices.clear()
-        
-        // Debug: Log current view states before pre-population check
-        // console.log(`[ContentViewPool] Views before pre-population:`, this.views.map(v => 
-        //     `${v.id}: idx=${v.articleIndex}, hasLoadedOnce=${v.hasLoadedOnce}, isReady=${v.isReady}, articleId=${v.articleId?.substring(0, 8) || 'empty'}`
-        // ))
-        
-        // Pre-populate completedIndices with targets that are ALREADY ready in the pool
-        // This prevents the status from showing "red" when the next article is actually cached
-        for (const targetIndex of targets) {
-            if (this.isArticleIndexReady(targetIndex)) {
-                this.prefetchCompletedIndices.add(targetIndex)
-            }
-        }
-        
-        // Update protected articles:
-        // Only protect the ACTIVE article. The pending prefetch articleIds will be
-        // protected dynamically as prefetch-info responses arrive.
+        // Update protected articles: protect the active article
         this.protectedArticleIds.clear()
-        this.pendingPrefetchArticleIds.clear()  // Clear pending prefetch tracking
+        this.pendingPrefetchArticleIds.clear()
+        this.protectedArticleIds.add(this.currentArticleId)
         
-        // Protect the active article
-        const activeView = this.getActiveView()
-        if (activeView?.articleId) {
-            this.protectedArticleIds.add(activeView.articleId)
+        // Request neighbor articleIds from renderer
+        // Forward: 3 articles (for reading forward)
+        // Backward: 1 article (for going back)
+        const forwardCount = this.readingDirection === 'backward' ? 1 : 3
+        const backwardCount = this.readingDirection === 'forward' ? 1 : 3
+        
+        log.debug(`Requesting neighbors for ${this.currentArticleId.substring(0, 8)}: forward=${forwardCount}, backward=${backwardCount}`)
+        this.sendToRenderer('cvp-request-neighbors', this.currentArticleId, forwardCount, backwardCount, this.currentMenuKey)
+    }
+    
+    /**
+     * Handle neighbor response from renderer (ArticleID-based prefetch)
+     * Called when renderer provides the actual neighboring articleIds
+     */
+    private onNeighborsReceived(articleId: string, forwardIds: string[], backwardIds: string[], menuKey: string | null): void {
+        // Validate that this response is for the current article
+        if (articleId !== this.currentArticleId) {
+            log.debug(`Neighbors response ignored: articleId mismatch (current=${this.currentArticleId?.substring(0, 8)}, received=${articleId.substring(0, 8)})`)
+            return
         }
         
-        // console.log(`[ContentViewPool] Protected articles:`, Array.from(this.protectedArticleIds))
-        // console.log(`[ContentViewPool] Current views:`, this.views.map(v => 
-        //     `${v.id}: ${v.articleId?.substring(0, 8) || 'empty'} (${v.status}${v.isActive ? ', ACTIVE' : ''})`
-        // ).join(', '))
+        // Validate menuKey
+        if (menuKey && this.currentMenuKey && menuKey !== this.currentMenuKey) {
+            log.debug(`Neighbors response ignored: stale menuKey`)
+            return
+        }
         
-        // Filter out already-ready targets from the queue
-        const targetsToFetch = targets.filter(idx => !this.prefetchCompletedIndices.has(idx))
+        // Build prefetch targets based on reading direction
+        // Priority: reading direction first, then opposite
+        let targetIds: string[] = []
         
-        if (this.cascadedPrefetchEnabled) {
-            // CASCADED MODE: Queue only targets that need fetching
-            this.prefetchQueue = [...targetsToFetch]
-            this.prefetchInProgress = null
-            // console.log(`[ContentViewPool] Cascaded prefetch: ${this.prefetchCompletedIndices.size} already ready, queued ${targetsToFetch.length} targets: [${targetsToFetch.join(', ')}]`)
-            
-            // Send initial status (some may already be complete)
-            this.sendPrefetchStatus()
-            
-            this.processNextPrefetch()
+        if (this.readingDirection === 'forward') {
+            targetIds = [...forwardIds, ...backwardIds]
+            this.nextArticleId = forwardIds[0] || null
+        } else if (this.readingDirection === 'backward') {
+            targetIds = [...backwardIds, ...forwardIds]
+            this.nextArticleId = backwardIds[0] || null
         } else {
-            // PARALLEL MODE (original): Request only targets that need fetching
-            // console.log(`[ContentViewPool] Requesting prefetch info for ${targetsToFetch.length} targets: [${targetsToFetch.join(', ')}]`)
-            for (const targetIndex of targetsToFetch) {
-                this.sendToRenderer('cvp-request-prefetch-info', targetIndex, this.currentMenuKey)
+            // Unknown direction: interleave forward/backward
+            const maxLen = Math.max(forwardIds.length, backwardIds.length)
+            for (let i = 0; i < maxLen; i++) {
+                if (i < forwardIds.length) targetIds.push(forwardIds[i])
+                if (i < backwardIds.length) targetIds.push(backwardIds[i])
             }
-            // Send initial status
-            this.sendPrefetchStatus()
+            this.nextArticleId = forwardIds[0] || backwardIds[0] || null
+        }
+        
+        log.debug(`Neighbors received: targets=[${targetIds.map(id => id.substring(0, 8)).join(',')}], next=${this.nextArticleId?.substring(0, 8) || 'none'}`)
+        
+        // Track all targets
+        this.prefetchTargetIds = [...targetIds]
+        
+        // Check which targets are already cached
+        for (const targetId of targetIds) {
+            if (this.isArticleIdReady(targetId)) {
+                this.prefetchCompletedIds.add(targetId)
+            }
+        }
+        
+        // Filter out already-cached targets
+        const targetsToFetch = targetIds.filter(id => !this.prefetchCompletedIds.has(id))
+        
+        log.debug(`Prefetch: ${this.prefetchCompletedIds.size} already cached, ${targetsToFetch.length} to fetch`)
+        
+        // Protect all target IDs from being recycled
+        for (const id of targetIds) {
+            this.protectedArticleIds.add(id)
+        }
+        
+        // Queue targets for cascaded fetching
+        this.prefetchQueue = [...targetsToFetch]
+        
+        // Send initial status
+        this.sendPrefetchStatus()
+        
+        // Start processing the queue
+        if (targetsToFetch.length > 0) {
+            this.processNextPrefetch()
         }
     }
     
     /**
+     * Check if an article is ready in the pool (by ArticleID)
+     */
+    private isArticleIdReady(articleId: string): boolean {
+        const view = this.getViewByArticleId(articleId)
+        return view !== undefined && view.hasLoadedOnce
+    }
+    
+    /**
      * Process the next item in the prefetch queue (cascaded mode)
+     * Now works with ArticleIDs instead of indices
      */
     private processNextPrefetch(): void {
         if (!this.cascadedPrefetchEnabled) return
         
         // If something is already in progress, wait for it
         if (this.prefetchInProgress) {
-            // console.log(`[ContentViewPool] Cascaded prefetch: waiting for ${this.prefetchInProgress.substring(0, 8)} to complete`)
             return
         }
         
         // Get next target from queue
-        const nextTarget = this.prefetchQueue.shift()
-        if (nextTarget === undefined) {
+        const nextTargetId = this.prefetchQueue.shift()
+        if (!nextTargetId) {
             log.debug(`Cascaded prefetch: queue empty, sending final status`)
-            // Send final status with queueLength = 0
             this.sendPrefetchStatus()
             return
         }
         
-        log.debug(`Cascaded prefetch: requesting index ${nextTarget} (${this.prefetchQueue.length} remaining)`)
-        this.sendToRenderer('cvp-request-prefetch-info', nextTarget, this.currentMenuKey)
+        // Find the index of this articleId in the target list for the prefetch-info request
+        // The renderer still needs an index to look up article data
+        const targetIndex = this.prefetchTargetIds.indexOf(nextTargetId)
+        
+        log.debug(`Cascaded prefetch: requesting ${nextTargetId.substring(0, 8)} (${this.prefetchQueue.length} remaining)`)
+        this.prefetchInProgress = nextTargetId
+        
+        // Request prefetch info with the articleId
+        // The renderer will use its current list to get the article data
+        this.sendToRenderer('cvp-request-prefetch-by-id', nextTargetId, this.currentMenuKey)
     }
     
     /**
      * Called when a prefetch completes (view becomes ready)
      * Triggers the next item in the cascade
      * 
-     * IMPORTANT: Only the "+1" article in reading direction gets the render position.
-     * All other prefetched articles (+2, +3, -2, -3 etc.) stay offscreen.
+     * IMPORTANT: Only the "next" article in reading direction gets the render position.
+     * All other prefetched articles stay offscreen.
      */
     onPrefetchComplete(articleId: string, articleIndex?: number): void {
         log.debug(`Prefetch complete: ${articleId.substring(0, 8)} (index ${articleIndex ?? 'N/A'})`)
         
-        // Track completion by index
-        if (articleIndex !== undefined && articleIndex >= 0) {
-            this.prefetchCompletedIndices.add(articleIndex)
-            
-            // Check if this is the "+1" article in reading direction
-            // Only the immediate next article should be at render position
-            const nextInReadingDirection = this.getNextIndexInReadingDirection()
-            if (articleIndex === nextInReadingDirection) {
-                // This is the next article - set it to render position
-                log.verbose(`Setting ${articleId.substring(0, 8)} (index ${articleIndex}) to render position (+1 in reading direction)`)
-                this.setViewToRenderPosition(articleId, articleIndex)
-            }
-            // All other articles (+2, +3, etc.) stay offscreen - no action needed
+        // Track completion by ArticleID (new ArticleID-based tracking)
+        this.prefetchCompletedIds.add(articleId)
+        
+        // Check if this is the "next" article in reading direction
+        // Only the immediate next article should be at render position
+        if (this.nextArticleId && articleId === this.nextArticleId) {
+            // This is the next article - set it to render position
+            log.verbose(`Setting ${articleId.substring(0, 8)} to render position (next in reading direction)`)
+            this.setViewToRenderPosition(articleId, articleIndex ?? -1)
         }
+        // All other articles stay offscreen - no action needed
         
         if (!this.cascadedPrefetchEnabled) {
             // Send updated status for non-cascaded mode
@@ -1769,6 +2031,7 @@ export class ContentViewPool {
     
     /**
      * Get the index of the next article in reading direction (+1 for forward, -1 for backward)
+     * @deprecated Use nextArticleId instead for ArticleID-based tracking
      * Returns -1 if no next article exists (at list boundary)
      */
     private getNextIndexInReadingDirection(): number {
@@ -1834,37 +2097,20 @@ export class ContentViewPool {
     /**
      * Calculate and send prefetch status to renderer
      * Used for visual feedback (traffic light indicator)
+     * 
+     * Now uses ArticleID-based tracking instead of index-based
      */
     private sendPrefetchStatus(): void {
         const direction = this.readingDirection
-        const currentIndex = this.currentArticleIndex
-        const totalTargets = this.prefetchTargets.length
-        const completedCount = this.prefetchCompletedIndices.size
+        const totalTargets = this.prefetchTargetIds.length
+        const completedCount = this.prefetchCompletedIds.size
         
-        // Determine "next" article based on direction
-        let nextIndex = -1
-        if (direction === 'forward' && currentIndex < this.articleListLength - 1) {
-            nextIndex = currentIndex + 1
-        } else if (direction === 'backward' && currentIndex > 0) {
-            nextIndex = currentIndex - 1
-        } else if (direction === 'unknown') {
-            // Both directions possible - check both neighbors
-            nextIndex = -1  // Special case: will check both
-        }
-        
-        // Check if next article is ready
+        // Check if next article is ready (using ArticleID)
         let nextArticleReady = false
-        if (direction === 'unknown') {
-            // For unknown: both neighbors must be ready (if they exist)
-            const forwardReady = currentIndex >= this.articleListLength - 1 || 
-                this.isArticleIndexReady(currentIndex + 1)
-            const backwardReady = currentIndex <= 0 || 
-                this.isArticleIndexReady(currentIndex - 1)
-            nextArticleReady = forwardReady && backwardReady
-        } else if (nextIndex >= 0) {
-            nextArticleReady = this.isArticleIndexReady(nextIndex)
+        if (this.nextArticleId) {
+            nextArticleReady = this.isArticleIdReady(this.nextArticleId)
         } else {
-            // No next article (at list boundary)
+            // No next article (at list boundary or unknown)
             nextArticleReady = true
         }
         
@@ -1874,21 +2120,21 @@ export class ContentViewPool {
         const status = {
             direction,
             nextArticleReady,
-            nextIndex,
+            nextArticleId: this.nextArticleId,
             queueLength,
             totalTargets,
             completedCount,
             loadingArticleId: this.prefetchInProgress,
-            targets: this.prefetchTargets,
-            completedIndices: Array.from(this.prefetchCompletedIndices)
+            targets: this.prefetchTargetIds,
+            completedIds: Array.from(this.prefetchCompletedIds)
         }
         
         // console.log(`[ContentViewPool] Sending prefetch status:`, status)
         this.sendToRenderer('cvp-prefetch-status', status)
         
-        // NOTE: Render position is now ONLY set in onPrefetchComplete() for the +1 article.
-        // This prevents race conditions where +2/+3 articles get the render position
-        // before +1 is loaded.
+        // NOTE: Render position is now ONLY set in onPrefetchComplete() for the next article.
+        // This prevents race conditions where later articles get the render position
+        // before the next one is loaded.
     }
     
     /**
@@ -2850,6 +3096,49 @@ export class ContentViewPool {
             }
         })
         
+        // Prefetch info response by ArticleID (ArticleID-based flow)
+        ipcMain.on('cvp-prefetch-info-by-id', (event, articleId: string, url: string | null, feedId: string | null, settings: any, articleInfo: any, menuKey: string | null) => {
+            // Reject prefetch requests after nuke until first navigation
+            if (this.awaitingFirstNavigationAfterNuke) {
+                log.debug(`BLOCKED prefetch-info-by-id for ${articleId?.substring(0, 8)} - awaiting first navigation after nuke`)
+                return
+            }
+            
+            // CRITICAL: Validate menuKey - reject stale prefetch responses from previous list
+            if (menuKey && this.currentMenuKey && menuKey !== this.currentMenuKey) {
+                log.debug(`REJECTED stale prefetch-info-by-id: menuKey mismatch, articleId=${articleId?.substring(0, 8)}`)
+                // Continue with next prefetch
+                if (this.prefetchInProgress === articleId) {
+                    this.prefetchInProgress = null
+                    this.processNextPrefetch()
+                }
+                return
+            }
+            
+            log.debug(`cvp-prefetch-info-by-id received: articleId=${articleId?.substring(0, 8)}, menuKey=${menuKey}`)
+            
+            // Add articleId to pending set BEFORE calling prefetch()
+            if (articleId) {
+                this.pendingPrefetchArticleIds.add(articleId)
+                this.prefetchInProgress = articleId
+            }
+            
+            if (articleId && articleInfo?.openTarget === PrefetchOpenTarget.FullContent) {
+                // FullContent mode: fetch and extract in background (no index needed)
+                this.prefetchFullContentById(articleId, feedId, settings, articleInfo)
+            } else if (articleId && url) {
+                // Webpage or RSS mode: use URL directly (no index needed)
+                this.prefetchById(articleId, url, feedId, settings)
+            } else {
+                // No valid prefetch, continue with next
+                log.debug(`Prefetch-by-id incomplete, skipping ${articleId?.substring(0, 8)}`)
+                if (this.prefetchInProgress === articleId) {
+                    this.prefetchInProgress = null
+                    this.processNextPrefetch()
+                }
+            }
+        })
+        
         // Set bounds
         ipcMain.on('cvp-set-bounds', (event, bounds) => {
             this.setBounds(bounds)
@@ -2999,6 +3288,11 @@ export class ContentViewPool {
         // Position update from renderer after list change
         ipcMain.on("cvp-position-update", (event, articleId, newIndex, newListLength, menuKey) => {
             this.onPositionUpdate(articleId, newIndex, newListLength, menuKey)
+        })
+        
+        // Neighbors response from renderer (ArticleID-based prefetch)
+        ipcMain.on("cvp-neighbors-response", (event, articleId, forwardIds, backwardIds, menuKey) => {
+            this.onNeighborsReceived(articleId, forwardIds, backwardIds, menuKey)
         })
         
         // === Additional handlers for feature parity with ContentViewManager ===
@@ -3904,12 +4198,12 @@ export class ContentViewPool {
         const oldIndex = this.currentArticleIndex
         const oldLength = this.articleListLength
         
-        // Update position
+        // Update position (legacy index-based tracking)
         this.currentArticleIndex = newIndex
         this.articleListLength = newListLength
         
-        // Update the active view's articleIndex as well
-        activeView.articleIndex = newIndex
+        // Note: activeView.articleIndex is read-only, but that's okay
+        // The ArticleID-based tracking doesn't rely on the view's articleIndex
         
         log.info(`Position updated: ${articleId.substring(0, 8)} moved from idx=${oldIndex}/${oldLength} to idx=${newIndex}/${newListLength}`)
         

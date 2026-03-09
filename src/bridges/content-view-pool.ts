@@ -56,6 +56,7 @@ export interface PrefetchArticleInfo {
     fontSize: number
     fontFamily: string
     locale: string
+    translateTo?: string       // Target language for translation (e.g., 'de')
 }
 
 /**
@@ -188,6 +189,51 @@ export const contentViewPoolBridge = {
         menuKey: string | null
     ): void => {
         ipcRenderer.send("cvp-position-update", articleId, newIndex, newListLength, menuKey)
+    },
+    
+    /**
+     * Provide neighbor articleIds for prefetch (ArticleID-based tracking)
+     * Called in response to 'cvp-request-neighbors' event
+     * 
+     * The pool tracks prefetch by ArticleID, not by index. This eliminates
+     * desynchronization issues when the article list changes.
+     * 
+     * @param currentArticleId - The article we're providing neighbors for
+     * @param forwardIds - ArticleIds AFTER current in list order (closest first)
+     * @param backwardIds - ArticleIds BEFORE current in list order (closest first)
+     * @param menuKey - Current menu key for validation
+     */
+    provideNeighbors: (
+        currentArticleId: string,
+        forwardIds: string[],
+        backwardIds: string[],
+        menuKey: string | null
+    ): void => {
+        ipcRenderer.send("cvp-neighbors-response", currentArticleId, forwardIds, backwardIds, menuKey)
+    },
+    
+    /**
+     * Provide prefetch info by ArticleID (ArticleID-based flow)
+     * Called in response to 'cvp-request-prefetch-by-id' event
+     * 
+     * Similar to providePrefetchInfo but identified by ArticleID instead of index.
+     * 
+     * @param articleId - The article being prefetched
+     * @param url - URL or data URL to load
+     * @param feedId - Feed ID for the article
+     * @param settings - Navigation settings
+     * @param articleInfo - Article info for FullContent extraction
+     * @param menuKey - Menu key for validation
+     */
+    providePrefetchInfoById: (
+        articleId: string,
+        url: string | null,
+        feedId: string | null,
+        settings: NavigationSettings | null,
+        articleInfo?: PrefetchArticleInfo | null,
+        menuKey?: string | null
+    ): void => {
+        ipcRenderer.send("cvp-prefetch-info-by-id", articleId, url, feedId, settings, articleInfo, menuKey)
     },
     
     /**
