@@ -1926,6 +1926,13 @@ export class ContentViewPool {
             }
         }
         
+        // IMPORTANT: If nextArticleId is already cached, set render position NOW
+        // onPrefetchComplete() is only called for newly-loaded articles, not cached ones
+        if (this.nextArticleId && this.isArticleIdReady(this.nextArticleId)) {
+            log.debug(`Next article ${this.nextArticleId.substring(0, 8)} already cached - setting render position`)
+            this.setViewToRenderPosition(this.nextArticleId, -1)
+        }
+        
         // Filter out already-cached targets
         const targetsToFetch = targetIds.filter(id => !this.prefetchCompletedIds.has(id))
         
@@ -2174,21 +2181,35 @@ export class ContentViewPool {
         }
         
         // Check if current render position view is WRONG (not the +1 article)
+        // A view is CORRECT if either:
+        // 1. Its articleIndex matches nextIndex (index-based path), OR
+        // 2. Its articleId matches nextArticleId (ArticleID-based path)
         if (this.renderPositionViewId) {
             const currentRenderView = this.getViewById(this.renderPositionViewId)
-            if (currentRenderView && currentRenderView.articleIndex !== nextIndex) {
-                // Wrong view at render position - clear it!
-                if (currentRenderView.isAtRenderPosition && !currentRenderView.isActive) {
-                    currentRenderView.moveOffScreen(this.visibleBounds)
-                    log.warn(`Cleared WRONG render position: ${this.renderPositionViewId} (index ${currentRenderView.articleIndex}, expected ${nextIndex})`)
+            if (currentRenderView) {
+                const indexMatches = currentRenderView.articleIndex === nextIndex
+                const articleIdMatches = this.nextArticleId && currentRenderView.articleId === this.nextArticleId
+                
+                if (!indexMatches && !articleIdMatches) {
+                    // Wrong view at render position - clear it!
+                    if (currentRenderView.isAtRenderPosition && !currentRenderView.isActive) {
+                        currentRenderView.moveOffScreen(this.visibleBounds)
+                        log.warn(`Cleared WRONG render position: ${this.renderPositionViewId} (index ${currentRenderView.articleIndex}, expected ${nextIndex}, articleId ${currentRenderView.articleId?.substring(0, 8) || 'none'}, expected ${this.nextArticleId?.substring(0, 8) || 'none'})`)
+                    }
+                    this.renderPositionViewId = null
+                    // Don't clear renderPositionPreviewActive - will apply to correct view if found
                 }
-                this.renderPositionViewId = null
-                // Don't clear renderPositionPreviewActive - will apply to correct view if found
             }
         }
         
-        // Find view for the next article
-        const nextView = this.views.find(v => v.articleIndex === nextIndex && v.hasLoadedOnce)
+        // Find view for the next article (by index OR ArticleID)
+        let nextView = this.views.find(v => v.articleIndex === nextIndex && v.hasLoadedOnce)
+        
+        // If not found by index, try by ArticleID
+        if (!nextView && this.nextArticleId) {
+            nextView = this.views.find(v => v.articleId === this.nextArticleId && v.hasLoadedOnce)
+        }
+        
         if (!nextView) {
             // Next article not loaded yet - render position stays empty until prefetch completes
             return
@@ -2405,8 +2426,12 @@ export class ContentViewPool {
                 const expectedNextIndex = this.getNextIndexInReadingDirection()
                 
                 // Render position should be on the +1 article ONLY
-                if (renderView.articleIndex >= 0 && renderView.articleIndex !== expectedNextIndex) {
-                    result.issues.push(`Render position on wrong view: ${renderView.id} has index ${renderView.articleIndex}, expected ${expectedNextIndex}`)
+                // Check both index-based and ArticleID-based alignment
+                const indexMatches = renderView.articleIndex >= 0 && renderView.articleIndex === expectedNextIndex
+                const articleIdMatches = this.nextArticleId && renderView.articleId === this.nextArticleId
+                
+                if (!indexMatches && !articleIdMatches) {
+                    result.issues.push(`Render position on wrong view: ${renderView.id} has index ${renderView.articleIndex} (expected ${expectedNextIndex}), articleId ${renderView.articleId?.substring(0, 8) || 'none'} (expected ${this.nextArticleId?.substring(0, 8) || 'none'})`)
                     result.renderPositionMismatch = true
                 }
                 
@@ -2443,12 +2468,24 @@ export class ContentViewPool {
         
         // --- Check 4: Orphaned Ready Views ---
         // Views that are ready but not at expected positions
+        // Note: Views with articleIndex = -1 but valid articleId in prefetchTargetIds are NOT orphaned
         const orphanedViews: string[] = []
         for (const view of this.views) {
-            if (view.hasLoadedOnce && !view.isActive && view.articleIndex >= 0) {
-                const expectedTargets = this.determinePrefetchTargets()
-                if (!expectedTargets.includes(view.articleIndex) && view.articleIndex !== this.currentArticleIndex) {
-                    orphanedViews.push(`${view.id}(idx=${view.articleIndex})`)
+            if (view.hasLoadedOnce && !view.isActive) {
+                // Check if protected by ArticleID-based targets (new system)
+                if (view.articleId && this.prefetchTargetIds.includes(view.articleId)) {
+                    continue  // Not orphaned - it's an ArticleID-based prefetch target
+                }
+                if (view.articleId && view.articleId === this.currentArticleId) {
+                    continue  // Not orphaned - it's the current article
+                }
+                
+                // Check if protected by index-based targets (legacy system)
+                if (view.articleIndex >= 0) {
+                    const expectedTargets = this.determinePrefetchTargets()
+                    if (!expectedTargets.includes(view.articleIndex) && view.articleIndex !== this.currentArticleIndex) {
+                        orphanedViews.push(`${view.id}(idx=${view.articleIndex})`)
+                    }
                 }
             }
         }
@@ -2568,11 +2605,12 @@ export class ContentViewPool {
         const renderView = this.renderPositionViewId ? this.getViewById(this.renderPositionViewId) : null
         
         log.info(`=== Pool State (${context}) ===`)
-        log.info(`  Current: idx=${this.currentArticleIndex}/${this.articleListLength}, dir=${this.readingDirection}`)
-        log.info(`  Active: ${activeView?.id || 'none'} (articleIdx=${activeView?.articleIndex ?? 'N/A'})`)
-        log.info(`  RenderPosition: ${renderView?.id || 'none'} (articleIdx=${renderView?.articleIndex ?? 'N/A'})`)
-        log.info(`  Prefetch targets: [${this.prefetchTargets.join(', ')}]`)
-        log.info(`  Prefetch completed: [${Array.from(this.prefetchCompletedIndices).join(', ')}]`)
+        log.info(`  Current: idx=${this.currentArticleIndex}/${this.articleListLength}, articleId=${this.currentArticleId?.substring(0, 8) || 'none'}, dir=${this.readingDirection}`)
+        log.info(`  Active: ${activeView?.id || 'none'} (articleIdx=${activeView?.articleIndex ?? 'N/A'}, articleId=${activeView?.articleId?.substring(0, 8) || 'none'})`)
+        log.info(`  RenderPosition: ${renderView?.id || 'none'} (articleIdx=${renderView?.articleIndex ?? 'N/A'}, articleId=${renderView?.articleId?.substring(0, 8) || 'none'})`)
+        log.info(`  Next in reading dir: idx=${this.getNextIndexInReadingDirection()}, articleId=${this.nextArticleId?.substring(0, 8) || 'none'}`)
+        log.info(`  Prefetch targets (idx): [${this.prefetchTargets.join(', ')}], completed: [${Array.from(this.prefetchCompletedIndices).join(', ')}]`)
+        log.info(`  Prefetch targets (id): [${this.prefetchTargetIds.map(id => id.substring(0, 8)).join(', ')}], completed: [${Array.from(this.prefetchCompletedIds).map(id => id.substring(0, 8)).join(', ')}]`)
         log.info(`  Views:`)
         for (const v of this.views) {
             const status = [
@@ -2581,7 +2619,7 @@ export class ContentViewPool {
                 v.hasLoadedOnce ? 'ready' : 'empty',
                 v.isLoading ? 'loading' : ''
             ].filter(Boolean).join(',')
-            log.info(`    ${v.id}: idx=${v.articleIndex}, status=[${status}]`)
+            log.info(`    ${v.id}: idx=${v.articleIndex}, articleId=${v.articleId?.substring(0, 8) || 'none'}, status=[${status}]`)
         }
     }
     
@@ -2667,8 +2705,13 @@ export class ContentViewPool {
             
             // Don't recycle views that hold ready content for current prefetch targets
             // This preserves already-cached articles when starting a new prefetch cycle
+            // Check both index-based (legacy) and ArticleID-based (new) targets
             if (v.hasLoadedOnce && v.articleIndex >= 0 && this.prefetchTargets.includes(v.articleIndex)) {
                 log.debug(`findFreeView: Skipping ${v.id} - holds target index ${v.articleIndex}`)
+                return false
+            }
+            if (v.hasLoadedOnce && v.articleId && this.prefetchTargetIds.includes(v.articleId)) {
+                log.debug(`findFreeView: Skipping ${v.id} - holds target ArticleID ${v.articleId.substring(0, 8)}`)
                 return false
             }
             
@@ -2714,8 +2757,13 @@ export class ContentViewPool {
             }
             // Don't recycle views that hold ready content for current prefetch targets
             // This preserves already-cached articles when starting a new prefetch cycle
+            // Check both index-based (legacy) and ArticleID-based (new) targets
             if (v.hasLoadedOnce && v.articleIndex >= 0 && this.prefetchTargets.includes(v.articleIndex)) {
                 // console.log(`[ContentViewPool] Skipping ${v.id} - holds target index ${v.articleIndex}`)
+                return false
+            }
+            if (v.hasLoadedOnce && v.articleId && this.prefetchTargetIds.includes(v.articleId)) {
+                // console.log(`[ContentViewPool] Skipping ${v.id} - holds target ArticleID ${v.articleId}`)
                 return false
             }
             return true

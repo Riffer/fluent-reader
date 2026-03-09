@@ -411,9 +411,6 @@ export function updateSource(source: RSSSource): AppThunk<Promise<void>> {
         // Use SQLite for update via window.db bridge
         const row = sourceToRow(sourceCopy)
         
-        // DEBUG: Log what we're saving
-        console.log(`[Redux updateSource] Saving source: sid=${source.sid}, name=${source.name}, defaultZoom=${source.defaultZoom}`)
-        
         await window.db.sources.update(source.sid, row)
         dispatch(updateSourceDone(source))
     }
