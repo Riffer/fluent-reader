@@ -914,6 +914,7 @@ export class ContentViewPool {
         // Update article context
         this.currentArticleIndex = articleIndex
         this.articleListLength = listLength
+        this.currentArticleId = articleId  // ArticleID-based tracking for prefetch
         
         // Log navigation info
         log.verbose(`Navigate to: ${articleId.substring(0, 8)} (index ${articleIndex}/${listLength}, direction: ${this.readingDirection})`)
@@ -4100,6 +4101,7 @@ export class ContentViewPool {
         this.readingDirection = 'unknown'
         this.currentArticleIndex = -1
         this.articleListLength = 0
+        this.currentArticleId = null  // ArticleID-based tracking
         this.currentSourceId = null
         this.currentMenuKey = null  // Clear list identity on nuke
         this.renderPositionViewId = null
