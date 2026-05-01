@@ -6,6 +6,15 @@ Based on the original [Fluent Reader v1.1.4](https://github.com/yang991178/fluen
 
 ---
 
+## [1.4.34] - 2026-05-01
+
+### Fixed - follow.it Feed Link Resolution
+- **follow.it tracking URLs** are now automatically resolved to the real article URL
+- When a feed is served via `follow.it` (e.g. `https://follow.it/<feed>/rss`) and an item's link points to an `api.follow.it` tracking redirect, the parser now extracts the first non-follow.it `<a href>` from the embedded HTML description and uses that as the canonical article link
+- Fixes article display, full-content extraction, and external sharing for feeds migrated to follow.it (e.g. "Der Postillon")
+
+---
+
 ## [1.3.5] - 2025-12-30
 
 ### Added - Fullscreen Support

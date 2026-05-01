@@ -47,7 +47,7 @@ export class RSSItem {
         }
         this.source = source.sid
         this.title = item.title || intl.get("article.untitled")
-        this.link = item.link || ""
+        this.link = resolveFeedItemLink(item, source)
         this.fetchedDate = new Date()
         this.date = new Date(item.isoDate ?? item.pubDate ?? this.fetchedDate)
         this.creator = item.creator
@@ -100,6 +100,51 @@ export class RSSItem {
             delete item.thumb
         }
     }
+}
+
+function resolveFeedItemLink(item: MyParserItem, source: RSSSource): string {
+    if (!item.link) return ""
+
+    let parsedItemUrl: URL
+    let parsedSourceUrl: URL
+    try {
+        parsedItemUrl = new URL(item.link)
+        parsedSourceUrl = new URL(source.url)
+    } catch {
+        return item.link
+    }
+
+    const isFollowItFeed = parsedSourceUrl.hostname === "follow.it"
+    const isFollowItTrackingLink = parsedItemUrl.hostname === "api.follow.it"
+    if (!isFollowItFeed || !isFollowItTrackingLink) return item.link
+
+    for (let field of ["content", "fullContent"]) {
+        const html = item[field]
+        if (!html || typeof html !== "string") continue
+
+        const dom = domParser.parseFromString(html, "text/html")
+        const links = dom.querySelectorAll("a[href]")
+        for (let anchor of links) {
+            const href = anchor.getAttribute("href")
+            if (!href) continue
+
+            try {
+                const candidate = new URL(href, source.url)
+                if (
+                    (candidate.protocol === "https:" ||
+                        candidate.protocol === "http:") &&
+                    candidate.hostname !== "follow.it" &&
+                    candidate.hostname !== "api.follow.it"
+                ) {
+                    return candidate.toString()
+                }
+            } catch {
+                continue
+            }
+        }
+    }
+
+    return item.link
 }
 
 export type ItemState = {
